@@ -1,0 +1,49 @@
+[package]
+edition.workspace = true
+name = "wdf-macros"
+version = "0.3.0"
+description = "A crate containing macros for use in WDF drivers"
+repository.workspace = true
+readme.workspace = true
+license.workspace = true
+keywords = ["windows", "wdf", "macros"]
+categories = ["macros", "os::windows-apis", "os"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["full"] }
+
+[features]
+default = []
+nightly = []
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_op_in_unsafe_fn = "forbid"
+
+[lints.clippy]
+# Lint Groups
+all = "deny"
+pedantic = "warn"
+nursery = "warn"
+cargo = "warn"
+# Individual Lints
+multiple_unsafe_ops_per_block = "forbid"
+undocumented_unsafe_blocks = "forbid"
+# unnecessary_safety_doc = "forbid"
+unnecessary_safety_doc = "deny" # This is lowered to deny to allow overriding it for proc_macros: https://github.com/rust-lang/rust-clippy/issues/12583
+
+[lints.rustdoc]
+bare_urls = "warn"
+broken_intra_doc_links = "warn"
+invalid_codeblock_attributes = "warn"
+invalid_html_tags = "warn"
+invalid_rust_codeblocks = "warn"
+missing_crate_level_docs = "warn"
+private_intra_doc_links = "warn"
+redundant_explicit_links = "warn"
+unescaped_backticks = "warn"

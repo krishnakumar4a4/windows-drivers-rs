@@ -1083,6 +1083,7 @@ impl Config {
                 println!("cargo::rustc-link-lib=static=wmilib");
                 println!("cargo::rustc-link-lib=static=WdfLdr");
                 println!("cargo::rustc-link-lib=static=WdfDriverEntry");
+                println!("cargo::rustc-link-lib=static=wpprecorder");
 
                 // Emit ARM64-specific libraries to link to derived from
                 // WindowsDriver.arm64.props

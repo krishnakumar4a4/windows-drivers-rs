@@ -1,0 +1,27 @@
+[package]
+edition.workspace = true
+name = "wdf"
+version = "0.3.0"
+description = "Safe idiomatic bindings to WDF APIs"
+repository.workspace = true
+readme.workspace = true
+license.workspace = true
+keywords = ["windows", "wdf", "wdm"]
+categories = [
+  "api-bindings",
+  "os",
+]
+
+[build-dependencies]
+wdk-build.workspace = true
+
+[dependencies]
+wdf-macros = { path = "../wdf-macros", version = "0.3.0" }
+wdk-alloc.workspace = true
+wdk-sys.workspace = true
+wdk.workspace = true
+wdk-panic.workspace = true
+
+[features]
+default = []
+umdf = []
