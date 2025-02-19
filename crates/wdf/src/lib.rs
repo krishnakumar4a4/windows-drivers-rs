@@ -17,12 +17,6 @@ pub use api::*;
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 pub use shim::*;
 
-#[doc(hidden)]
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-pub use wdk_sys::{DRIVER_OBJECT, NTSTATUS, PCUNICODE_STRING};
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-pub use wdk::println;
-
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 extern crate wdk_panic;
 
