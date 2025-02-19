@@ -27,11 +27,6 @@ pub use wdk::println;
 extern crate wdk_panic;
 
 
-// extern crate alloc;
-
-// use alloc::{vec::Vec, boxed::Box, string::String};
-// use core::{mem, ptr};
-
 #[cfg(driver_model__driver_type = "KMDF")]
 use wdk_alloc::WdkAllocator;
 
