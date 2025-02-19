@@ -1,5 +1,5 @@
 use wdk_sys::{WDFDEVICE, WDFDEVICE_INIT, WDF_NO_HANDLE, WDF_NO_OBJECT_ATTRIBUTES, call_unsafe_wdf_function_binding};
-use crate::error::NtError;
+use crate::api::{error::NtError, WdfRc};
 
 pub struct Device(WDFDEVICE);
 

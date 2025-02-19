@@ -8,26 +8,12 @@
 #![allow(non_snake_case, non_camel_case_types)]
 
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-mod object;
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-mod device;
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-mod request;
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-mod error;
+mod api;
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 mod shim_layer;
 
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-pub use object::*;
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-pub use device::*;
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-pub use request::*;
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-pub use error::*;
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-pub use wdf_macros::*;
+pub use api::*;
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 pub use shim_layer::*;
 
