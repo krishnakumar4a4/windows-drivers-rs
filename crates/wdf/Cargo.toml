@@ -25,3 +25,6 @@ wdk-panic.workspace = true
 [features]
 default = []
 umdf = []
+
+[lints]
+workspace = true
