@@ -24,6 +24,8 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 # Workspace Crates
+wdf = { path = "crates/wdf", version = "0.3.0" }
+wdf-macros = { path = "crates/wdf-macros", version = "0.3.0" }
 wdk = { path = "crates/wdk", version = "0.3.1" }
 wdk-alloc = { path = "crates/wdk-alloc", version = "0.3.1" }
 wdk-build = { path = "crates/wdk-build", version = "0.4.0" }

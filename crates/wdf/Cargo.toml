@@ -16,7 +16,7 @@ categories = [
 wdk-build.workspace = true
 
 [dependencies]
-wdf-macros = { path = "../wdf-macros", version = "0.3.0" }
+wdf-macros.workspace = true
 wdk-alloc.workspace = true
 wdk-sys.workspace = true
 wdk.workspace = true
