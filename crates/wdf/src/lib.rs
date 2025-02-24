@@ -9,13 +9,9 @@
 
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 mod api;
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-mod shim;
 
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 pub use api::*;
-#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
-pub use shim::*;
 
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 extern crate wdk_panic;
