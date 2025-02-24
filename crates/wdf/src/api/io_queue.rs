@@ -31,6 +31,7 @@ impl IoQueue {
                 evt_io_default: queue_config.evt_io_default,
                 evt_io_read: queue_config.evt_io_read,
                 evt_io_write: queue_config.evt_io_write,
+                evt_io_device_control: queue_config.evt_io_device_control,
             };
 
             let mut queue = unsafe { IoQueue::new(queue) };
@@ -81,7 +82,8 @@ pub struct QueueConfig {
     default_queue: bool,
     evt_io_default: Option<fn(&mut IoQueue, Request)>,
     evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
-    evt_io_write: Option<fn(&mut IoQueue, Request, usize)>
+    evt_io_write: Option<fn(&mut IoQueue, Request, usize)>,
+    evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
 }
 
 macro_rules! wdf_struct_size {
@@ -125,6 +127,10 @@ fn to_unsafe_config(safe_config: &QueueConfig) -> WDF_IO_QUEUE_CONFIG {
         config.EvtIoWrite = Some(__evt_io_write);
     }
 
+    if safe_config.evt_io_device_control.is_some() {
+        config.EvtIoDeviceControl = Some(__evt_io_device_control);
+    }
+
 
     if let IoQueueDispatchType::Parallel { presented_requests_limit} = safe_config.dispatch_type {
         config.Settings.Parallel.NumberOfPresentedRequests = match presented_requests_limit {
@@ -140,7 +146,8 @@ fn to_unsafe_config(safe_config: &QueueConfig) -> WDF_IO_QUEUE_CONFIG {
 struct RequestHandlers {
     evt_io_default: Option<fn(&mut IoQueue, Request)>,
     evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
-    evt_io_write: Option<fn(&mut IoQueue, Request, usize)>
+    evt_io_write: Option<fn(&mut IoQueue, Request, usize)>,
+    evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
 }
 
 
@@ -166,3 +173,4 @@ macro_rules! extern_request_handler {
 extern_request_handler!(evt_io_default);
 extern_request_handler!(evt_io_read, length: usize);
 extern_request_handler!(evt_io_write, length: usize);
+extern_request_handler!(evt_io_device_control,  OutputBufferLength: usize, InputBufferLength: usize, IoControlCode: u32);
