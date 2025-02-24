@@ -1121,6 +1121,7 @@ dependencies = [
 name = "wdf"
 version = "0.3.0"
 dependencies = [
+ "paste",
  "wdf-macros",
  "wdk",
  "wdk-alloc",

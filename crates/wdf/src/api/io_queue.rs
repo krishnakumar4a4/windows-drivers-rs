@@ -1,0 +1,168 @@
+use crate::api::{object::{WdfObject, WdfRc}, device::Device, error::{NtError, NtResult}, request::Request};
+use wdk_sys::{WDFQUEUE, WDFREQUEST, call_unsafe_wdf_function_binding, STATUS_SUCCESS, WDF_IO_QUEUE_CONFIG, _WDF_IO_QUEUE_DISPATCH_TYPE, WDF_IO_QUEUE_DISPATCH_TYPE, WDFOBJECT, _WDF_TRI_STATE};
+use wdf_macros::object_context;
+use paste::paste;
+
+pub struct IoQueue(WdfRc);
+
+impl IoQueue {
+    unsafe fn new(inner: WDFQUEUE) -> Self {
+        Self(unsafe { WdfRc::new(inner as *mut _) })
+    }
+
+    pub fn as_ptr(&self) -> WDFOBJECT {
+        self.0.inner() as *mut _
+    }
+
+    pub fn create(device: &Device, queue_config: &QueueConfig) -> Result<Self, NtError> {
+        let mut config = to_unsafe_config(&queue_config);
+        let mut queue: WDFQUEUE = core::ptr::null_mut();
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(WdfIoQueueCreate,
+                device.as_ptr() as *mut _,
+                &mut config as *mut _,
+                wdk_sys::WDF_NO_OBJECT_ATTRIBUTES,
+                &mut queue,
+            )
+        };
+
+        if status == STATUS_SUCCESS {
+            let handlers = RequestHandlers {
+                evt_io_default: queue_config.evt_io_default,
+                evt_io_read: queue_config.evt_io_read,
+                evt_io_write: queue_config.evt_io_write,
+            };
+
+            let mut queue = unsafe { IoQueue::new(queue) };
+
+            RequestHandlers::attach(&mut queue, handlers)?;
+
+            Ok(queue)
+        } else {
+            Err(status.into())
+        }
+    }
+}
+
+impl WdfObject for IoQueue {
+    fn as_ptr(&self) -> WDFOBJECT {
+        self.0.inner() as *mut _
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum IoQueueDispatchType {
+    Sequential,
+    Parallel { presented_requests_limit : Option<u32> },
+    Manual
+}
+
+impl Into<WDF_IO_QUEUE_DISPATCH_TYPE> for IoQueueDispatchType {
+    fn into(self) -> WDF_IO_QUEUE_DISPATCH_TYPE {
+        match self {
+            IoQueueDispatchType::Sequential => _WDF_IO_QUEUE_DISPATCH_TYPE::WdfIoQueueDispatchSequential,
+            IoQueueDispatchType::Parallel { .. } => _WDF_IO_QUEUE_DISPATCH_TYPE::WdfIoQueueDispatchParallel,
+            IoQueueDispatchType::Manual => _WDF_IO_QUEUE_DISPATCH_TYPE::WdfIoQueueDispatchManual
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum TriState {
+    False = 0,
+    True = 1,
+    UseDefault = 2
+}
+
+pub struct QueueConfig {
+    dispatch_type: IoQueueDispatchType,
+    power_managed: TriState,
+    allow_zero_length_requests: bool,
+    default_queue: bool,
+    evt_io_default: Option<fn(&mut IoQueue, Request)>,
+    evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
+    evt_io_write: Option<fn(&mut IoQueue, Request, usize)>
+}
+
+macro_rules! wdf_struct_size {
+    ($StructName:ty) => {{
+        paste! {
+            if unsafe { wdk_sys::WdfClientVersionHigherThanFramework } != 0 {
+                let index = wdk_sys::_WDFSTRUCTENUM::[<INDEX_ $StructName>] as u32;
+                if index < unsafe { wdk_sys::WdfStructureCount } {
+                    unsafe {wdk_sys::WdfStructures.add(index as usize) as u32 }
+                } else {
+                    usize::MAX as u32
+                }
+            } else {
+                core::mem::size_of::<$StructName>() as u32
+            }
+        }
+    }};
+}
+
+fn to_unsafe_config(safe_config: &QueueConfig) -> WDF_IO_QUEUE_CONFIG {
+    let mut config = unsafe { core::mem::MaybeUninit::<WDF_IO_QUEUE_CONFIG>::zeroed().assume_init() };
+
+    let size = wdf_struct_size!(WDF_IO_QUEUE_CONFIG);
+
+    config.Size = size as u32;
+    config.PowerManaged = safe_config.power_managed as i32;
+    config.DispatchType = safe_config.dispatch_type.into();
+    config.AllowZeroLengthRequests = safe_config.allow_zero_length_requests as u8;
+    config.DefaultQueue = safe_config.default_queue as u8;
+
+    
+    if safe_config.evt_io_default.is_some() {
+        config.EvtIoDefault = Some(__evt_io_default);
+    }
+
+    if safe_config.evt_io_read.is_some() {
+        config.EvtIoRead = Some(__evt_io_read);
+    }
+
+    if safe_config.evt_io_write.is_some() {
+        config.EvtIoWrite = Some(__evt_io_write);
+    }
+
+
+    if let IoQueueDispatchType::Parallel { presented_requests_limit} = safe_config.dispatch_type {
+        config.Settings.Parallel.NumberOfPresentedRequests = match presented_requests_limit {
+            Some(limit) => limit,
+            None => u32::MAX 
+        };
+    } 
+
+    config
+}
+
+#[object_context(IoQueue)]
+struct RequestHandlers {
+    evt_io_default: Option<fn(&mut IoQueue, Request)>,
+    evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
+    evt_io_write: Option<fn(&mut IoQueue, Request, usize)>
+}
+
+
+macro_rules! extern_request_handler {
+    ($handler_name:ident $(, $arg_name:ident: $arg_type:ty)*) => {
+        paste::paste! {
+            pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
+                let mut queue = unsafe { IoQueue::new(queue) };
+                let mut request = unsafe { Request::new(request) };
+                if let Some(handlers) = RequestHandlers::get(&queue) {
+                    if let Some(handler) = handlers.$handler_name {
+                        handler(&mut queue, request $(, $arg_name)*);
+                        return;
+                    }
+                }
+
+                request.complete(super::NtStatus::Error(NtError::from(1))); // TODO: pass proper error status e.g. unsupported request
+            }
+        }
+    };
+}
+
+extern_request_handler!(evt_io_default);
+extern_request_handler!(evt_io_read, length: usize);
+extern_request_handler!(evt_io_write, length: usize);

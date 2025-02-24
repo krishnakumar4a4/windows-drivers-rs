@@ -21,6 +21,7 @@ wdk-alloc.workspace = true
 wdk-sys.workspace = true
 wdk.workspace = true
 wdk-panic.workspace = true
+paste.workspace = true
 
 [features]
 default = []

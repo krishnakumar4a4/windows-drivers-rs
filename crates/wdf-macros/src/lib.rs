@@ -5,7 +5,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemFn, ItemImpl};
+use syn::{parse_macro_input, Error, Ident, ItemFn, ItemImpl, ItemStruct};
 
 /// A procedural macro that when placed on a safe Rust impl of a driver
 /// generates the relevant FFI wrappers
@@ -280,3 +280,69 @@ pub fn driver_entry(_args: TokenStream, input: TokenStream) -> TokenStream {
 
 //     wrappers
 // }
+
+
+/// The attribute used to mark a struct as a WDF object context
+#[proc_macro_attribute]
+pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let wdf_obj_type_name = parse_macro_input!(attr as Ident);
+    let context_struct = parse_macro_input!(item as ItemStruct);
+
+
+    // Check if the struct is generic
+    if !context_struct.generics.params.is_empty() {
+        return Error::new_spanned(context_struct, "The `object_context` attribute cannot be applied to generic structs.")
+            .to_compile_error()
+            .into();
+    }
+
+    // Establish wdf crate's path to use 
+    let wdf_crate_path = if std::env::var("CARGO_PKG_NAME").ok() == Some("wdf".to_string()) {
+        quote!(crate) // Inside the `wdf` crate itself
+    } else {
+        quote!(::wdf) // Outside of `wdf`, use the global path
+    };
+
+
+    let struct_name = &context_struct.ident;
+    let static_name = Ident::new(&format!("__WDF_{}_TYPE_INFO", struct_name), struct_name.span());
+    let cleanup_callback_name = Ident::new(&format!("__evt_{}_cleanup", struct_name), struct_name.span());
+
+    
+    let expanded = quote! {
+        #context_struct
+
+        #[allow(non_upper_case_globals)]
+        #[link_section = ".data"]
+        static #static_name: #wdf_crate_path::WdfObjectContextTypeInfo = #wdf_crate_path::WdfObjectContextTypeInfo::new(#wdf_crate_path::WDF_OBJECT_CONTEXT_TYPE_INFO {
+            Size: core::mem::size_of::<#wdf_crate_path::WdfObjectContextTypeInfo>() as u32,
+            ContextName: concat!(stringify!(#struct_name),'\0').as_bytes().as_ptr().cast(),
+            ContextSize: core::mem::size_of::<#struct_name>(),
+            UniqueType: core::ptr::addr_of!(#static_name) as *const #wdf_crate_path::WDF_OBJECT_CONTEXT_TYPE_INFO,
+            EvtDriverGetUniqueContextType: None,
+        });
+
+        impl #struct_name {
+            fn attach(wdf_obj: &mut #wdf_obj_type_name, context: #struct_name) -> Result<(), NtError> where Self: Sync {
+                unsafe {
+                    #wdf_crate_path::ObjectContext::attach(wdf_obj, context, &#static_name, #cleanup_callback_name)
+                }
+            }
+
+            fn get(wdf_obj: &#wdf_obj_type_name) -> Option<&#struct_name> where Self: Sync {
+                unsafe {
+                    #wdf_crate_path::ObjectContext::get(wdf_obj, &#static_name)
+                }
+            }
+        }
+
+        #[allow(non_snake_case)]
+        extern "C" fn #cleanup_callback_name(wdf_obj: #wdf_crate_path::WDFOBJECT) {
+            unsafe {
+                #wdf_crate_path::ObjectContext::drop::<#struct_name>(wdf_obj, &#static_name);
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}

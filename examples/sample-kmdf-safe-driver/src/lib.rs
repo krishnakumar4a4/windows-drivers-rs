@@ -2,7 +2,12 @@
 
 #![no_std]
 
-use wdf::{driver_entry, Guid, println, DeviceInit, Driver, trace, NtError};
+use wdf::{driver_entry, object_context, Guid, println, Device, DeviceInit, Driver, trace, NtError};
+
+#[object_context(Device)]
+struct DeviceState {
+    ver: i32
+}
 
 #[driver_entry]
 fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), i32> {

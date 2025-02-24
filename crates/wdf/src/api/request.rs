@@ -1,20 +1,19 @@
-use wdk_sys::{WDFREQUEST, WDFOBJECT, call_unsafe_wdf_function_binding};
+use wdk_sys::{NT_SUCCESS, WDFREQUEST, WDFOBJECT, call_unsafe_wdf_function_binding};
+use super::error::NtStatus;
 
-use crate::{OwnedRef, WdfObject};
+use crate::{WdfObject, WdfRc};
 
-pub struct Request(WDFREQUEST);
+pub struct Request(WdfRc);
 
 impl Request {
-    pub fn new(request: WDFREQUEST) -> Self {
-        Self(request)
+    pub unsafe fn new(request: WDFREQUEST) -> Self {
+        Self(unsafe { WdfRc::new(request as WDFOBJECT) })
     }
 
-    pub fn complete(&mut self, _completion_status: RequestCompletionStatus) -> Result<(), RequestCompletionError>  {
+    pub fn complete(&mut self, status: NtStatus) {
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestComplete, self.as_ptr() as *mut _, 0);
-        }
-
-        Ok(())
+            call_unsafe_wdf_function_binding!(WdfRequestComplete, self.as_ptr() as *mut _, status.nt_status())
+        };
     }
 
     // pub fn complete(self: OwnedRef<Request>, _completion_status: RequestCompletionStatus) {
@@ -25,21 +24,7 @@ impl Request {
 }
 
 impl WdfObject for Request {
-    unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
-        Self::new(inner as *mut _)
-    }
-
     fn as_ptr(&self) -> WDFOBJECT {
-        self.0 as *mut _
+        self.0.inner() as *mut _
     }
-}
-
-pub enum RequestCompletionError {
-    AlreadyCompleted,
-    CancelUnmarkNotCalled
-}
-
-pub enum RequestCompletionStatus {
-    Success,
-    Canceled,
 }

@@ -2,13 +2,16 @@ use crate::api::*;
 use wdk::println;
 
 #[doc(hidden)]
-pub use wdk_sys::{DRIVER_OBJECT, NTSTATUS, PCUNICODE_STRING};
+pub use wdk_sys::{
+    DRIVER_OBJECT, NTSTATUS, NT_SUCCESS, PCUNICODE_STRING, WDFOBJECT,
+    WDF_OBJECT_CONTEXT_TYPE_INFO, WDF_OBJECT_ATTRIBUTES 
+};
 
 use wdk_sys::{
-    GUID, LONG, LPCGUID, LPCSTR, LPGUID, NT_SUCCESS, PDRIVER_OBJECT,
+    GUID, LONG, LPCGUID, LPCSTR, LPGUID, PDRIVER_OBJECT,
     PREGHANDLE, PULONG, PUNICODE_STRING, PVOID, REGHANDLE, TRACEHANDLE,
     UCHAR, ULONG, ULONG64, UNICODE_STRING, USHORT, WDFDEVICE_INIT, WDFDRIVER, WDF_DRIVER_CONFIG,
-    WDF_NO_HANDLE, WDFOBJECT, WDFREQUEST, WDF_NO_OBJECT_ATTRIBUTES, call_unsafe_wdf_function_binding
+    WDF_NO_HANDLE, WDFREQUEST, WDF_NO_OBJECT_ATTRIBUTES, call_unsafe_wdf_function_binding
 };
 
 extern crate alloc;
@@ -129,7 +132,7 @@ extern "C" fn evt_driver_device_add(
         let mut device_init = DeviceInit::from(device_init);
         match cb(&mut device_init) {
             Ok(_) => 0,
-            Err(e) => e.ntstatus(),
+            Err(e) => e.nt_status(),
         }
     } else {
         0
@@ -196,10 +199,6 @@ pub fn call_safe_driver_entry(
 struct Reqeust(WDFREQUEST);
 
 impl WdfObject for Reqeust {
-    unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
-        Self(inner as _)
-    }
-
     fn as_ptr(&self) -> WDFOBJECT {
         self.0 as _
     }
