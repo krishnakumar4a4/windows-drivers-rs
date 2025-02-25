@@ -76,14 +76,14 @@ pub enum TriState {
 }
 
 pub struct IoQueueConfig {
-    dispatch_type: IoQueueDispatchType,
-    power_managed: TriState,
-    allow_zero_length_requests: bool,
-    default_queue: bool,
-    evt_io_default: Option<fn(&mut IoQueue, Request)>,
-    evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
-    evt_io_write: Option<fn(&mut IoQueue, Request, usize)>,
-    evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
+    pub dispatch_type: IoQueueDispatchType,
+    pub power_managed: TriState,
+    pub allow_zero_length_requests: bool,
+    pub default_queue: bool,
+    pub evt_io_default: Option<fn(&mut IoQueue, Request)>,
+    pub evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
+    pub evt_io_write: Option<fn(&mut IoQueue, Request, usize)>,
+    pub evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
 }
 
 impl Default for IoQueueConfig {
