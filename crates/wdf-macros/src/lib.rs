@@ -296,6 +296,16 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
             .into();
     }
 
+
+    // TODO: Reject the type if its required alignment is greater than 16
+    // because WDF's allocators like ExAllocatePool2 use 16 byte aligntment
+    // for types smaller than PAGE_SIZE.
+    // We may not be able to determine the type's alignment in the proc macro.
+    // But as a proxy we can check if it has #[repr(align)] on it or if any of
+    // its fields have #[repr(align)] on them recursively and reject if that is
+    // the case. Any type that does not fail this check is guaranteed to have
+    // an alignment requirement of 16 or less and should therefore be safe
+
     // Establish wdf crate's path to use 
     let wdf_crate_path = if std::env::var("CARGO_PKG_NAME").ok() == Some("wdf".to_string()) {
         quote!(crate) // Inside the `wdf` crate itself
