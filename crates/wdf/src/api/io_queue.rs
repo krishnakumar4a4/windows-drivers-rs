@@ -86,6 +86,21 @@ pub struct IoQueueConfig {
     evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
 }
 
+impl Default for IoQueueConfig {
+    fn default() -> Self {
+        Self {
+            dispatch_type: IoQueueDispatchType::Sequential,
+            power_managed: TriState::UseDefault,
+            allow_zero_length_requests: false,
+            default_queue: false,
+            evt_io_default: None,
+            evt_io_read: None,
+            evt_io_write: None,
+            evt_io_device_control: None
+        }
+    }
+}
+
 macro_rules! wdf_struct_size {
     ($StructName:ty) => {{
         paste! {
