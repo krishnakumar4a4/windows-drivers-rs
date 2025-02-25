@@ -305,6 +305,9 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
     // its fields have #[repr(align)] on them recursively and reject if that is
     // the case. Any type that does not fail this check is guaranteed to have
     // an alignment requirement of 16 or less and should therefore be safe
+    // If this proves to be too cumbersome, and it might, we can avoid checking
+    // in this macro and instead return an error at run time from the
+    // `attach` method if the alignment is greater than 16.
 
     // Establish wdf crate's path to use 
     let wdf_crate_path = if std::env::var("CARGO_PKG_NAME").ok() == Some("wdf".to_string()) {
