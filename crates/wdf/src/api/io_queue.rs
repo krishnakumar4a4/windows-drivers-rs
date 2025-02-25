@@ -14,7 +14,7 @@ impl IoQueue {
         self.0.inner() as *mut _
     }
 
-    pub fn create(device: &Device, queue_config: &QueueConfig) -> Result<Self, NtError> {
+    pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Self, NtError> {
         let mut config = to_unsafe_config(&queue_config);
         let mut queue: WDFQUEUE = core::ptr::null_mut();
         let status = unsafe {
@@ -75,7 +75,7 @@ pub enum TriState {
     UseDefault = 2
 }
 
-pub struct QueueConfig {
+pub struct IoQueueConfig {
     dispatch_type: IoQueueDispatchType,
     power_managed: TriState,
     allow_zero_length_requests: bool,
@@ -103,7 +103,7 @@ macro_rules! wdf_struct_size {
     }};
 }
 
-fn to_unsafe_config(safe_config: &QueueConfig) -> WDF_IO_QUEUE_CONFIG {
+fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
     let mut config = unsafe { core::mem::MaybeUninit::<WDF_IO_QUEUE_CONFIG>::zeroed().assume_init() };
 
     let size = wdf_struct_size!(WDF_IO_QUEUE_CONFIG);
