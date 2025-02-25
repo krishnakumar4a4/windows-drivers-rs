@@ -2,7 +2,7 @@
 
 #![no_std]
 
-use wdf::{driver_entry, object_context, Guid, println, Device, DeviceInit, Driver, trace, NtError};
+use wdf::{driver_entry, object_context, Guid, println, Device, DeviceInit, Driver, IoQueue, IoQueueConfig, trace, NtError, NtStatus};
 
 #[object_context(Device)]
 struct DeviceState {
@@ -23,8 +23,30 @@ fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), i32> {
     Ok(())
 }
 
-fn device_add(_: &mut DeviceInit) -> Result<(), NtError> {
+fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     println!("Safe Rust device add called");
+
+    let device = Device::create(device_init)?;
+
+    let mut queue_config = IoQueueConfig::default();
+
+    queue_config.evt_io_read = Some(|_queue, mut request, _| {
+        println!("Safe Rust evt_io_read called");
+        request.complete(NtStatus::Success);
+    });
+
+    queue_config.evt_io_write = Some(|_queue, mut request, _| {
+        println!("Safe Rust evt_io_write called");
+        request.complete(NtStatus::Success);
+    });
+
+    queue_config.evt_io_default = Some(|_queue, mut request| {
+        println!("Safe Rust evt_io_default called");
+        request.complete(NtStatus::Success);
+    });
+
+    let _ = IoQueue::create(&device, &queue_config)?;
+
     trace("Trace: Safe Rust device add complete");
     Ok(())
 }
