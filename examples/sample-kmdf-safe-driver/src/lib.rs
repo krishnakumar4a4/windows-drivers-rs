@@ -2,11 +2,11 @@
 
 #![no_std]
 
-use wdf::{driver_entry, object_context, Guid, println, Device, DeviceInit, Driver, IoQueue, IoQueueConfig, trace, NtError, NtStatus};
+use wdf::{driver_entry, object_context, Guid, println, Device, DeviceInit, Driver, IoQueue, IoQueueConfig, Request, SpinLock, trace, NtError, NtStatus};
 
 #[object_context(Device)]
 struct DeviceState {
-    ver: i32
+    request: SpinLock<Option<Request>>
 }
 
 #[driver_entry]

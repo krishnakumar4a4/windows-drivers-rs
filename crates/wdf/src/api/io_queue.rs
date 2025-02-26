@@ -6,7 +6,7 @@ use paste::paste;
 pub struct IoQueue(WdfRc);
 
 impl IoQueue {
-    unsafe fn new(inner: WDFQUEUE) -> Self {
+    pub unsafe fn new(inner: WDFQUEUE) -> Self {
         Self(unsafe { WdfRc::new(inner as *mut _) })
     }
 
@@ -41,6 +41,13 @@ impl IoQueue {
             Ok(queue)
         } else {
             Err(status.into())
+        }
+    }
+
+    pub fn get_device(&self) -> Device {
+        unsafe {
+            let device = call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr() as *mut _);
+            Device::new(device)
         }
     }
 }

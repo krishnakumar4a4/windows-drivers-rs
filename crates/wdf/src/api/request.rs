@@ -1,6 +1,5 @@
-use wdk_sys::{NT_SUCCESS, WDFREQUEST, WDFOBJECT, call_unsafe_wdf_function_binding};
-use super::error::NtStatus;
-
+use wdk_sys::{NT_SUCCESS, WDFREQUEST, WDFQUEUE, WDFOBJECT, call_unsafe_wdf_function_binding};
+use super::{io_queue::IoQueue, error::NtStatus, NtResult};
 use crate::{WdfObject, WdfRc};
 
 pub struct Request(WdfRc);
@@ -16,11 +15,12 @@ impl Request {
         };
     }
 
-    // pub fn complete(self: OwnedRef<Request>, _completion_status: RequestCompletionStatus) {
-    //     unsafe {
-    //         call_unsafe_wdf_function_binding!(WdfRequestComplete, self.as_ptr() as WDFREQUEST, 0);
-    //     }
-    // }
+    pub fn get_io_queue(&self) -> IoQueue {
+        unsafe  {
+            let queue = call_unsafe_wdf_function_binding!(WdfRequestGetIoQueue, self.as_ptr() as *mut _);
+            IoQueue::new(queue)
+        }
+    }
 }
 
 impl WdfObject for Request {

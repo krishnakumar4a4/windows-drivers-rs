@@ -1,12 +1,15 @@
 use wdk_sys::{WDFDEVICE, WDFDEVICE_INIT, WDF_NO_HANDLE, WDF_NO_OBJECT_ATTRIBUTES, WDFOBJECT, call_unsafe_wdf_function_binding};
-use crate::api::{error::NtError, WdfRc};
+use crate::api::error::NtResult;
 
 use super::WdfObject;
 
-pub struct Device(WdfRc);
+pub struct Device(WDFDEVICE);
 
 impl Device {
-    pub fn create(device_init: &mut DeviceInit) -> Result<Self, NtError> {
+    pub unsafe fn new(inner: WDFDEVICE) -> Self {
+        Self(inner)
+    }
+    pub fn create(device_init: &mut DeviceInit) -> NtResult<Self> {
         let mut device: WDFDEVICE = WDF_NO_HANDLE.cast();
         let mut device_init_ptr: *mut WDFDEVICE_INIT = device_init.as_ptr_mut();
 
@@ -18,25 +21,22 @@ impl Device {
         ) };
 
         match status {
-            0 => Ok(Self(unsafe { WdfRc::new(device as WDFOBJECT) })),
+            0 => Ok(Self(unsafe { device })),
             status => Err(status.into()),
         }
     }
-
-
 }
 
 impl WdfObject for Device {
     fn as_ptr(&self) -> WDFOBJECT {
-        self.0.inner() as WDFOBJECT
+        self.0 as WDFOBJECT
     }
-
 }
 
 pub struct DeviceInit(*mut WDFDEVICE_INIT);
 
 impl DeviceInit {
-    pub fn from(inner: *mut WDFDEVICE_INIT) -> Self {
+    pub unsafe fn from(inner: *mut WDFDEVICE_INIT) -> Self {
         Self(inner)
     }
 

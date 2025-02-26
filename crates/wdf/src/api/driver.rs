@@ -129,7 +129,7 @@ extern "C" fn evt_driver_device_add(
     device_init: *mut WDFDEVICE_INIT,
 ) -> NTSTATUS {
     if let Some(cb) = unsafe { EVT_DEVICE_ADD } {
-        let mut device_init = DeviceInit::from(device_init);
+        let mut device_init = unsafe { DeviceInit::from(device_init) };
         match cb(&mut device_init) {
             Ok(_) => 0,
             Err(e) => e.nt_status(),
