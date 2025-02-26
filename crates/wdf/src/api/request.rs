@@ -28,3 +28,9 @@ impl WdfObject for Request {
         self.0.inner() as *mut _
     }
 }
+
+/// SAFETY: This is safe because all the WDF functions
+/// that operate on WDFREQUEST do so in a thread-safe manner.
+/// As a result, all the Rust methods on this struct are
+/// also thread-safe.
+unsafe impl Send for Request {}
