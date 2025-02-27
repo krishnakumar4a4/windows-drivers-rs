@@ -196,14 +196,6 @@ pub fn call_safe_driver_entry(
     }
 }
 
-struct Reqeust(WDFREQUEST);
-
-impl WdfObject for Reqeust {
-    fn as_ptr(&self) -> WDFOBJECT {
-        self.0 as _
-    }
-}
-
 pub fn trace(message: &str) {
     if let Some(tracing_config) = unsafe { TRACING_CONFIG.as_ref() } {
         let message_c_str = alloc::ffi::CString::new(message).unwrap();
