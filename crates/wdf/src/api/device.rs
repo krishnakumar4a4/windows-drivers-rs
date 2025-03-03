@@ -1,7 +1,7 @@
 use wdk_sys::{WDFDEVICE, WDFDEVICE_INIT, WDF_NO_HANDLE, WDF_NO_OBJECT_ATTRIBUTES, WDFOBJECT, call_unsafe_wdf_function_binding};
 use crate::api::error::NtResult;
 
-use super::WdfObject;
+use super::FrameworkObject;
 
 pub struct Device(WDFDEVICE);
 
@@ -27,7 +27,7 @@ impl Device {
     }
 }
 
-impl WdfObject for Device {
+impl FrameworkObject for Device {
     fn as_ptr(&self) -> WDFOBJECT {
         self.0 as WDFOBJECT
     }

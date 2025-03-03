@@ -1,12 +1,12 @@
 use wdk_sys::{WDFREQUEST, WDFOBJECT, call_unsafe_wdf_function_binding};
 use super::{io_queue::IoQueue, error::NtStatus};
-use crate::{WdfObject, WdfRc};
+use crate::{FrameworkObject, Rc};
 
-pub struct Request(WdfRc);
+pub struct Request(Rc);
 
 impl Request {
     pub unsafe fn new(request: WDFREQUEST) -> Self {
-        Self(unsafe { WdfRc::new(request as WDFOBJECT) })
+        Self(unsafe { Rc::new(request as WDFOBJECT) })
     }
 
     pub fn complete(&mut self, status: NtStatus) {
@@ -23,7 +23,7 @@ impl Request {
     }
 }
 
-impl WdfObject for Request {
+impl FrameworkObject for Request {
     fn as_ptr(&self) -> WDFOBJECT {
         self.0.inner() as *mut _
     }

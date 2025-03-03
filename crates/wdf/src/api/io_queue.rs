@@ -1,12 +1,12 @@
-use crate::api::{object::{WdfObject, WdfRc, wdf_struct_size}, device::Device, error::NtError, request::Request};
+use crate::api::{object::{FrameworkObject, Rc, wdf_struct_size}, device::Device, error::NtError, request::Request};
 use wdk_sys::{WDFQUEUE, WDFREQUEST, call_unsafe_wdf_function_binding, STATUS_SUCCESS, WDF_IO_QUEUE_CONFIG, _WDF_IO_QUEUE_DISPATCH_TYPE, WDF_IO_QUEUE_DISPATCH_TYPE, WDFOBJECT};
 use wdf_macros::object_context;
 
-pub struct IoQueue(WdfRc);
+pub struct IoQueue(Rc);
 
 impl IoQueue {
     pub unsafe fn new(inner: WDFQUEUE) -> Self {
-        Self(unsafe { WdfRc::new(inner as *mut _) })
+        Self(unsafe { Rc::new(inner as *mut _) })
     }
 
     pub fn as_ptr(&self) -> WDFOBJECT {
@@ -51,7 +51,7 @@ impl IoQueue {
     }
 }
 
-impl WdfObject for IoQueue {
+impl FrameworkObject for IoQueue {
     fn as_ptr(&self) -> WDFOBJECT {
         self.0.inner() as *mut _
     }

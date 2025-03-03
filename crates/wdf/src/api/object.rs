@@ -11,13 +11,13 @@ macro_rules! call_ref_func {
     };
 }
 
-pub trait WdfObject {
+pub trait FrameworkObject {
     fn as_ptr(&self) -> WDFOBJECT;
 }
 
-pub struct WdfRc(WDFOBJECT);
+pub struct Rc(WDFOBJECT);
 
-impl WdfRc {
+impl Rc {
     pub unsafe fn new(wdf_obj: WDFOBJECT) -> Self {
         call_ref_func!(WdfObjectReferenceActual, wdf_obj);
         Self(wdf_obj)
@@ -29,7 +29,7 @@ impl WdfRc {
 }
 
 
-impl Drop for WdfRc {
+impl Drop for Rc {
     fn drop(&mut self) {
         call_ref_func!(WdfObjectDereferenceActual, self.0);
     }
