@@ -1,5 +1,5 @@
-use wdk_sys::{NT_SUCCESS, WDFREQUEST, WDFQUEUE, WDFOBJECT, call_unsafe_wdf_function_binding};
-use super::{io_queue::IoQueue, error::NtStatus, NtResult};
+use wdk_sys::{WDFREQUEST, WDFOBJECT, call_unsafe_wdf_function_binding};
+use super::{io_queue::IoQueue, error::NtStatus};
 use crate::{WdfObject, WdfRc};
 
 pub struct Request(WdfRc);

@@ -21,7 +21,7 @@ impl Device {
         ) };
 
         match status {
-            0 => Ok(Self(unsafe { device })),
+            0 => Ok(unsafe { Self::new(device) }),
             status => Err(status.into()),
         }
     }

@@ -5,6 +5,7 @@ mod io_queue;
 mod request;
 mod object_context;
 mod sync;
+mod timer;
 mod error;
 
 pub use object::*;
@@ -16,4 +17,5 @@ pub use object_context::*;
 pub use error::*;
 pub use wdf_macros::*;
 pub use sync::*;
+pub use timer::*;
 pub use wdk::println;

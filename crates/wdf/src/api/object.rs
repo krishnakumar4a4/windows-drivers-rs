@@ -1,4 +1,4 @@
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFSPINLOCK, WDFOBJECT, WDF_OBJECT_ATTRIBUTES};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT};
 
 macro_rules! call_ref_func {
     ($func:ident, $obj:expr) => {
@@ -34,3 +34,23 @@ impl Drop for WdfRc {
         call_ref_func!(WdfObjectDereferenceActual, self.0);
     }
 }
+
+macro_rules! wdf_struct_size {
+    ($StructName:ty) => {{
+        paste::paste! {
+            if unsafe { wdk_sys::WdfClientVersionHigherThanFramework } != 0 {
+                let index = wdk_sys::_WDFSTRUCTENUM::[<INDEX_ $StructName>] as u32;
+                if index < unsafe { wdk_sys::WdfStructureCount } {
+                    unsafe {wdk_sys::WdfStructures.add(index as usize) as u32 }
+                } else {
+                    usize::MAX as u32
+                }
+            } else {
+                core::mem::size_of::<$StructName>() as u32
+            }
+        }
+    }};
+}
+
+pub(crate) use wdf_struct_size;
+

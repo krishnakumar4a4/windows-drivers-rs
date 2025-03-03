@@ -1,7 +1,6 @@
-use crate::api::{object::{WdfObject, WdfRc}, device::Device, error::{NtError, NtResult}, request::Request};
-use wdk_sys::{WDFQUEUE, WDFREQUEST, call_unsafe_wdf_function_binding, STATUS_SUCCESS, WDF_IO_QUEUE_CONFIG, _WDF_IO_QUEUE_DISPATCH_TYPE, WDF_IO_QUEUE_DISPATCH_TYPE, WDFOBJECT, _WDF_TRI_STATE};
+use crate::api::{object::{WdfObject, WdfRc, wdf_struct_size}, device::Device, error::NtError, request::Request};
+use wdk_sys::{WDFQUEUE, WDFREQUEST, call_unsafe_wdf_function_binding, STATUS_SUCCESS, WDF_IO_QUEUE_CONFIG, _WDF_IO_QUEUE_DISPATCH_TYPE, WDF_IO_QUEUE_DISPATCH_TYPE, WDFOBJECT};
 use wdf_macros::object_context;
-use paste::paste;
 
 pub struct IoQueue(WdfRc);
 
@@ -106,23 +105,6 @@ impl Default for IoQueueConfig {
             evt_io_device_control: None
         }
     }
-}
-
-macro_rules! wdf_struct_size {
-    ($StructName:ty) => {{
-        paste! {
-            if unsafe { wdk_sys::WdfClientVersionHigherThanFramework } != 0 {
-                let index = wdk_sys::_WDFSTRUCTENUM::[<INDEX_ $StructName>] as u32;
-                if index < unsafe { wdk_sys::WdfStructureCount } {
-                    unsafe {wdk_sys::WdfStructures.add(index as usize) as u32 }
-                } else {
-                    usize::MAX as u32
-                }
-            } else {
-                core::mem::size_of::<$StructName>() as u32
-            }
-        }
-    }};
 }
 
 fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {

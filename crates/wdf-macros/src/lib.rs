@@ -336,7 +336,7 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         });
 
         impl #struct_name {
-            fn attach(wdf_obj: &mut #wdf_obj_type_name, context: #struct_name) -> Result<(), NtError> where Self: Sync {
+            fn attach(wdf_obj: &mut #wdf_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
                 unsafe {
                     #wdf_crate_path::ObjectContext::attach(wdf_obj, context, &#static_name, #cleanup_callback_name)
                 }

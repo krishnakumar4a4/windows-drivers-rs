@@ -2,7 +2,7 @@
 // License: MIT OR Apache-2.0
 
 use wdk_sys::{NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDF_OBJECT_ATTRIBUTES, WDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, call_unsafe_wdf_function_binding};
-use crate::api::{NtError, WdfObject};
+use crate::api::{NtResult, WdfObject};
 
 #[doc(hidden)]
 #[repr(transparent)]
@@ -33,7 +33,7 @@ impl WdfObjectContextTypeInfo {
 pub struct ObjectContext;
 
 impl ObjectContext {
-    pub unsafe fn attach<T: WdfObject, U: Sync>(wdf_obj: &mut T, context: U, context_metadata: &'static WdfObjectContextTypeInfo, cleanup_callback: unsafe extern "C" fn(WDFOBJECT)) -> Result<(), NtError> {
+    pub unsafe fn attach<T: WdfObject, U: Sync>(wdf_obj: &mut T, context: U, context_metadata: &'static WdfObjectContextTypeInfo, cleanup_callback: unsafe extern "C" fn(WDFOBJECT)) -> NtResult<()> {
         let mut attributes = WDF_OBJECT_ATTRIBUTES::default();
         attributes.ContextTypeInfo = context_metadata.get_unique_type();
         attributes.EvtCleanupCallback = Some(cleanup_callback);

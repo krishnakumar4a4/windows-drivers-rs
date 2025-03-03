@@ -1,5 +1,5 @@
 use core::cell::UnsafeCell;
-use wdk_sys::{call_unsafe_wdf_function_binding, NTSTATUS, NT_SUCCESS, WDFSPINLOCK, WDF_OBJECT_ATTRIBUTES};
+use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFSPINLOCK, WDF_OBJECT_ATTRIBUTES};
 
 use crate::api::error::NtResult;
 
