@@ -6,7 +6,7 @@ use super::FrameworkObject;
 pub struct Device(WDFDEVICE);
 
 impl Device {
-    pub unsafe fn new(inner: WDFDEVICE) -> Self {
+    pub(crate) unsafe fn new(inner: WDFDEVICE) -> Self {
         Self(inner)
     }
     pub fn create(device_init: &mut DeviceInit) -> NtResult<Self> {

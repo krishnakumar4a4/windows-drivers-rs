@@ -5,7 +5,7 @@ use crate::{FrameworkObject, Rc};
 pub struct Request(Rc);
 
 impl Request {
-    pub unsafe fn new(request: WDFREQUEST) -> Self {
+    pub(crate) unsafe fn new(request: WDFREQUEST) -> Self {
         Self(unsafe { Rc::new(request as WDFOBJECT) })
     }
 

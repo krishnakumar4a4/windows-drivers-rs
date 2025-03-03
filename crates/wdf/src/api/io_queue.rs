@@ -5,7 +5,7 @@ use wdf_macros::object_context;
 pub struct IoQueue(Rc);
 
 impl IoQueue {
-    pub unsafe fn new(inner: WDFQUEUE) -> Self {
+    pub(crate) unsafe fn new(inner: WDFQUEUE) -> Self {
         Self(unsafe { Rc::new(inner as *mut _) })
     }
 
