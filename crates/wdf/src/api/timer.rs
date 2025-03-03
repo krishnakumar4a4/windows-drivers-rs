@@ -1,6 +1,6 @@
-use crate::api::{error::NtResult, object::{wdf_struct_size, FrameworkObject}};
+use crate::api::{error::NtResult, object::{wdf_struct_size, FrameworkObject, FrameworkObjectType}};
 use wdf_macros::object_context;
-use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_OBJECT_ATTRIBUTES, WDF_TIMER_CONFIG};
+use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFTIMER, WDF_OBJECT_ATTRIBUTES, WDF_TIMER_CONFIG};
 use core::{mem::MaybeUninit, ptr::null_mut};
 
 // TODO: Make timer more ergonomic and safer. It's
@@ -13,13 +13,10 @@ use core::{mem::MaybeUninit, ptr::null_mut};
 pub struct Timer(WDFTIMER);
 
 impl Timer {
-    pub(crate) unsafe fn new(inner: WDFTIMER) -> Self {
-        Self(inner)
-    }
-
     pub fn create<'a, P: FrameworkObject>(config: &TimerConfig<'a, P>) -> NtResult<Self> {
         let context = TimerContext {
             evt_timer_func: config.evt_timer_func,
+            parent_type: P::object_type()
         };
 
         let mut timer : WDFTIMER = null_mut();
@@ -42,7 +39,7 @@ impl Timer {
         };
 
         if NT_SUCCESS(status) {
-            let mut timer = unsafe { Timer::new(timer) };
+            let mut timer = unsafe { Timer::from_ptr(timer as *mut _) };
 
             TimerContext::attach(&mut timer, context)?;
 
@@ -63,11 +60,37 @@ impl Timer {
             call_unsafe_wdf_function_binding!(WdfTimerStop, self.0, wait as u8) != 0
         }
     }
+
+    pub fn get_parent_object<P: FrameworkObject>(&self) -> Option<P> {
+        let parent = unsafe {
+            call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.0)
+        };
+
+        if !parent.is_null() {
+            TimerContext::get(&self).and_then(|context| {
+                if context.parent_type == P::object_type() {
+                    Some(unsafe { P::from_ptr(parent) })
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        }
+    }
 }
 
 impl FrameworkObject for Timer {
+    unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
+        Self(inner as WDFTIMER)
+    }
+
     fn as_ptr(&self) -> *mut core::ffi::c_void {
         self.0 as *mut _
+    }
+
+    fn object_type() -> FrameworkObjectType {
+        FrameworkObjectType::Timer
     }
 }
 
@@ -127,11 +150,12 @@ impl<'a, P: FrameworkObject> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
 
 #[object_context(Timer)]
 struct TimerContext {
-    evt_timer_func: fn(&mut Timer)
+    evt_timer_func: fn(&mut Timer),
+    parent_type: FrameworkObjectType
 }
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {
-    let mut timer = unsafe { Timer::new(timer) };
+    let mut timer = unsafe { Timer::from_ptr(timer as WDFOBJECT) };
     if let Some(timer_state) = TimerContext::get(&timer) {
         (timer_state.evt_timer_func)(&mut timer);
     }

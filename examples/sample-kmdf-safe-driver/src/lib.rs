@@ -4,9 +4,8 @@
 
 use wdf::{driver_entry, object_context, Guid, println, Device, DeviceInit, Driver, IoQueue, IoQueueConfig, Request, SpinLock, trace, Timer, TimerConfig, NtError, NtStatus};
 
-#[object_context(Device)]
-struct DeviceState {
-    timer: Option<Timer>,
+#[object_context(IoQueue)]
+struct QueueContext {
     request: SpinLock<Option<Request>>
 }
 
@@ -27,7 +26,7 @@ fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), i32> {
 fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     println!("Safe Rust device add called");
 
-    let mut device = Device::create(device_init)?;
+    let device = Device::create(device_init)?;
 
     let mut queue_config = IoQueueConfig::default();
 
@@ -47,21 +46,28 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
         request.complete(NtStatus::Success);
     });
 
-    let queue = IoQueue::create(&device, &queue_config)?;
+    let mut queue = IoQueue::create(&device, &queue_config)?;
 
     let timer_config = TimerConfig::new_non_periodic(&queue, |timer| {
         println!("Safe Rust evt_timer_func called");
+        if let Some(queue) = timer.get_parent_object::<IoQueue>() {
+            let context = QueueContext::get(&queue).unwrap();
+            let mut req = context.request.lock();
+            if let Some(mut req) = req.take() {
+                req.complete(NtStatus::Success);
+            }
+        }
+
         timer.stop(false);
     });
 
-    let timer = Timer::create(&timer_config)?;
+    let _ = Timer::create(&timer_config)?;
 
-    let context = DeviceState {
-        timer: Some(timer),
+    let context = QueueContext {
         request: SpinLock::create(None)?
     };
 
-    DeviceState::attach(&mut device, context)?;
+    QueueContext::attach(&mut queue, context)?;
 
     trace("Trace: Safe Rust device add complete");
     Ok(())

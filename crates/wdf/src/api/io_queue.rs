@@ -1,4 +1,4 @@
-use crate::api::{object::{FrameworkObject, Rc, wdf_struct_size}, device::Device, error::NtError, request::Request};
+use crate::api::{object::{FrameworkObject, FrameworkObjectType, Rc, wdf_struct_size}, device::Device, error::NtError, request::Request};
 use wdk_sys::{WDFQUEUE, WDFREQUEST, call_unsafe_wdf_function_binding, STATUS_SUCCESS, WDF_IO_QUEUE_CONFIG, _WDF_IO_QUEUE_DISPATCH_TYPE, WDF_IO_QUEUE_DISPATCH_TYPE, WDFOBJECT};
 use wdf_macros::object_context;
 
@@ -46,14 +46,22 @@ impl IoQueue {
     pub fn get_device(&self) -> Device {
         unsafe {
             let device = call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr() as *mut _);
-            Device::new(device)
+            Device::from_ptr(device as *mut _)
         }
     }
 }
 
 impl FrameworkObject for IoQueue {
+    unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
+        Self(unsafe { Rc::new(inner) })
+    }
+
     fn as_ptr(&self) -> WDFOBJECT {
         self.0.inner() as *mut _
+    }
+
+    fn object_type() -> FrameworkObjectType {
+        FrameworkObjectType::IoQueue
     }
 }
 
@@ -159,8 +167,8 @@ macro_rules! extern_request_handler {
     ($handler_name:ident $(, $arg_name:ident: $arg_type:ty)*) => {
         paste::paste! {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
-                let mut queue = unsafe { IoQueue::new(queue) };
-                let mut request = unsafe { Request::new(request) };
+                let mut queue = unsafe { IoQueue::from_ptr(queue as *mut _) };
+                let mut request = unsafe { Request::from_ptr(request as *mut _) };
                 if let Some(handlers) = RequestHandlers::get(&queue) {
                     if let Some(handler) = handlers.$handler_name {
                         handler(&mut queue, request $(, $arg_name)*);

@@ -12,7 +12,17 @@ macro_rules! call_ref_func {
 }
 
 pub trait FrameworkObject {
+    unsafe fn from_ptr(inner: WDFOBJECT) -> Self;
     fn as_ptr(&self) -> WDFOBJECT;
+    fn object_type() -> FrameworkObjectType;
+}
+
+#[derive(PartialEq)]
+pub enum FrameworkObjectType {
+    Device,
+    IoQueue,
+    Request,
+    Timer
 }
 
 pub struct Rc(WDFOBJECT);
