@@ -33,10 +33,10 @@ impl WdfObjectContextTypeInfo {
 pub struct ObjectContext;
 
 impl ObjectContext {
-    pub unsafe fn attach<T: FrameworkObject, U: Sync>(wdf_obj: &mut T, context: U, context_metadata: &'static WdfObjectContextTypeInfo, cleanup_callback: unsafe extern "C" fn(WDFOBJECT)) -> NtResult<()> {
+    pub unsafe fn attach<T: FrameworkObject, U: Sync>(wdf_obj: &mut T, context: U, context_metadata: &'static WdfObjectContextTypeInfo, destroy_callback: unsafe extern "C" fn(WDFOBJECT)) -> NtResult<()> {
         let mut attributes = WDF_OBJECT_ATTRIBUTES::default();
         attributes.ContextTypeInfo = context_metadata.get_unique_type();
-        attributes.EvtCleanupCallback = Some(cleanup_callback);
+        attributes.EvtDestroyCallback = Some(destroy_callback);
 
         let mut wdf_context: *mut U = core::ptr::null_mut();
         let status = unsafe {

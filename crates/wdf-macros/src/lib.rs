@@ -319,7 +319,7 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let struct_name = &context_struct.ident;
     let static_name = Ident::new(&format!("__WDF_{}_TYPE_INFO", struct_name), struct_name.span());
-    let cleanup_callback_name = Ident::new(&format!("__evt_{}_cleanup", struct_name), struct_name.span());
+    let destroy_callback_name = Ident::new(&format!("__evt_{}_destroy", struct_name), struct_name.span());
 
     
     let expanded = quote! {
@@ -338,7 +338,7 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl #struct_name {
             fn attach(wdf_obj: &mut #wdf_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
                 unsafe {
-                    #wdf_crate_path::ObjectContext::attach(wdf_obj, context, &#static_name, #cleanup_callback_name)
+                    #wdf_crate_path::ObjectContext::attach(wdf_obj, context, &#static_name, #destroy_callback_name)
                 }
             }
 
@@ -350,7 +350,7 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         #[allow(non_snake_case)]
-        extern "C" fn #cleanup_callback_name(wdf_obj: #wdf_crate_path::WDFOBJECT) {
+        extern "C" fn #destroy_callback_name(wdf_obj: #wdf_crate_path::WDFOBJECT) {
             unsafe {
                 #wdf_crate_path::ObjectContext::drop::<#struct_name>(wdf_obj, &#static_name);
             }
