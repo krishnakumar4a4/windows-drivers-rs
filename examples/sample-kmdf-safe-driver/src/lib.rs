@@ -31,17 +31,17 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     let mut queue_config = IoQueueConfig::default();
 
 
-    queue_config.evt_io_read = Some(|_queue, mut request, _| {
+    queue_config.evt_io_read = Some(|_queue, request, _| {
         println!("Safe Rust evt_io_read called");
         request.complete(NtStatus::Success);
     });
 
-    queue_config.evt_io_write = Some(|_queue, mut request, _| {
+    queue_config.evt_io_write = Some(|_queue, request, _| {
         println!("Safe Rust evt_io_write called");
         request.complete(NtStatus::Success);
     });
 
-    queue_config.evt_io_default = Some(|_queue, mut request| {
+    queue_config.evt_io_default = Some(|_queue, request| {
         println!("Safe Rust evt_io_default called");
         request.complete(NtStatus::Success);
     });
@@ -53,7 +53,7 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
         if let Some(queue) = timer.get_parent_object::<IoQueue>() {
             let context = QueueContext::get(&queue).unwrap();
             let mut req = context.request.lock();
-            if let Some(mut req) = req.take() {
+            if let Some(req) = req.take() {
                 req.complete(NtStatus::Success);
             }
         }

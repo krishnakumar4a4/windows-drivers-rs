@@ -168,7 +168,7 @@ macro_rules! extern_request_handler {
         paste::paste! {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
                 let mut queue = unsafe { IoQueue::from_ptr(queue as *mut _) };
-                let mut request = unsafe { Request::from_ptr(request as *mut _) };
+                let request = unsafe { Request::from_ptr(request as *mut _) };
                 if let Some(handlers) = RequestHandlers::get(&queue) {
                     if let Some(handler) = handlers.$handler_name {
                         handler(&mut queue, request $(, $arg_name)*);
