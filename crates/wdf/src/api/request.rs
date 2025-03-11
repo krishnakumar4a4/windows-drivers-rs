@@ -17,7 +17,7 @@ impl Request {
         };
     }
 
-    pub fn mark_cancellable(mut self, cancel_fn: fn(RequestId)) -> NtResult<CancellableMarkedRequest> {
+    pub fn mark_cancellable(mut self, cancel_fn: fn(RequestCancellationToken)) -> NtResult<CancellableMarkedRequest> {
         // TODO: check for the race where another thread
         // could call this method method and thay might
         // attach the context before us.
@@ -62,12 +62,12 @@ unsafe impl Send for Request {}
 
 #[object_context(Request)]
 struct RequestContext {
-    evt_request_cancel: fn(RequestId),
+    evt_request_cancel: fn(RequestCancellationToken),
 }
 
 pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     if let Some(context) = RequestContext::get(unsafe { &Request::from_ptr(request as _) }) {
-        (context.evt_request_cancel)(unsafe { RequestId::new(request as _) });
+        (context.evt_request_cancel)(unsafe { RequestCancellationToken::new(request as _) });
     }
 }
 
@@ -109,14 +109,14 @@ impl FrameworkObject for CancellableMarkedRequest {
 /// also thread-safe.
 unsafe impl Send for CancellableMarkedRequest {}
 
-pub struct RequestId(WDFOBJECT);
+pub struct RequestCancellationToken(WDFOBJECT);
 
-impl RequestId {
+impl RequestCancellationToken {
     unsafe fn new(inner: WDFOBJECT) -> Self {
         Self(inner)
     }
 
-    pub fn Id(&self) -> usize {
+    pub fn RequestId(&self) -> usize {
         self.0 as usize
     }
 }
@@ -126,5 +126,5 @@ impl RequestId {
 /// that operate on WDFREQUEST do so in a thread-safe manner.
 /// As a result, all the Rust methods on this struct are
 /// also thread-safe.
-unsafe impl Send for RequestId {}
-unsafe impl Sync for RequestId {}
+unsafe impl Send for RequestCancellationToken {}
+unsafe impl Sync for RequestCancellationToken {}
