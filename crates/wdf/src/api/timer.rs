@@ -1,6 +1,7 @@
 use crate::api::{error::NtResult, object::{wdf_struct_size, FrameworkObject, FrameworkObjectType}};
 use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFTIMER, WDF_OBJECT_ATTRIBUTES, WDF_TIMER_CONFIG};
+use wdk::nt_success;
 use core::{mem::MaybeUninit, ptr::null_mut};
 
 // TODO: Make timer more ergonomic and safer. It's
@@ -49,9 +50,9 @@ impl Timer {
         }
     }
 
-    pub fn start(&self, due_time: i64) { // TODO: use something like duration instead of i64 for due_time
+    pub fn start(&self, due_time: i64) -> bool { // TODO: use something like duration instead of i64 for due_time
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfTimerStart, self.0, due_time);
+            call_unsafe_wdf_function_binding!(WdfTimerStart, self.0, due_time) != 0
         }
     }
 

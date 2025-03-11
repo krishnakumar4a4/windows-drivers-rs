@@ -1,4 +1,5 @@
 use wdk_sys::{WDFOBJECT, WDFREQUEST, call_unsafe_wdf_function_binding};
+use wdk::nt_success;
 use super::{error::NtStatus, io_queue::IoQueue, object::FrameworkObjectType, NtResult};
 use crate::{FrameworkObject, Rc};
 use wdf_macros::object_context;
@@ -66,7 +67,7 @@ struct RequestContext {
 
 pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     if let Some(context) = RequestContext::get(unsafe { &Request::from_ptr(request as _) }) {
-        (context.evt_request_cancel)(RequestId(request as _));
+        (context.evt_request_cancel)(unsafe { RequestId::new(request as _) });
     }
 }
 
@@ -75,11 +76,15 @@ pub struct CancellableMarkedRequest(Request);
 
 impl CancellableMarkedRequest {
     pub fn unmark_cancellable(self) -> NtResult<Request> {
-        unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr() as *mut _);
-        }
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr() as *mut _)
+        };
 
-        Ok(self.0)
+        if nt_success(status) {
+            Ok(self.0)
+        } else {
+            Err(status.into())
+        }
     }
 }
 
