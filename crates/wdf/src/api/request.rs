@@ -109,15 +109,19 @@ impl FrameworkObject for CancellableMarkedRequest {
 /// also thread-safe.
 unsafe impl Send for CancellableMarkedRequest {}
 
-pub struct RequestCancellationToken(WDFOBJECT);
+pub struct RequestCancellationToken(Request);
 
 impl RequestCancellationToken {
     unsafe fn new(inner: WDFOBJECT) -> Self {
-        Self(inner)
+        Self(unsafe { Request::from_ptr(inner) })
     }
 
     pub fn RequestId(&self) -> usize {
-        self.0 as usize
+        self.0.id()
+    }
+
+    pub fn get_io_queue(&self) -> IoQueue {
+        self.0.get_io_queue()
     }
 }
 
