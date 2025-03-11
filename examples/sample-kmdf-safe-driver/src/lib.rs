@@ -6,7 +6,8 @@ use wdf::{driver_entry, object_context, Guid, println, Device, DeviceInit, Drive
 
 #[object_context(IoQueue)]
 struct QueueContext {
-    request: SpinLock<Option<Request>>
+    request: SpinLock<Option<Request>>,
+    timer: Timer
 }
 
 #[driver_entry]
@@ -31,19 +32,16 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     let mut queue_config = IoQueueConfig::default();
 
 
-    queue_config.evt_io_read = Some(|_queue, request, _| {
+    queue_config.evt_io_read = Some(|queue, request, _| {
         println!("Safe Rust evt_io_read called");
-        request.complete(NtStatus::Success);
-    });
 
-    queue_config.evt_io_write = Some(|_queue, request, _| {
-        println!("Safe Rust evt_io_write called");
-        request.complete(NtStatus::Success);
-    });
-
-    queue_config.evt_io_default = Some(|_queue, request| {
-        println!("Safe Rust evt_io_default called");
-        request.complete(NtStatus::Success);
+        if let Some(context) = QueueContext::get(&queue) {
+            println!("Request processing started");
+            *context.request.lock() = Some(request);
+            let _ = context.timer.start(5000);
+        } else {
+            println!("Failed to get queue context");
+        }
     });
 
     let mut queue = IoQueue::create(&device, &queue_config)?;
@@ -61,10 +59,11 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
         timer.stop(false);
     });
 
-    let _ = Timer::create(&timer_config)?;
+    let timer = Timer::create(&timer_config)?;
 
     let context = QueueContext {
-        request: SpinLock::create(None)?
+        request: SpinLock::create(None)?,
+        timer
     };
 
     QueueContext::attach(&mut queue, context)?;
