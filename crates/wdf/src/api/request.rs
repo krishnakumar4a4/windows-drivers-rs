@@ -7,7 +7,7 @@ use wdf_macros::object_context;
 pub struct Request(Rc);
 
 impl Request {
-    pub fn Id(&self) -> usize {
+    pub fn id(&self) -> usize {
         self.0.inner() as usize
     }
 
