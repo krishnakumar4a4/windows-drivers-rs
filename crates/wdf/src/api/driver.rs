@@ -1,5 +1,7 @@
 use crate::api::*;
 use wdk::println;
+use crate::api::string::{to_utf16_buf, to_unicode_string, to_rust_str};
+use crate::api::guid::Guid;
 
 #[doc(hidden)]
 pub use wdk_sys::{
@@ -15,8 +17,6 @@ use wdk_sys::{
 };
 
 extern crate alloc;
-
-use alloc::{string::String, vec::Vec, boxed::Box};
 
 use core::{mem, ptr};
 
@@ -212,44 +212,6 @@ pub fn trace(message: &str) {
     }
 }
 
-#[derive(Debug)]
-pub struct Guid(GUID);
-
-impl Guid {
-     pub fn parse(guid_str: &str) -> Result<Self, &'static str> {
-        // Remove dashes from the input string
-        let guid_str = guid_str.replace("-", "");
-
-        let err = "Invalid GUID format";
-
-        if guid_str.len() != 32 {
-            return Err(err);
-        }
-
-        let data1 = u32::from_str_radix(&guid_str[0..8], 16).map_err(|_| err)?;
-        let data2 = u16::from_str_radix(&guid_str[8..12], 16).map_err(|_| err)?;
-        let data3 = u16::from_str_radix(&guid_str[12..16], 16).map_err(|_| err)?;
-
-        let mut data4 = [0u8; 8];
-        for i in 0..8 {
-            data4[i] = u8::from_str_radix(&guid_str[16 + i * 2..18 + i * 2], 16).map_err(|_| err)?;
-        }
-
-        Ok(Guid(GUID {
-                Data1: data1,
-                Data2: data2,
-                Data3: data3,
-                Data4: data4,
-            },
-        ))
-    }
-
-    pub fn as_lpcguid(&self) -> *const GUID {
-        &self.0
-    }
-}
-
-
 #[repr(C)]
 pub union WPP_PROJECT_CONTROL_BLOCK {
     Control: mem::ManuallyDrop<WPP_TRACE_CONTROL_BLOCK>,
@@ -323,27 +285,6 @@ extern "C" fn WppClassicProviderCallback(_Guid: LPCGUID, ControlCode: UCHAR, Ena
             (*TraceCb).Flags[0] = 0;
             (*TraceCb).Logger = 0;
         }
-    }
-}
-
-fn to_rust_str(unicode_str: UNICODE_STRING) -> String {
-    let unicode_slice = unsafe { core::slice::from_raw_parts(unicode_str.Buffer, unicode_str.Length as usize / 2) };
-    String::from_utf16_lossy(unicode_slice)
-}
-
-fn to_utf16_buf(rust_str: &str) -> Box<[u16]> {
-    let utf16_vec = rust_str.encode_utf16()
-        .chain(core::iter::once(0)) // Append null terminator
-        .collect::<Vec<_>>();
-    utf16_vec.into_boxed_slice()
-}
-
-fn to_unicode_string(buf: &[u16]) -> UNICODE_STRING {
-    let byte_len = (buf.len() * 2) as u16;
-    UNICODE_STRING {
-        Length: byte_len - 2, // Length excluding the null terminator
-        MaximumLength: byte_len,
-        Buffer: buf.as_ptr() as *mut _,
     }
 }
 
