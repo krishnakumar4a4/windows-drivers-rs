@@ -2,11 +2,11 @@
 
 #![no_std]
 
-use wdf::{driver_entry, object_context, Guid, println, Device, DeviceInit, Driver, IoQueue, IoQueueConfig, Request, SpinLock, trace, Timer, TimerConfig, NtError, NtStatus};
+use wdf::{driver_entry, object_context, Guid, println, Device, DeviceInit, Driver, IoQueue, IoQueueConfig, CancellableMarkedRequest, SpinLock, trace, Timer, TimerConfig, NtError, NtStatus};
 
 #[object_context(IoQueue)]
 struct QueueContext {
-    request: SpinLock<Option<Request>>,
+    request: SpinLock<Option<CancellableMarkedRequest>>,
     timer: Timer
 }
 
@@ -37,8 +37,39 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
 
         if let Some(context) = QueueContext::get(&queue) {
             println!("Request processing started");
-            *context.request.lock() = Some(request);
-            let _ = context.timer.start(5000);
+
+            match request.mark_cancellable(|token| {
+                println!("Request evt_cancel called");
+
+                let queue = token.get_io_queue();
+
+                if let Some(context) = QueueContext::get(&queue) {
+                    let mut req = context.request.lock();
+                    if let Some(req) = req.take() {
+                        match req.unmark_cancellable() {
+                            Ok(req) => {
+                                req.complete(NtStatus::cancelled());
+                                println!("Request cancelled");
+                            }
+                            Err(e) => {
+                                println!("Failed to unmark request as cancellable: {e:?}");
+                            }
+                        }
+                    }
+                } else {
+                    println!("Could not cancel request. Failed to get queue context");
+                }
+            }) {
+                Ok(cancellable_req) => {
+                    *context.request.lock() = Some(cancellable_req);
+                    let _ = context.timer.start(5000);
+
+                    println!("Request marked as cancellable");
+                }
+                Err(e) => {
+                    println!("Failed to mark request as cancellable: {e:?}");
+                }
+            }
         } else {
             println!("Failed to get queue context");
         }
@@ -52,7 +83,15 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
             let context = QueueContext::get(&queue).unwrap();
             let mut req = context.request.lock();
             if let Some(req) = req.take() {
-                req.complete(NtStatus::Success);
+                match req.unmark_cancellable() {
+                    Ok(req) => {
+                        req.complete(NtStatus::cancelled());
+                        println!("Request cancelled");
+                    }
+                    Err(e) => {
+                        println!("Failed to unmark request as cancellable: {e:?}");
+                    }
+                };
             }
         }
 
