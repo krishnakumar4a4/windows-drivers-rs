@@ -114,24 +114,3 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     trace("Trace: Safe Rust device add complete");
     Ok(())
 }
-
-
-// Alternative programming model using a struct
-// and an impl instead of free functions
-
-// use wdf::driver_impl;
-// // Struct representing the driver
-// struct MyDriver;
-
-// // Impl containing the driver's callbacks/logic
-// #[driver_impl]
-// // #[trace_config(control_guid="cb94defb-592a-4509-8f2e-54f204929669", ifr_enabled=true, ...)]
-// impl MyDriver {
-//     fn driver_entry(&self) -> Result<(), i32> {
-//         Ok(())
-//      }
-
-//     fn evt_driver_device_add(&self) -> Result<(), i32> {
-//         Ok(())
-//     }
-// }
