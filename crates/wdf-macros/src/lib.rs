@@ -281,21 +281,21 @@ pub fn driver_entry(_args: TokenStream, input: TokenStream) -> TokenStream {
 //     wrappers
 // }
 
-
 /// The attribute used to mark a struct as a WDF object context
 #[proc_macro_attribute]
 pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
     let wdf_obj_type_name = parse_macro_input!(attr as Ident);
     let context_struct = parse_macro_input!(item as ItemStruct);
 
-
     // Check if the struct is generic
     if !context_struct.generics.params.is_empty() {
-        return Error::new_spanned(context_struct, "The `object_context` attribute cannot be applied to generic structs.")
-            .to_compile_error()
-            .into();
+        return Error::new_spanned(
+            context_struct,
+            "The `object_context` attribute cannot be applied to generic structs.",
+        )
+        .to_compile_error()
+        .into();
     }
-
 
     // TODO: Reject the type if its required alignment is greater than 16
     // because WDF's allocators like ExAllocatePool2 use 16 byte aligntment
@@ -309,19 +309,23 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
     // in this macro and instead return an error at run time from the
     // `attach` method if the alignment is greater than 16.
 
-    // Establish wdf crate's path to use 
+    // Establish wdf crate's path to use
     let wdf_crate_path = if std::env::var("CARGO_PKG_NAME").ok() == Some("wdf".to_string()) {
         quote!(crate) // Inside the `wdf` crate itself
     } else {
         quote!(::wdf) // Outside of `wdf`, use the global path
     };
 
-
     let struct_name = &context_struct.ident;
-    let static_name = Ident::new(&format!("__WDF_{}_TYPE_INFO", struct_name), struct_name.span());
-    let destroy_callback_name = Ident::new(&format!("__evt_{}_destroy", struct_name), struct_name.span());
+    let static_name = Ident::new(
+        &format!("__WDF_{}_TYPE_INFO", struct_name),
+        struct_name.span(),
+    );
+    let destroy_callback_name = Ident::new(
+        &format!("__evt_{}_destroy", struct_name),
+        struct_name.span(),
+    );
 
-    
     let expanded = quote! {
         #context_struct
 

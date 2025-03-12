@@ -1,6 +1,14 @@
-use crate::api::{object::{FrameworkObject, FrameworkObjectType, Rc, wdf_struct_size}, device::Device, error::NtError, request::Request};
-use wdk_sys::{WDFQUEUE, WDFREQUEST, call_unsafe_wdf_function_binding, STATUS_SUCCESS, WDF_IO_QUEUE_CONFIG, _WDF_IO_QUEUE_DISPATCH_TYPE, WDF_IO_QUEUE_DISPATCH_TYPE, WDFOBJECT};
+use crate::api::{
+    device::Device,
+    error::NtError,
+    object::{wdf_struct_size, FrameworkObject, FrameworkObjectType, Rc},
+    request::Request,
+};
 use wdf_macros::object_context;
+use wdk_sys::{
+    call_unsafe_wdf_function_binding, STATUS_SUCCESS, WDFOBJECT, WDFQUEUE, WDFREQUEST,
+    WDF_IO_QUEUE_CONFIG, WDF_IO_QUEUE_DISPATCH_TYPE, _WDF_IO_QUEUE_DISPATCH_TYPE,
+};
 
 pub struct IoQueue(Rc);
 
@@ -17,7 +25,8 @@ impl IoQueue {
         let mut config = to_unsafe_config(&queue_config);
         let mut queue: WDFQUEUE = core::ptr::null_mut();
         let status = unsafe {
-            call_unsafe_wdf_function_binding!(WdfIoQueueCreate,
+            call_unsafe_wdf_function_binding!(
+                WdfIoQueueCreate,
                 device.as_ptr() as *mut _,
                 &mut config as *mut _,
                 wdk_sys::WDF_NO_OBJECT_ATTRIBUTES,
@@ -45,7 +54,8 @@ impl IoQueue {
 
     pub fn get_device(&self) -> Device {
         unsafe {
-            let device = call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr() as *mut _);
+            let device =
+                call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr() as *mut _);
             Device::from_ptr(device as *mut _)
         }
     }
@@ -68,16 +78,22 @@ impl FrameworkObject for IoQueue {
 #[derive(Copy, Clone, Debug)]
 pub enum IoQueueDispatchType {
     Sequential,
-    Parallel { presented_requests_limit : Option<u32> },
-    Manual
+    Parallel {
+        presented_requests_limit: Option<u32>,
+    },
+    Manual,
 }
 
 impl Into<WDF_IO_QUEUE_DISPATCH_TYPE> for IoQueueDispatchType {
     fn into(self) -> WDF_IO_QUEUE_DISPATCH_TYPE {
         match self {
-            IoQueueDispatchType::Sequential => _WDF_IO_QUEUE_DISPATCH_TYPE::WdfIoQueueDispatchSequential,
-            IoQueueDispatchType::Parallel { .. } => _WDF_IO_QUEUE_DISPATCH_TYPE::WdfIoQueueDispatchParallel,
-            IoQueueDispatchType::Manual => _WDF_IO_QUEUE_DISPATCH_TYPE::WdfIoQueueDispatchManual
+            IoQueueDispatchType::Sequential => {
+                _WDF_IO_QUEUE_DISPATCH_TYPE::WdfIoQueueDispatchSequential
+            }
+            IoQueueDispatchType::Parallel { .. } => {
+                _WDF_IO_QUEUE_DISPATCH_TYPE::WdfIoQueueDispatchParallel
+            }
+            IoQueueDispatchType::Manual => _WDF_IO_QUEUE_DISPATCH_TYPE::WdfIoQueueDispatchManual,
         }
     }
 }
@@ -86,7 +102,7 @@ impl Into<WDF_IO_QUEUE_DISPATCH_TYPE> for IoQueueDispatchType {
 pub enum TriState {
     False = 0,
     True = 1,
-    UseDefault = 2
+    UseDefault = 2,
 }
 
 pub struct IoQueueConfig {
@@ -110,13 +126,14 @@ impl Default for IoQueueConfig {
             evt_io_default: None,
             evt_io_read: None,
             evt_io_write: None,
-            evt_io_device_control: None
+            evt_io_device_control: None,
         }
     }
 }
 
 fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
-    let mut config = unsafe { core::mem::MaybeUninit::<WDF_IO_QUEUE_CONFIG>::zeroed().assume_init() };
+    let mut config =
+        unsafe { core::mem::MaybeUninit::<WDF_IO_QUEUE_CONFIG>::zeroed().assume_init() };
 
     let size = wdf_struct_size!(WDF_IO_QUEUE_CONFIG);
 
@@ -126,7 +143,6 @@ fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
     config.AllowZeroLengthRequests = safe_config.allow_zero_length_requests as u8;
     config.DefaultQueue = safe_config.default_queue as u8;
 
-    
     if safe_config.evt_io_default.is_some() {
         config.EvtIoDefault = Some(__evt_io_default);
     }
@@ -143,13 +159,15 @@ fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
         config.EvtIoDeviceControl = Some(__evt_io_device_control);
     }
 
-
-    if let IoQueueDispatchType::Parallel { presented_requests_limit} = safe_config.dispatch_type {
+    if let IoQueueDispatchType::Parallel {
+        presented_requests_limit,
+    } = safe_config.dispatch_type
+    {
         config.Settings.Parallel.NumberOfPresentedRequests = match presented_requests_limit {
             Some(limit) => limit,
-            None => u32::MAX 
+            None => u32::MAX,
         };
-    } 
+    }
 
     config
 }
@@ -161,7 +179,6 @@ struct RequestHandlers {
     evt_io_write: Option<fn(&mut IoQueue, Request, usize)>,
     evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
 }
-
 
 macro_rules! extern_request_handler {
     ($handler_name:ident $(, $arg_name:ident: $arg_type:ty)*) => {

@@ -4,7 +4,7 @@ use wdk_sys::GUID;
 pub struct Guid(GUID);
 
 impl Guid {
-     pub fn parse(guid_str: &str) -> Result<Self, &'static str> {
+    pub fn parse(guid_str: &str) -> Result<Self, &'static str> {
         // Remove dashes from the input string
         let guid_str = guid_str.replace("-", "");
 
@@ -20,20 +20,19 @@ impl Guid {
 
         let mut data4 = [0u8; 8];
         for i in 0..8 {
-            data4[i] = u8::from_str_radix(&guid_str[16 + i * 2..18 + i * 2], 16).map_err(|_| err)?;
+            data4[i] =
+                u8::from_str_radix(&guid_str[16 + i * 2..18 + i * 2], 16).map_err(|_| err)?;
         }
 
         Ok(Guid(GUID {
-                Data1: data1,
-                Data2: data2,
-                Data3: data3,
-                Data4: data4,
-            },
-        ))
+            Data1: data1,
+            Data2: data2,
+            Data3: data3,
+            Data4: data4,
+        }))
     }
 
     pub fn as_lpcguid(&self) -> *const GUID {
         &self.0
     }
 }
-

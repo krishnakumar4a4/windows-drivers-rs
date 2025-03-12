@@ -39,7 +39,7 @@ impl<T> SpinLock<T> {
         // TODO: should we increment the ref count of the spin lock
         // to prevent it from being deleted while we are using it?
         // This is super important for soundness so look into it
-        
+
         if NT_SUCCESS(status) {
             Ok(spin_lock)
         } else {
@@ -54,7 +54,10 @@ impl<T> SpinLock<T> {
         unsafe {
             call_unsafe_wdf_function_binding!(WdfSpinLockAcquire, self.wdf_spin_lock);
         }
-        SpinLockGuard { spin_lock: self, _not_send: core::marker::PhantomData }
+        SpinLockGuard {
+            spin_lock: self,
+            _not_send: core::marker::PhantomData,
+        }
     }
 }
 

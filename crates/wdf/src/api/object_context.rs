@@ -1,8 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // License: MIT OR Apache-2.0
 
-use wdk_sys::{NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDF_OBJECT_ATTRIBUTES, WDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, call_unsafe_wdf_function_binding};
-use crate::api::{NtResult, FrameworkObject};
+use crate::api::{FrameworkObject, NtResult};
+use wdk_sys::{
+    call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT,
+    WDF_OBJECT_ATTRIBUTES, WDF_OBJECT_CONTEXT_TYPE_INFO,
+};
 
 #[doc(hidden)]
 #[repr(transparent)]
@@ -33,7 +36,12 @@ impl WdfObjectContextTypeInfo {
 pub struct ObjectContext;
 
 impl ObjectContext {
-    pub unsafe fn attach<T: FrameworkObject, U: Sync>(wdf_obj: &mut T, context: U, context_metadata: &'static WdfObjectContextTypeInfo, destroy_callback: unsafe extern "C" fn(WDFOBJECT)) -> NtResult<()> {
+    pub unsafe fn attach<T: FrameworkObject, U: Sync>(
+        wdf_obj: &mut T,
+        context: U,
+        context_metadata: &'static WdfObjectContextTypeInfo,
+        destroy_callback: unsafe extern "C" fn(WDFOBJECT),
+    ) -> NtResult<()> {
         let mut attributes = WDF_OBJECT_ATTRIBUTES::default();
         attributes.ContextTypeInfo = context_metadata.get_unique_type();
         attributes.EvtDestroyCallback = Some(destroy_callback);
@@ -62,9 +70,16 @@ impl ObjectContext {
         Ok(())
     }
 
-    pub fn get<'a, T: FrameworkObject, U: Sync>(wdf_obj: &'a T, context_metadata: &'static WdfObjectContextTypeInfo) -> Option<&'a U> {
-         let state = unsafe {
-             call_unsafe_wdf_function_binding!(WdfObjectGetTypedContextWorker, wdf_obj.as_ptr(), &context_metadata.0 as *const WDF_OBJECT_CONTEXT_TYPE_INFO) as *mut U
+    pub fn get<'a, T: FrameworkObject, U: Sync>(
+        wdf_obj: &'a T,
+        context_metadata: &'static WdfObjectContextTypeInfo,
+    ) -> Option<&'a U> {
+        let state = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfObjectGetTypedContextWorker,
+                wdf_obj.as_ptr(),
+                &context_metadata.0 as *const WDF_OBJECT_CONTEXT_TYPE_INFO
+            ) as *mut U
         };
 
         if !state.is_null() {
@@ -74,10 +89,16 @@ impl ObjectContext {
         }
     }
 
-    pub unsafe fn drop<U: Sync>(wdf_obj: WDFOBJECT, context_metadata: &'static WdfObjectContextTypeInfo) {
-        let context =
-        unsafe {
-            call_unsafe_wdf_function_binding!(WdfObjectGetTypedContextWorker, wdf_obj, &context_metadata.0 as *const WDF_OBJECT_CONTEXT_TYPE_INFO) as *mut core::mem::ManuallyDrop<U>
+    pub unsafe fn drop<U: Sync>(
+        wdf_obj: WDFOBJECT,
+        context_metadata: &'static WdfObjectContextTypeInfo,
+    ) {
+        let context = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfObjectGetTypedContextWorker,
+                wdf_obj,
+                &context_metadata.0 as *const WDF_OBJECT_CONTEXT_TYPE_INFO
+            ) as *mut core::mem::ManuallyDrop<U>
         };
 
         if !context.is_null() {

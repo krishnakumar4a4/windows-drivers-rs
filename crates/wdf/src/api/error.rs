@@ -20,18 +20,17 @@ impl From<NTSTATUS> for NtError {
 
 pub type NtResult<T> = Result<T, NtError>;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NtStatus {
     Success,
-    Error(NtError)
+    Error(NtError),
 }
 
 impl NtStatus {
     pub fn nt_status(&self) -> NTSTATUS {
         match self {
             Self::Success => 0,
-            Self::Error(err) => err.nt_status()
+            Self::Error(err) => err.nt_status(),
         }
     }
 
@@ -44,7 +43,7 @@ impl From<NTSTATUS> for NtStatus {
     fn from(status: NTSTATUS) -> Self {
         match status {
             0 => Self::Success,
-            _ => Self::Error(NtError::from(status))
+            _ => Self::Error(NtError::from(status)),
         }
     }
 }

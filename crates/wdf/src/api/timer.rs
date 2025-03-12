@@ -1,8 +1,14 @@
-use crate::api::{error::NtResult, object::{wdf_struct_size, FrameworkObject, FrameworkObjectType}};
-use wdf_macros::object_context;
-use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFTIMER, WDF_OBJECT_ATTRIBUTES, WDF_TIMER_CONFIG};
-use wdk::nt_success;
+use crate::api::{
+    error::NtResult,
+    object::{wdf_struct_size, FrameworkObject, FrameworkObjectType},
+};
 use core::{mem::MaybeUninit, ptr::null_mut};
+use wdf_macros::object_context;
+use wdk::nt_success;
+use wdk_sys::{
+    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFTIMER, WDF_OBJECT_ATTRIBUTES,
+    WDF_TIMER_CONFIG,
+};
 
 // TODO: Make timer more ergonomic and safer. It's
 // not fully safe yet. For example it lets you pass
@@ -17,15 +23,15 @@ impl Timer {
     pub fn create<'a, P: FrameworkObject>(config: &TimerConfig<'a, P>) -> NtResult<Self> {
         let context = TimerContext {
             evt_timer_func: config.evt_timer_func,
-            parent_type: P::object_type()
+            parent_type: P::object_type(),
         };
 
-        let mut timer : WDFTIMER = null_mut();
+        let mut timer: WDFTIMER = null_mut();
 
         let mut attributes = WDF_OBJECT_ATTRIBUTES::default();
         attributes.ParentObject = config.parent.as_ptr();
 
-        let mut config:  WDF_TIMER_CONFIG = config.into();
+        let mut config: WDF_TIMER_CONFIG = config.into();
 
         // SAFETY: The resulting ffi object is stored in a private member and not
         // accessible outside of this module, and this module guarantees that it is
@@ -55,24 +61,19 @@ impl Timer {
     // of WDF objects to the driver code. So we're using &self for
     // the moment as it lets us put the object in the object context.
     // When we have a good design for thread safe reprensetation we
-    // will change it back to &mut self 
-    pub fn start(&self, due_time: i64) -> bool { // TODO: use something like duration instead of i64 for due_time
-        unsafe {
-            call_unsafe_wdf_function_binding!(WdfTimerStart, self.0, due_time) != 0
-        }
+    // will change it back to &mut self
+    pub fn start(&self, due_time: i64) -> bool {
+        // TODO: use something like duration instead of i64 for due_time
+        unsafe { call_unsafe_wdf_function_binding!(WdfTimerStart, self.0, due_time) != 0 }
     }
 
-    // TODO: Change to &mut self. See comment on start() method 
+    // TODO: Change to &mut self. See comment on start() method
     pub fn stop(&self, wait: bool) -> bool {
-        unsafe {
-            call_unsafe_wdf_function_binding!(WdfTimerStop, self.0, wait as u8) != 0
-        }
+        unsafe { call_unsafe_wdf_function_binding!(WdfTimerStop, self.0, wait as u8) != 0 }
     }
 
     pub fn get_parent_object<P: FrameworkObject>(&self) -> Option<P> {
-        let parent = unsafe {
-            call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.0)
-        };
+        let parent = unsafe { call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.0) };
 
         if !parent.is_null() {
             TimerContext::get(&self).and_then(|context| {
@@ -114,7 +115,7 @@ pub struct TimerConfig<'a, P: FrameworkObject> {
     pub period: u32,
     pub tolerable_delay: u32,
     pub use_high_resolution_timer: bool,
-    pub parent: &'a P
+    pub parent: &'a P,
 }
 
 impl<'a, P: FrameworkObject> TimerConfig<'a, P> {
@@ -124,26 +125,30 @@ impl<'a, P: FrameworkObject> TimerConfig<'a, P> {
             period: 0,
             tolerable_delay: 0,
             use_high_resolution_timer: false,
-            parent: &parent
+            parent: &parent,
         }
     }
 
-    pub fn new_periodic(parent: &'a P, evt_timer_func: fn(&mut Timer), period: u32, tolerable_delay: u32, use_high_resolution_timer: bool) -> Self {
+    pub fn new_periodic(
+        parent: &'a P,
+        evt_timer_func: fn(&mut Timer),
+        period: u32,
+        tolerable_delay: u32,
+        use_high_resolution_timer: bool,
+    ) -> Self {
         Self {
             evt_timer_func,
             period,
             tolerable_delay,
             use_high_resolution_timer,
-            parent: &parent
+            parent: &parent,
         }
     }
 }
 
 impl<'a, P: FrameworkObject> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
     fn from(config: &TimerConfig<'a, P>) -> Self {
-        let mut wdf_config: WDF_TIMER_CONFIG = unsafe {
-            MaybeUninit::zeroed().assume_init()
-        };
+        let mut wdf_config: WDF_TIMER_CONFIG = unsafe { MaybeUninit::zeroed().assume_init() };
 
         wdf_config.Size = wdf_struct_size!(WDF_TIMER_CONFIG);
         wdf_config.Period = config.period;
@@ -159,7 +164,7 @@ impl<'a, P: FrameworkObject> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
 #[object_context(Timer)]
 struct TimerContext {
     evt_timer_func: fn(&mut Timer),
-    parent_type: FrameworkObjectType
+    parent_type: FrameworkObjectType,
 }
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {
