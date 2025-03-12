@@ -108,8 +108,8 @@ fn evt_timer(timer: &mut Timer) {
         if let Some(req) = req.take() {
             match req.unmark_cancellable() {
                 Ok(req) => {
-                    req.complete(NtStatus::cancelled());
-                    println!("Request cancelled");
+                    req.complete(NtStatus::Success);
+                    println!("Request completed");
                 }
                 Err(e) => {
                     println!("Failed to unmark request as cancellable: {e:?}");
