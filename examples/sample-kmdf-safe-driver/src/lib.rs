@@ -77,7 +77,7 @@ fn evt_io_write(queue: &mut IoQueue, request: Request, _length: usize) {
     }
 }
 
-fn evt_request_cancel(token: RequestCancellationToken) {
+fn evt_request_cancel(token: &RequestCancellationToken) {
     println!("Request evt_cancel called");
 
     let queue = token.get_io_queue();

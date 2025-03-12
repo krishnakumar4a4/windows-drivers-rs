@@ -23,7 +23,7 @@ impl Request {
 
     pub fn mark_cancellable(
         mut self,
-        cancel_fn: fn(RequestCancellationToken),
+        cancel_fn: fn(&RequestCancellationToken),
     ) -> NtResult<CancellableMarkedRequest> {
         // TODO: check for the race where another thread
         // could call this method method and thay might
@@ -77,12 +77,12 @@ unsafe impl Send for Request {}
 
 #[object_context(Request)]
 struct RequestContext {
-    evt_request_cancel: fn(RequestCancellationToken),
+    evt_request_cancel: fn(&RequestCancellationToken),
 }
 
 pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     if let Some(context) = RequestContext::get(unsafe { &Request::from_ptr(request as _) }) {
-        (context.evt_request_cancel)(unsafe { RequestCancellationToken::new(request as _) });
+        (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
     }
 }
 
