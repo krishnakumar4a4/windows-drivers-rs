@@ -2,7 +2,11 @@
 
 #![no_std]
 
-use wdf::{driver_entry, object_context, Guid, println, Device, DeviceInit, Driver, IoQueue, IoQueueConfig, CancellableMarkedRequest, SpinLock, trace, Timer, TimerConfig, NtError, NtStatus};
+use wdf::{
+    driver_entry, object_context, println, trace, CancellableMarkedRequest, Device,
+    DeviceInit, Driver, Guid, IoQueue, IoQueueConfig, NtError, NtStatus, SpinLock,
+    Timer, TimerConfig
+};
 
 #[object_context(IoQueue)]
 struct QueueContext {
