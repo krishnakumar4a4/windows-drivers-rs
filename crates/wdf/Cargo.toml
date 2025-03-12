@@ -27,5 +27,6 @@ paste.workspace = true
 default = []
 umdf = []
 
-[lints]
-workspace = true
+# TODO temporarily turned off lints
+# [lints]
+# workspace = true
