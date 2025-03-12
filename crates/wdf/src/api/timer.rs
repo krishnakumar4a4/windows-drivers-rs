@@ -4,7 +4,6 @@ use crate::api::{
 };
 use core::{mem::MaybeUninit, ptr::null_mut};
 use wdf_macros::object_context;
-use wdk::nt_success;
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFTIMER, WDF_OBJECT_ATTRIBUTES,
     WDF_TIMER_CONFIG,
