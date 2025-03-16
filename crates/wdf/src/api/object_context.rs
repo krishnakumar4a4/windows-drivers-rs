@@ -50,7 +50,7 @@ impl ObjectContext {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfObjectAllocateContext,
-                wdf_obj as *const _ as WDFOBJECT,
+                wdf_obj.as_ptr() as _,
                 &mut attributes as *mut _,
                 core::mem::transmute(&mut wdf_context),
             )
