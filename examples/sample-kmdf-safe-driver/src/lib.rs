@@ -35,7 +35,6 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
 
     let mut queue_config = IoQueueConfig::default();
 
-
     queue_config.evt_io_read = Some(evt_io_write);
 
     let mut queue = IoQueue::create(&device, &queue_config)?;
@@ -50,6 +49,11 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     };
 
     QueueContext::attach(&mut queue, context)?;
+
+    let _ = device.create_interface(
+        &Guid::parse("2aa02ab1-c26e-431b-8efe-85ee8de102e4").expect("GUID is valid"),
+        Some("SafeRustDriver"),
+    )?; 
 
     trace("Trace: Safe Rust device add complete");
     Ok(())
