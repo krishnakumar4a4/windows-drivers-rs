@@ -1,4 +1,4 @@
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_OBJECT_ATTRIBUTES};
 
 macro_rules! call_ref_func {
     ($func:ident, $obj:expr) => {
@@ -68,3 +68,13 @@ macro_rules! wdf_struct_size {
 }
 
 pub(crate) use wdf_struct_size;
+
+pub fn init_attributes() -> WDF_OBJECT_ATTRIBUTES {
+    let mut attributes = WDF_OBJECT_ATTRIBUTES::default();
+
+    attributes.Size = wdf_struct_size!(WDF_OBJECT_ATTRIBUTES);
+    attributes.ExecutionLevel = _WDF_EXECUTION_LEVEL::WdfExecutionLevelInheritFromParent;
+    attributes.SynchronizationScope = _WDF_SYNCHRONIZATION_SCOPE::WdfSynchronizationScopeInheritFromParent;
+
+    attributes
+}

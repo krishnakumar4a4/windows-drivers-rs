@@ -1,12 +1,11 @@
 use crate::api::{
     error::NtResult,
-    object::{wdf_struct_size, FrameworkObject, FrameworkObjectType},
+    object::{wdf_struct_size, FrameworkObject, FrameworkObjectType, init_attributes},
 };
 use core::{mem::MaybeUninit, ptr::null_mut};
 use wdf_macros::object_context;
 use wdk_sys::{
-    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFTIMER, WDF_OBJECT_ATTRIBUTES,
-    WDF_TIMER_CONFIG,
+    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFTIMER, WDF_TIMER_CONFIG,
 };
 
 // TODO: Make timer more ergonomic and safer. It's
@@ -27,7 +26,7 @@ impl Timer {
 
         let mut timer: WDFTIMER = null_mut();
 
-        let mut attributes = WDF_OBJECT_ATTRIBUTES::default();
+        let mut attributes = init_attributes();
         attributes.ParentObject = config.parent.as_ptr();
 
         let mut config: WDF_TIMER_CONFIG = config.into();
