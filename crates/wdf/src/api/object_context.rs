@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // License: MIT OR Apache-2.0
 
-use crate::api::{FrameworkObject, NtResult};
+use crate::api::{wdf_struct_size, FrameworkObject, NtResult};
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT,
-    WDF_OBJECT_ATTRIBUTES, WDF_OBJECT_CONTEXT_TYPE_INFO,
+    _WDF_EXECUTION_LEVEL, WDF_OBJECT_ATTRIBUTES, WDF_OBJECT_CONTEXT_TYPE_INFO, _WDF_SYNCHRONIZATION_SCOPE,
 };
 
 #[doc(hidden)]
@@ -43,6 +43,9 @@ impl ObjectContext {
         destroy_callback: unsafe extern "C" fn(WDFOBJECT),
     ) -> NtResult<()> {
         let mut attributes = WDF_OBJECT_ATTRIBUTES::default();
+        attributes.Size = wdf_struct_size!(WDF_OBJECT_ATTRIBUTES);
+        attributes.ExecutionLevel = _WDF_EXECUTION_LEVEL::WdfExecutionLevelInheritFromParent;
+        attributes.SynchronizationScope = _WDF_SYNCHRONIZATION_SCOPE::WdfSynchronizationScopeInheritFromParent;
         attributes.ContextTypeInfo = context_metadata.get_unique_type();
         attributes.EvtDestroyCallback = Some(destroy_callback);
 
