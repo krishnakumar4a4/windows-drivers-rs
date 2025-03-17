@@ -1,7 +1,7 @@
 use core::cell::UnsafeCell;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFSPINLOCK, WDF_OBJECT_ATTRIBUTES};
-
 use crate::api::error::NtResult;
+use super::init_attributes;
 
 /// WDF Spin Lock
 pub struct SpinLock<T> {
@@ -23,7 +23,7 @@ impl<T> SpinLock<T> {
             data: UnsafeCell::new(data),
         };
 
-        let mut attributes = WDF_OBJECT_ATTRIBUTES::default();
+        let mut attributes = init_attributes();
 
         // SAFETY: The resulting ffi object is stored in a private member and not
         // accessible outside of this module, and this module guarantees that it is
