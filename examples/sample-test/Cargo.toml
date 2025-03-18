@@ -1,6 +1,12 @@
 [package]
 name = "sample-test"
 version = "0.1.0"
+description = "A user mode app that tests sample KMDF safe Rust driver by sending it I/O requests"
+repository = "https://github.com/microsoft/windows-drivers-rs"
+license = "MIT OR Apache-2.0"
+keywords = ["windows", "driver", "sample", "wdf", "test"]
+categories = ["hardware-support"]
+publish = false
 
 [dependencies]
 uuid = "1.16.0"
