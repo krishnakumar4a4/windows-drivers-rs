@@ -9,7 +9,7 @@ use windows::{
             CM_Get_Device_Interface_ListW, CM_Get_Device_Interface_List_SizeW,
             CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CONFIGRET,
         },
-        Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE},
+        Foundation::{CloseHandle, ERROR_SUCCESS, GetLastError, HANDLE},
         Storage::FileSystem::{
             CreateFileW, WriteFile, FILE_FLAGS_AND_ATTRIBUTES, FILE_GENERIC_WRITE, FILE_SHARE_MODE,
             OPEN_EXISTING,
@@ -155,7 +155,11 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), String> {
     if result.as_bool() {
         Ok(())
     } else {
-        Err("Failed to write to the device.".to_string())
+        let error_code = unsafe { GetLastError() };
+        return Err(format!(
+            "Failed to write to the device. Error code: {}",
+            error_code.0
+        ));
     }
 }
 
