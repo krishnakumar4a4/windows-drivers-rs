@@ -41,7 +41,6 @@ impl ObjectContext {
         context_metadata: &'static WdfObjectContextTypeInfo,
         destroy_callback: unsafe extern "C" fn(WDFOBJECT),
     ) -> NtResult<()> {
-        use wdk::println;
         let mut attributes = init_attributes();
         attributes.ContextTypeInfo = context_metadata.get_unique_type();
         attributes.EvtDestroyCallback = Some(destroy_callback);
