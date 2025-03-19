@@ -52,7 +52,7 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
 
     let _ = device.create_interface(
         &Guid::parse("2aa02ab1-c26e-431b-8efe-85ee8de102e4").expect("GUID is valid"),
-        Some("SafeRustDriver"),
+        None
     )?; 
 
     trace("Trace: Safe Rust device add complete");
