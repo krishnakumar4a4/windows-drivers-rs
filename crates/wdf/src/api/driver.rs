@@ -1,7 +1,7 @@
 use crate::api::guid::Guid;
 use crate::api::string::{to_rust_str, to_unicode_string, to_utf16_buf};
 use crate::api::*;
-use wdk::println;
+// use wdk::println;
 
 #[doc(hidden)]
 pub use wdk_sys::{
@@ -176,7 +176,7 @@ pub fn call_safe_driver_entry(
     };
 
     if !NT_SUCCESS(nt_status) {
-        println!("WdfDriverCreate failed. status: {nt_status:#02x}");
+        // println!("WdfDriverCreate failed. status: {nt_status:#02x}");
         return nt_status;
     }
 
@@ -390,7 +390,7 @@ fn wpp_recorder_sf_ds(
     unsafe {
         if let Some(tracing_config) = TRACING_CONFIG.as_ref() {
             if let Some(wpp_trace_message) = tracing_config.wpp_trace_message {
-                println!("wpp_recorder_sf_ds: calling wpp_trace_message");
+                // println!("wpp_recorder_sf_ds: calling wpp_trace_message");
                 let cb = &tracing_config.control_block;
                 wpp_trace_message(
                     cb.Control.Logger,
@@ -406,7 +406,7 @@ fn wpp_recorder_sf_ds(
             }
         }
 
-        println!("wpp_recorder_sf_ds: calling WppAutoLogTrace");
+        // println!("wpp_recorder_sf_ds: calling WppAutoLogTrace");
         WppAutoLogTrace(
             AutoLogContext,
             level,
