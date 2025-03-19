@@ -4,7 +4,7 @@ use crate::api::{
     string::{to_unicode_string, to_utf16_buf},
 };
 use wdk_sys::{
-    call_unsafe_wdf_function_binding, WDFDEVICE, WDFDEVICE_INIT, WDFOBJECT, WDF_NO_HANDLE,
+    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFDEVICE, WDFDEVICE_INIT, WDFOBJECT, WDF_NO_HANDLE,
     WDF_NO_OBJECT_ATTRIBUTES,
 };
 
@@ -26,9 +26,10 @@ impl Device {
             )
         };
 
-        match status {
-            0 => Ok(unsafe { Self::from_ptr(device as *mut _) }),
-            status => Err(status.into()),
+        if NT_SUCCESS(status) {
+            Ok(unsafe { Self::from_ptr(device as *mut _) })
+        } else {
+            Err(status.into())
         }
     }
 
@@ -49,9 +50,10 @@ impl Device {
             )
         };
 
-        match status {
-            0 => Ok(()),
-            status => Err(status.into()),
+        if NT_SUCCESS(status) {
+            Ok(())
+        } else {
+            Err(status.into())
         }
     }
 }

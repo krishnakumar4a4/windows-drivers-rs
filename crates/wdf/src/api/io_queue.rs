@@ -6,7 +6,7 @@ use crate::api::{
 };
 use wdf_macros::object_context;
 use wdk_sys::{
-    call_unsafe_wdf_function_binding, STATUS_SUCCESS, WDFOBJECT, WDFQUEUE, WDFREQUEST,
+    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFQUEUE, WDFREQUEST,
     WDF_IO_QUEUE_CONFIG, WDF_IO_QUEUE_DISPATCH_TYPE, _WDF_IO_QUEUE_DISPATCH_TYPE,
 };
 
@@ -34,7 +34,7 @@ impl IoQueue {
             )
         };
 
-        if status == STATUS_SUCCESS {
+        if NT_SUCCESS(status) {
             let handlers = RequestHandlers {
                 evt_io_default: queue_config.evt_io_default,
                 evt_io_read: queue_config.evt_io_read,
