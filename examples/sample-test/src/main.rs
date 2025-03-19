@@ -19,8 +19,6 @@ use windows::{
 };
 use std::env;
 
-const MAX_DEVPATH_LENGTH: usize = 256;
-
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -33,24 +31,27 @@ fn main() {
         return;
     };
 
-    let mut device_path = [0u16; MAX_DEVPATH_LENGTH];
-
-    if get_device_path(&interface_guid, &mut device_path) {
-        let device_path_str = String::from_utf16_lossy(&device_path);
-        println!("Device Path: {}", device_path_str);
-
-        // Send a write request to the device
-        if send_write_request(&device_path_str, "Hello, Device!") {
-            println!("Write request sent successfully.");
-        } else {
-            eprintln!("Failed to send write request.");
+    let device_path = match get_device_path(&interface_guid) {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return;
         }
-    } else {
-        eprintln!("Failed to retrieve device path.");
+    };
+    
+    println!("Device Path: {}", device_path);
+
+    // Send a write request to the device
+    match send_write_request(&device_path, "Hello, Device!") {
+        Ok(()) => println!("Write request sent successfully."),
+        Err(e) => {
+            eprintln!("Error sending write request: {}", e);
+            return;
+        }
     }
 }
 
-fn get_device_path(interface_guid: &GUID, device_path: &mut [u16]) -> bool {
+fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
     let mut device_interface_list_length: u32 = 0;
 
     // Get the size of the device interface list
@@ -64,27 +65,15 @@ fn get_device_path(interface_guid: &GUID, device_path: &mut [u16]) -> bool {
     };
 
     if cr != CONFIGRET(ERROR_SUCCESS.0) {
-        eprintln!("Error retrieving device interface list size: 0x{:x}", cr.0);
-        return false;
+        return Err(format!("Error retrieving device interface list size: 0x{:x}", cr.0));
     }
 
     if device_interface_list_length <= 1 {
-        eprintln!("No active device interfaces found. Is the driver loaded?");
-        return false;
+        return Err("No active device interfaces found. Is the driver loaded?".to_string());
     }
 
     // Allocate memory for the device interface list
     let mut device_interface_list = vec![0u16; device_interface_list_length as usize];
-    // unsafe {
-    //     core::ptr::write_bytes(device_interface_list.as_mut_ptr(), 0, 1);
-    // }
-
-    // unsafe {
-    //     ZeroMemory(
-    //         device_interface_list.as_mut_ptr() as *mut _,
-    //         (device_interface_list_length as usize * std::mem::size_of::<u16>()) as _,
-    //     );
-    // }
 
     // Get the device interface list
     let cr = unsafe {
@@ -97,8 +86,7 @@ fn get_device_path(interface_guid: &GUID, device_path: &mut [u16]) -> bool {
     };
 
     if cr != CONFIGRET(ERROR_SUCCESS.0) {
-        eprintln!("Error retrieving device interface list: 0x{:x}", cr.0);
-        return false;
+        return Err(format!("Error retrieving device interface list: 0x{:x}", cr.0));
     }
 
     // Copy the first device interface path to the output buffer
@@ -107,15 +95,15 @@ fn get_device_path(interface_guid: &GUID, device_path: &mut [u16]) -> bool {
         .next()
         .unwrap_or(&[]);
     if first_interface.is_empty() {
-        eprintln!("No valid device interfaces found.");
-        return false;
+        return Err("No valid device interfaces found.".to_string());
     }
 
-    device_path[..first_interface.len()].copy_from_slice(first_interface);
-    true
+    let device_path = String::from_utf16_lossy(first_interface);
+
+    Ok(device_path)
 }
 
-fn send_write_request(device_path: &str, data: &str) -> bool {
+fn send_write_request(device_path: &str, data: &str) -> Result<(), String> {
     // Convert the device path to a wide string
     let device_path_wide: Vec<u16> = OsString::from(device_path)
         .encode_wide()
@@ -136,14 +124,12 @@ fn send_write_request(device_path: &str, data: &str) -> bool {
     } {
         Ok(handle) => handle,
         Err(e) => {
-            eprintln!("Failed to open device: {e}");
-            return false;
+            return Err(format!("Failed to open device: {e}"));
         }
     };
 
     if handle == HANDLE::default() {
-        eprintln!("Failed to open device.");
-        return false;
+        return Err("Failed to open device".to_string());
     }
 
     // Data to write to the device
@@ -167,11 +153,9 @@ fn send_write_request(device_path: &str, data: &str) -> bool {
     }
 
     if result.as_bool() {
-        println!("Successfully wrote {} bytes to the device.", bytes_written);
-        true
+        Ok(())
     } else {
-        eprintln!("Failed to write to the device.");
-        false
+        Err("Failed to write to the device.".to_string())
     }
 }
 
