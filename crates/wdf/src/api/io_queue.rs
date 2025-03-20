@@ -180,7 +180,7 @@ struct RequestHandlers {
     evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
 }
 
-macro_rules! extern_request_handler {
+macro_rules! unsafe_request_handler {
     ($handler_name:ident $(, $arg_name:ident: $arg_type:ty)*) => {
         paste::paste! {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
@@ -199,7 +199,7 @@ macro_rules! extern_request_handler {
     };
 }
 
-extern_request_handler!(evt_io_default);
-extern_request_handler!(evt_io_read, length: usize);
-extern_request_handler!(evt_io_write, length: usize);
-extern_request_handler!(evt_io_device_control,  OutputBufferLength: usize, InputBufferLength: usize, IoControlCode: u32);
+unsafe_request_handler!(evt_io_default);
+unsafe_request_handler!(evt_io_read, length: usize);
+unsafe_request_handler!(evt_io_write, length: usize);
+unsafe_request_handler!(evt_io_device_control,  OutputBufferLength: usize, InputBufferLength: usize, IoControlCode: u32);
