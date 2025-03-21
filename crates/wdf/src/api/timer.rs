@@ -54,7 +54,7 @@ impl Timer {
         }
     }
 
-    // TODO: takes &mut self instead of &self because right now
+    // TODO: takes &self instead of &mut self because right now
     // we don't have a good design for representation thread safey
     // of WDF objects to the driver code. So we're using &self for
     // the moment as it lets us put the object in the object context.
