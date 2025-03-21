@@ -19,13 +19,9 @@ use windows::{
     },
 };
 use std::env;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
-use std::time::Duration;
+use std::sync::Mutex;
 
-
-static CANCEL_FLAG: AtomicBool = AtomicBool::new(false);
-static REQUEST_COMPLETED: AtomicBool = AtomicBool::new(false);
+static IO_HANDLE: Mutex<Option<HANDLE>> = Mutex::new(None);
 
 
 fn main() {
@@ -69,12 +65,12 @@ fn main() {
 
 unsafe extern "system" fn ctrlc_handler(ctrl_type: u32) -> BOOL {
     if ctrl_type == CTRL_C_EVENT {
-        if !REQUEST_COMPLETED.load(Ordering::SeqCst) {
-            CANCEL_FLAG.store(true, Ordering::SeqCst);
-            println!("Ctrl+C pressed. Attempting to cancel the write request...");
-        } else {
-            println!("Ctrl+C pressed, but the request is already completed.");
+        let handle = IO_HANDLE.lock().unwrap().take();
+        if let Some(handle) = handle {
+            CancelIoEx(handle, null_mut());
+            println!("Request cancelled");
         }
+        
         return true.into();
     }
     false.into()
@@ -167,27 +163,12 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), String> {
         return Err("Failed to open device".to_string());
     }
 
+    IO_HANDLE.lock().unwrap().replace(handle);
+
     // Data to write to the device
     let data = data.as_bytes();
     let mut bytes_written = 0;
 
-    // Create a thread to monitor the cancel flag
-    let cancel_thread = thread::spawn(move || {
-        loop {
-            if REQUEST_COMPLETED.load(Ordering::SeqCst) {
-                // Request completed, exit the loop without canceling I/O
-                break;
-            }
-            if CANCEL_FLAG.load(Ordering::SeqCst) {
-                // Ctrl+C pressed, cancel the I/O
-                unsafe {
-                    CancelIoEx(handle, null_mut());
-                }
-                break;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-    });
 
     // Send the write request
     let result = unsafe {
@@ -200,11 +181,7 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), String> {
         )
     };
 
-    
-    REQUEST_COMPLETED.store(true, Ordering::SeqCst);
-
-    // Wait for the cancel thread to finish
-    cancel_thread.join().unwrap();
+    *IO_HANDLE.lock().unwrap() = None;
 
     // Close the device handle
     unsafe {
