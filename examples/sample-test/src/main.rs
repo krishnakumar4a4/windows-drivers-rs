@@ -25,6 +25,7 @@ use std::time::Duration;
 
 
 static CANCEL_FLAG: AtomicBool = AtomicBool::new(false);
+static REQUEST_COMPLETED: AtomicBool = AtomicBool::new(false);
 
 
 fn main() {
@@ -49,13 +50,16 @@ fn main() {
 
     println!("Device Path: {}", device_path);
 
+    // Set the Ctrl+C handler
     unsafe {
         SetConsoleCtrlHandler(Some(ctrlc_handler), true);
     }
 
     // Send a write request to the device
     match send_write_request(&device_path, "Hello, Device!") {
-        Ok(()) => println!("Write request completed"),
+        Ok(()) => {
+            println!("Write request completed");
+        }
         Err(e) => {
             eprintln!("Error sending write request: {}", e);
             return;
@@ -65,8 +69,12 @@ fn main() {
 
 unsafe extern "system" fn ctrlc_handler(ctrl_type: u32) -> BOOL {
     if ctrl_type == CTRL_C_EVENT {
-        CANCEL_FLAG.store(true, Ordering::SeqCst);
-        println!("Ctrl+C pressed. Attempting to cancel the write request...");
+        if !REQUEST_COMPLETED.load(Ordering::SeqCst) {
+            CANCEL_FLAG.store(true, Ordering::SeqCst);
+            println!("Ctrl+C pressed. Attempting to cancel the write request...");
+        } else {
+            println!("Ctrl+C pressed, but the request is already completed.");
+        }
         return true.into();
     }
     false.into()
@@ -165,11 +173,19 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), String> {
 
     // Create a thread to monitor the cancel flag
     let cancel_thread = thread::spawn(move || {
-        while !CANCEL_FLAG.load(Ordering::SeqCst) {
+        loop {
+            if REQUEST_COMPLETED.load(Ordering::SeqCst) {
+                // Request completed, exit the loop without canceling I/O
+                break;
+            }
+            if CANCEL_FLAG.load(Ordering::SeqCst) {
+                // Ctrl+C pressed, cancel the I/O
+                unsafe {
+                    CancelIoEx(handle, null_mut());
+                }
+                break;
+            }
             thread::sleep(Duration::from_millis(100));
-        }
-        unsafe {
-            CancelIoEx(handle, null_mut());
         }
     });
 
@@ -183,6 +199,9 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), String> {
             null_mut() as *mut OVERLAPPED,
         )
     };
+
+    
+    REQUEST_COMPLETED.store(true, Ordering::SeqCst);
 
     // Wait for the cancel thread to finish
     cancel_thread.join().unwrap();
@@ -220,5 +239,5 @@ fn parse_guid(guid_str: &str) -> Option<GUID> {
             fields.3[6],
             fields.3[7],
         ],
-    ))
+       ))
 }

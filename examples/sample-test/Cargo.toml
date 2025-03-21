@@ -11,4 +11,4 @@ publish = false
 
 [dependencies]
 uuid = "1.16.0"
-windows = { version = "0.36.1", features = ["Win32_Foundation", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Security", "Win32_System_IO", "Win32_System_Memory", "Win32_Storage_FileSystem"] }
+windows = { version = "0.36.1", features = ["Win32_Foundation", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Security", "Win32_System_Console", "Win32_System_IO", "Win32_System_Memory", "Win32_Storage_FileSystem"] }
