@@ -35,7 +35,8 @@ fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
 
     let mut queue_config = IoQueueConfig::default();
 
-    queue_config.evt_io_read = Some(evt_io_write);
+    queue_config.default_queue = true;
+    queue_config.evt_io_write = Some(evt_io_write);
 
     let mut queue = IoQueue::create(&device, &queue_config)?;
 
