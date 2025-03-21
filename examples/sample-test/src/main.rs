@@ -1,4 +1,5 @@
 extern crate windows;
+use std::env;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
@@ -9,7 +10,7 @@ use windows::{
             CM_Get_Device_Interface_ListW, CM_Get_Device_Interface_List_SizeW,
             CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CONFIGRET,
         },
-        Foundation::{CloseHandle, ERROR_SUCCESS, GetLastError, HANDLE},
+        Foundation::{CloseHandle, GetLastError, ERROR_SUCCESS, HANDLE},
         Storage::FileSystem::{
             CreateFileW, WriteFile, FILE_FLAGS_AND_ATTRIBUTES, FILE_GENERIC_WRITE, FILE_SHARE_MODE,
             OPEN_EXISTING,
@@ -17,7 +18,6 @@ use windows::{
         System::IO::OVERLAPPED,
     },
 };
-use std::env;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -38,7 +38,7 @@ fn main() {
             return;
         }
     };
-    
+
     println!("Device Path: {}", device_path);
 
     // Send a write request to the device
@@ -65,7 +65,10 @@ fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
     };
 
     if cr != CONFIGRET(ERROR_SUCCESS.0) {
-        return Err(format!("Error retrieving device interface list size: 0x{:x}", cr.0));
+        return Err(format!(
+            "Error retrieving device interface list size: 0x{:x}",
+            cr.0
+        ));
     }
 
     if device_interface_list_length <= 1 {
@@ -86,7 +89,10 @@ fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
     };
 
     if cr != CONFIGRET(ERROR_SUCCESS.0) {
-        return Err(format!("Error retrieving device interface list: 0x{:x}", cr.0));
+        return Err(format!(
+            "Error retrieving device interface list: 0x{:x}",
+            cr.0
+        ));
     }
 
     // Copy the first device interface path to the output buffer
@@ -171,8 +177,14 @@ fn parse_guid(guid_str: &str) -> Option<GUID> {
         fields.1 as u16,
         fields.2 as u16,
         [
-            fields.3[0], fields.3[1], fields.3[2], fields.3[3],
-            fields.3[4], fields.3[5], fields.3[6], fields.3[7],
+            fields.3[0],
+            fields.3[1],
+            fields.3[2],
+            fields.3[3],
+            fields.3[4],
+            fields.3[5],
+            fields.3[6],
+            fields.3[7],
         ],
     ))
 }
