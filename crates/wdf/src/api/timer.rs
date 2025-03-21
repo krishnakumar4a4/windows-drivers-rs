@@ -2,7 +2,7 @@ use crate::api::{
     error::NtResult,
     object::{wdf_struct_size, FrameworkObject, FrameworkObjectType, init_attributes},
 };
-use core::{mem::MaybeUninit, ptr::null_mut};
+use core::{mem::MaybeUninit, ptr::null_mut, time::Duration};
 use wdf_macros::object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFTIMER, WDF_TIMER_CONFIG,
@@ -60,7 +60,10 @@ impl Timer {
     // the moment as it lets us put the object in the object context.
     // When we have a good design for thread safe reprensetation we
     // will change it back to &mut self
-    pub fn start(&self, due_time: i64) -> bool {
+    // TODO: also support absolute time in addition to duration
+    pub fn start(&self, duration: &Duration) -> bool {
+        let due_time = -1 * duration.as_nanos() as i64 / 100; // To ticks. -1 is for relative time
+
         // TODO: use something like duration instead of i64 for due_time
         unsafe { call_unsafe_wdf_function_binding!(WdfTimerStart, self.0, due_time) != 0 }
     }

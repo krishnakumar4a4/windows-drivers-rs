@@ -8,6 +8,8 @@ use wdf::{
     IoQueueConfig, NtError, NtStatus, SpinLock, Timer, TimerConfig
 };
 
+use core::time::Duration;
+
 #[object_context(IoQueue)]
 struct QueueContext {
     request: SpinLock<Option<CancellableMarkedRequest>>,
@@ -69,7 +71,7 @@ fn evt_io_write(queue: &mut IoQueue, request: Request, _length: usize) {
         match request.mark_cancellable(evt_request_cancel) {
             Ok(cancellable_req) => {
                 *context.request.lock() = Some(cancellable_req);
-                let _ = context.timer.start(5000);
+                let _ = context.timer.start(&Duration::from_secs(5));
 
                 println!("Request marked as cancellable");
             }
