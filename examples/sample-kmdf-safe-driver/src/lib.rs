@@ -92,15 +92,10 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
     if let Some(context) = QueueContext::get(&queue) {
         let mut req = context.request.lock();
         if let Some(req) = req.take() {
-            match req.unmark_cancellable() {
-                Ok(req) => {
-                    req.complete(NtStatus::cancelled());
-                    println!("Request cancelled");
-                }
-                Err(e) => {
-                    println!("Failed to unmark request as cancellable: {e:?}");
-                }
-            }
+            req.complete(NtStatus::cancelled());
+            println!("Request cancelled");
+        } else {
+            println!("Request already completed");
         }
     } else {
         println!("Could not cancel request. Failed to get queue context");
@@ -113,15 +108,10 @@ fn evt_timer(timer: &mut Timer) {
         let context = QueueContext::get(&queue).unwrap();
         let mut req = context.request.lock();
         if let Some(req) = req.take() {
-            match req.unmark_cancellable() {
-                Ok(req) => {
-                    req.complete(NtStatus::Success);
-                    println!("Request completed");
-                }
-                Err(e) => {
-                    println!("Failed to unmark request as cancellable: {e:?}");
-                }
-            };
+            req.complete(NtStatus::Success);
+            println!("Request completed");
+        } else {
+            println!("Request already cancelled or completed");
         }
     }
 
