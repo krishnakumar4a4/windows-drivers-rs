@@ -9,19 +9,19 @@ use windows::{
             CM_Get_Device_Interface_ListW, CM_Get_Device_Interface_List_SizeW,
             CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CONFIGRET,
         },
-        Foundation::{CloseHandle, ERROR_SUCCESS, GetLastError, HANDLE, BOOL},
+        Foundation::{CloseHandle, ERROR_SUCCESS, ERROR_IO_PENDING, ERROR_IO_INCOMPLETE, ERROR_OPERATION_ABORTED, GetLastError, HANDLE, BOOL},
         Storage::FileSystem::{
-            CreateFileW, WriteFile, FILE_FLAGS_AND_ATTRIBUTES, FILE_GENERIC_WRITE, FILE_SHARE_MODE,
-            OPEN_EXISTING,
+            CreateFileW, WriteFile, FILE_GENERIC_WRITE, FILE_SHARE_MODE,
+            FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
         },
-        System::IO::{CancelIoEx, OVERLAPPED },
+        System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED},
         System::Console::{CTRL_C_EVENT, SetConsoleCtrlHandler},
     },
 };
 use std::env;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-static IO_HANDLE: Mutex<Option<HANDLE>> = Mutex::new(None);
+static CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 
 fn main() {
@@ -56,23 +56,22 @@ fn main() {
         Ok(()) => {
             println!("Write request completed");
         }
-        Err(e) => {
+        Err(RequestError::Cancelled) => {
+            println!("Write request cancelled");
+        },
+        Err(RequestError::IoError(e)) => {
             eprintln!("Error sending write request: {}", e);
-            return;
         }
     }
 }
 
 unsafe extern "system" fn ctrlc_handler(ctrl_type: u32) -> BOOL {
     if ctrl_type == CTRL_C_EVENT {
-        let handle = IO_HANDLE.lock().unwrap().take();
-        if let Some(handle) = handle {
-            CancelIoEx(handle, null_mut());
-            println!("Request cancelled");
-        }
-        
+        CANCEL_REQUESTED.store(true, Ordering::SeqCst);
         return true.into();
     }
+
+    println!("You need to press Ctrl+C to cancel");
     false.into()
 }
 
@@ -134,14 +133,19 @@ fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
     Ok(device_path)
 }
 
-fn send_write_request(device_path: &str, data: &str) -> Result<(), String> {
+enum RequestError {
+    IoError(String),
+    Cancelled,
+}
+
+fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError> {
     // Convert the device path to a wide string
     let device_path_wide: Vec<u16> = OsString::from(device_path)
         .encode_wide()
         .chain(Some(0))
         .collect();
 
-    // Open the device
+    // Open the device with FILE_FLAG_OVERLAPPED for asynchronous I/O
     let handle = match unsafe {
         CreateFileW(
             PCWSTR(device_path_wide.as_ptr()),
@@ -149,54 +153,86 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), String> {
             FILE_SHARE_MODE(0),
             null_mut(),
             OPEN_EXISTING,
-            FILE_FLAGS_AND_ATTRIBUTES(0),
+            FILE_FLAG_OVERLAPPED,
             None,
         )
     } {
         Ok(handle) => handle,
         Err(e) => {
-            return Err(format!("Failed to open device: {e}"));
+            return Err(RequestError::IoError(format!("Failed to open device: {e}")));
         }
     };
 
     if handle == HANDLE::default() {
-        return Err("Failed to open device".to_string());
+        return Err(RequestError::IoError("Failed to open device".to_string()));
     }
 
-    IO_HANDLE.lock().unwrap().replace(handle);
+    let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
 
     // Data to write to the device
     let data = data.as_bytes();
-    let mut bytes_written = 0;
 
-
-    // Send the write request
+    // Send the write request asynchronously
     let result = unsafe {
         WriteFile(
             handle,
             data.as_ptr() as *const _,
             data.len() as u32,
-            &mut bytes_written,
-            null_mut() as *mut OVERLAPPED,
+            null_mut(), // Bytes written will be retrieved via GetOverlappedResult
+            &mut overlapped,
         )
     };
 
-    *IO_HANDLE.lock().unwrap() = None;
-
-    // Close the device handle
-    unsafe {
-        CloseHandle(handle);
-    }
-
-    if result.as_bool() {
-        Ok(())
-    } else {
+    if !result.as_bool() {
         let error_code = unsafe { GetLastError() };
-        return Err(format!(
-            "Failed to write to the device. Error code: {}",
-            error_code.0
-        ));
+        if error_code.0 != ERROR_IO_PENDING.0 {
+            unsafe { CloseHandle(handle) };
+            return Err(RequestError::IoError(format!(
+                "Failed to write to the device. Error code: {}",
+                error_code.0
+            )));
+        }
     }
+
+    println!("Write request sent, waiting for completion...");
+    // Wait for the asynchronous operation to complete in a loop
+    let mut bytes_written = 0;
+    let res = loop {
+        let overlapped_result = unsafe {
+            GetOverlappedResult(
+                handle,
+                &mut overlapped,
+                &mut bytes_written,
+                false, // Non-blocking call
+            )
+        };
+
+        if overlapped_result.as_bool() {
+            break Ok(())
+        } else {
+            let error_code = unsafe { GetLastError() };
+            if error_code.0 == ERROR_IO_INCOMPLETE.0  {
+                if CANCEL_REQUESTED.load(Ordering::SeqCst) {
+                    unsafe { CancelIoEx(handle, &overlapped) };
+                    CANCEL_REQUESTED.store(false, Ordering::SeqCst);
+                } else {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            } else if error_code.0 == ERROR_OPERATION_ABORTED.0 {
+                unsafe { CloseHandle(handle) };
+                break Err(RequestError::Cancelled);
+            } else {
+                break Err(RequestError::IoError(format!(
+                    "Failed to write to the device. Error code: {}",
+                    error_code.0
+                )));
+            }
+        };
+    };
+
+    unsafe { CloseHandle(handle) };
+
+    res
 }
 
 fn parse_guid(guid_str: &str) -> Option<GUID> {
