@@ -93,9 +93,7 @@ impl CancellableMarkedRequest {
             call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr() as *mut _)
         };
 
-        if unmark_status != STATUS_CANCELLED {
-            self.0.complete(status);
-        }
+        self.0.complete(status);
     }
 }
 
