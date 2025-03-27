@@ -89,7 +89,14 @@ pub struct CancellableMarkedRequest(Request);
 
 impl CancellableMarkedRequest {
     pub fn complete(self, status: NtStatus) {
-        unsafe {
+        // Ignoring the return value because the call to this method can
+        // come from both the request cancellation, event where unmarking
+        // is not required, and from other places, where unmarking is
+        // required, and we know that it will fail in the former case.
+        // At this point know where the call came from so we just ignore
+        // the return value.
+        // TODO: Redesign this and make sure we can handle genuine errors
+        let _ = unsafe {
             call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr() as *mut _)
         };
 
