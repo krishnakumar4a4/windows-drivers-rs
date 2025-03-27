@@ -1,7 +1,7 @@
 use super::{error::NtStatus, io_queue::IoQueue, object::FrameworkObjectType, NtResult};
 use crate::{FrameworkObject, Rc};
 use wdf_macros::object_context;
-use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFREQUEST, STATUS_CANCELLED};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFREQUEST};
 
 pub struct Request(Rc);
 
@@ -89,7 +89,7 @@ pub struct CancellableMarkedRequest(Request);
 
 impl CancellableMarkedRequest {
     pub fn complete(self, status: NtStatus) {
-        let unmark_status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr() as *mut _)
         };
 
