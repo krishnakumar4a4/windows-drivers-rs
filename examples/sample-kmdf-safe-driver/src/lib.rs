@@ -20,7 +20,7 @@ struct QueueContext {
 fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), i32> {
     println!("Safe Rust driver entry called. Registry path: {registry_path}");
 
-    driver.on_evt_device_add(device_add);
+    driver.on_evt_device_add(evt_device_add);
 
     let control_guid = Guid::parse("cb94defb-592a-4509-8f2e-54f204929669").expect("GUID is valid");
     driver.enable_tracing(control_guid);
@@ -30,7 +30,7 @@ fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), i32> {
     Ok(())
 }
 
-fn device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
+fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     println!("Safe Rust device add called");
 
     let device = Device::create(device_init)?;
