@@ -1,13 +1,23 @@
-# Sample KMDF Rust Driver
+# Sample KMDF Safe Rust Driver
 
-## Pre-requisites
+A sample driver written in 100% safe Rust demonstrating request processing and cancellation.
+
+When a write request arrives it stores the request in context object and starts a timer. When the timer fires it completes the request. This simulates I/O processing on real hardware. At any time before its completion the request can be cancelled.
+
+This sample shows how Rust:
+- Enforces a lock on the request object and thus eliminates concurrency issues between completion and cancellation.
+- Removes the possibility of double completions through its unique ownership semantics
+- Ensures all locks are automatically released when the surrounding scope ends
+- Ensures that only the correct type of arguments are passed to functions with its stronger typing
+- Eliminates any possibility of null or dangling pointers anywhere in the code
+
+## Build
+### Prerequisites
 
 * WDK environment (either via eWDK or installed WDK)
 * LLVM
 
-## Build
-
-* Run `cargo make` in this directory
+Once prerequests are installed, run `cargo make` in this directory to build and package the driver.
 
 ## Install
 
@@ -32,10 +42,24 @@
 
 ## Test
 
-* To capture prints:
-  * Start [DebugView](https://learn.microsoft.com/en-us/sysinternals/downloads/debugview)
-    1. Enable `Capture Kernel`
-    2. Enable `Enable Verbose Kernel Output`
-  * Alternatively, you can see prints in an active Windbg session.
-    1. Attach WinDBG
-    2. `ed nt!Kd_DEFAULT_Mask 0xFFFFFFFF`
+In order to see the driver in action you will have to send I/O requests to it. For that use the `sample-test` application located at `../sample-test` relative to this directory.
+
+Build that app by executing `cargo build` and then run it as below:
+* Copy the binary `sample-test.exe` to the DUT
+* Make sure you have printing enabled in DebugView or WinDbg (see below for how to do that)
+* Run the command `sample-test.exe 2aa02ab1-c26e-431b-8efe-85ee8de102e4`.
+
+You will see the driver print that it has received the request and after a few seconds it will print lines indicating that the timer has fired and the request is completed
+
+If you want to cancel the rquest, press CTRL+C in the console where you are running `sample-test.exe` and you should see the driver indicating that the request was cancelled. The timer will still fire, but this time it will print that the request is already completed and not try to complete it.
+
+
+### Capturing Print Lines
+To capture prints:
+* Start [DebugView](https://learn.microsoft.com/en-us/sysinternals/downloads/debugview)
+  1. Enable `Capture Kernel`
+  2. Enable `Enable Verbose Kernel Output`
+* Alternatively, you can see prints in an active Windbg session.
+  1. Attach WinDbg
+  2. `ed nt!Kd_DEFAULT_Mask 0xFFFFFFFF`
+
