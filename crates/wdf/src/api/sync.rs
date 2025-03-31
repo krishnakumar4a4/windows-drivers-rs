@@ -12,11 +12,7 @@ pub struct SpinLock<T> {
 unsafe impl<T> Sync for SpinLock<T> where T: Send {}
 
 impl<T> SpinLock<T> {
-    /// Try to construct a WDF Spin Lock object with data
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if WDF fails to construct a timer. The error variant will contain a [`NTSTATUS`] of the failure. Full error documentation is available in the [WDFSpinLock Documentation](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfsync/nf-wdfsync-wdfspinlockcreate#return-value)
+    /// Construct a WDF Spin Lock object with data
     pub fn create(data: T) -> NtResult<Self> {
         let mut spin_lock = Self {
             wdf_spin_lock: core::ptr::null_mut(),
