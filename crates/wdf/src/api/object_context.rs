@@ -11,7 +11,7 @@ use wdk_sys::{
 pub struct WdfObjectContextTypeInfo(WDF_OBJECT_CONTEXT_TYPE_INFO);
 
 /// SAFETY: This type is NOT safe to send across threads
-/// but it never is not supposed to be used by the end user.
+/// but it will never be used by the end user.
 /// It is used only to declare a static during the setup
 /// of WDF object contexts and is only internally used by
 /// WDF wherein proper locks are taken to ensure thread safety.
