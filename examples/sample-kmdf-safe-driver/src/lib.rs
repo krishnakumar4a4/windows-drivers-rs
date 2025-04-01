@@ -47,7 +47,7 @@ struct QueueContext {
 /// It is a proc macro that generates the shim code which enables WDF
 /// to call this driver
 #[driver_entry]
-fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), i32> {
+fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), NtError> {
     println!("Safe Rust driver entry called. Registry path: {registry_path}");
 
     // Set up the device add callback

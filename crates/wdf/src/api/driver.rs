@@ -152,7 +152,7 @@ extern "C" fn driver_unload(driver: *mut DRIVER_OBJECT) {
 pub fn call_safe_driver_entry(
     driver: &mut DRIVER_OBJECT,
     registry_path: PCUNICODE_STRING,
-    safe_entry: fn(&mut Driver, &str) -> Result<(), i32>,
+    safe_entry: fn(&mut Driver, &str) -> Result<(), NtError>,
 ) -> NTSTATUS {
     driver.DriverUnload = Some(driver_unload);
 
@@ -195,9 +195,9 @@ pub fn call_safe_driver_entry(
     let registry_path = to_rust_str(registry_path);
     match safe_entry(&mut safe_driver, &registry_path) {
         Ok(_) => 0,
-        Err(nt_status) => {
+        Err(e) => {
             clean_up_tracing(driver);
-            nt_status
+            e.nt_status()
         }
     }
 }
