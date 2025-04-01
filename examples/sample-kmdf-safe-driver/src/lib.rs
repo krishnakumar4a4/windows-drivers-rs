@@ -102,7 +102,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
 
 // Callback that is called when a write request is received
 fn evt_io_write(queue: &mut IoQueue, request: Request, _length: usize) {
-    println!("evt_io_read called");
+    println!("evt_io_write called");
 
     if let Some(context) = QueueContext::get(&queue) {
         println!("Request processing started");
@@ -127,7 +127,7 @@ fn evt_io_write(queue: &mut IoQueue, request: Request, _length: usize) {
 // It cancels the request identified by the `token` parameter
 // if it is found in the context.
 fn evt_request_cancel(token: &RequestCancellationToken) {
-    println!("evt_cancel called");
+    println!("evt_request_cancel called");
 
     let queue = token.get_io_queue();
 
@@ -148,7 +148,7 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 // It fetches the request stored in the context
 // and completes it
 fn evt_timer(timer: &mut Timer) {
-    println!("evt_timer_func called");
+    println!("evt_timer called");
     if let Some(queue) = timer.get_parent_object::<IoQueue>() {
         let context = QueueContext::get(&queue).unwrap();
         let mut req = context.request.lock();
