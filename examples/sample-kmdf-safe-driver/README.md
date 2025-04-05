@@ -51,7 +51,7 @@ Build that app by executing `cargo build` and then run it as below:
 
 You will see the driver print that it has received the request and after a few seconds it will print lines indicating that the timer has fired and the request is completed
 
-If you want to cancel the rquest, press CTRL+C in the console where you are running `sample-test.exe` and you should see the driver indicating that the request was cancelled. The timer will still fire, but this time it will print that the request is already completed and not try to complete it.
+If you want to cancel the request, press CTRL+C in the console where you are running `sample-test.exe` and you should see the driver indicating that the request was cancelled. The timer will still fire, but this time it will print that the request is already completed and not try to complete it.
 
 
 ### Capturing Print Lines
