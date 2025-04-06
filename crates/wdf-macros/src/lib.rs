@@ -342,13 +342,13 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl #struct_name {
             fn attach(wdf_obj: &mut #wdf_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
                 unsafe {
-                    #wdf_crate_path::ObjectContext::attach(wdf_obj, context, &#static_name, #destroy_callback_name)
+                    #wdf_crate_path::attach_context(wdf_obj, context, &#static_name, #destroy_callback_name)
                 }
             }
 
             fn get(wdf_obj: &#wdf_obj_type_name) -> Option<&#struct_name> where Self: Sync {
                 unsafe {
-                    #wdf_crate_path::ObjectContext::get(wdf_obj, &#static_name)
+                    #wdf_crate_path::get_context(wdf_obj, &#static_name)
                 }
             }
         }
@@ -356,7 +356,7 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[allow(non_snake_case)]
         extern "C" fn #destroy_callback_name(wdf_obj: #wdf_crate_path::WDFOBJECT) {
             unsafe {
-                #wdf_crate_path::ObjectContext::drop::<#struct_name>(wdf_obj, &#static_name);
+                #wdf_crate_path::drop_context::<#struct_name>(wdf_obj, &#static_name);
             }
         }
     };
