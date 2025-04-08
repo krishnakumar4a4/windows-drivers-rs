@@ -3,7 +3,8 @@
 
 use crate::api::{init_attributes, FrameworkObject, NtResult};
 use wdk_sys::{
-    call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO
+    call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO,
+    WDF_OBJECT_ATTRIBUTES,
 };
 
 #[doc(hidden)]
@@ -33,21 +34,24 @@ impl WdfObjectContextTypeInfo {
 }
 
 
-pub unsafe fn attach_context<T: FrameworkObject, U: Sync>(
-    wdf_obj: &mut T,
+/// Trait that must be implemented by context types
+#[doc(hidden)]
+pub unsafe trait ObjectContext: Sync {
+    fn get_context_type_info(&self) -> &'static WdfObjectContextTypeInfo;
+    fn get_destroy_callback(&self) -> unsafe extern "C" fn(WDFOBJECT);
+}
+
+pub unsafe fn attach_context<T: FrameworkObject, U: ObjectContext>(
+    fw_obj: &mut T,
     context: U,
-    context_metadata: &'static WdfObjectContextTypeInfo,
-    destroy_callback: unsafe extern "C" fn(WDFOBJECT),
 ) -> NtResult<()> {
-    let mut attributes = init_attributes();
-    attributes.ContextTypeInfo = context_metadata.get_unique_type();
-    attributes.EvtDestroyCallback = Some(destroy_callback);
+    let mut attributes = init_attributes_for(&context);
 
     let mut wdf_context: *mut U = core::ptr::null_mut();
     let status = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfObjectAllocateContext,
-            wdf_obj.as_ptr() as _,
+            fw_obj.as_ptr() as _,
             &mut attributes as *mut _,
             core::mem::transmute(&mut wdf_context),
         )
@@ -67,14 +71,14 @@ pub unsafe fn attach_context<T: FrameworkObject, U: Sync>(
     Ok(())
 }
 
-pub fn get_context<'a, T: FrameworkObject, U: Sync>(
-    wdf_obj: &'a T,
+pub fn get_context<'a, T: FrameworkObject, U: ObjectContext>(
+    fw_obj: &'a T,
     context_metadata: &'static WdfObjectContextTypeInfo,
 ) -> Option<&'a U> {
     let state = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfObjectGetTypedContextWorker,
-            wdf_obj.as_ptr(),
+            fw_obj.as_ptr(),
             &context_metadata.0 as *const WDF_OBJECT_CONTEXT_TYPE_INFO
         ) as *mut U
     };
@@ -86,14 +90,14 @@ pub fn get_context<'a, T: FrameworkObject, U: Sync>(
     }
 }
 
-pub unsafe fn drop_context<U: Sync>(
-    wdf_obj: WDFOBJECT,
+pub unsafe fn drop_context<U: ObjectContext>(
+    fw_obj: WDFOBJECT,
     context_metadata: &'static WdfObjectContextTypeInfo,
 ) {
     let context = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfObjectGetTypedContextWorker,
-            wdf_obj,
+            fw_obj,
             &context_metadata.0 as *const WDF_OBJECT_CONTEXT_TYPE_INFO
         ) as *mut core::mem::ManuallyDrop<U>
     };
@@ -103,4 +107,11 @@ pub unsafe fn drop_context<U: Sync>(
             core::mem::ManuallyDrop::drop(&mut *context);
         }
     }
+}
+
+pub(crate) fn init_attributes_for<U: ObjectContext>(context: &U) -> WDF_OBJECT_ATTRIBUTES {
+    let mut attributes = init_attributes();
+    attributes.ContextTypeInfo = context.get_context_type_info().get_unique_type();
+    attributes.EvtDestroyCallback = Some(context.get_destroy_callback());
+    attributes
 }

@@ -2,12 +2,14 @@ use crate::api::{
     device::Device,
     error::NtError,
     object::{wdf_struct_size, FrameworkObject, FrameworkObjectType, Rc},
+    object_context::{ObjectContext, init_attributes_for},
     request::Request,
 };
 use wdf_macros::object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFQUEUE, WDFREQUEST,
     WDF_IO_QUEUE_CONFIG, WDF_IO_QUEUE_DISPATCH_TYPE, _WDF_IO_QUEUE_DISPATCH_TYPE,
+    WDF_OBJECT_ATTRIBUTES, WDF_NO_OBJECT_ATTRIBUTES
 };
 
 pub struct IoQueue(Rc);
@@ -22,14 +24,25 @@ impl IoQueue {
     }
 
     pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Self, NtError> {
+        unsafe { Self::create_with_attributes(device, queue_config, WDF_NO_OBJECT_ATTRIBUTES) }
+    }
+
+    pub fn create_with_context<T: ObjectContext>(device: &Device, queue_config: &IoQueueConfig, context: T) -> Result<Self, NtError> {
+        let size = core::mem::size_of::<T>() as u32;
+        let mut attributes = init_attributes_for(&context);
+        unsafe { Self::create_with_attributes(device, queue_config, &mut attributes) }
+    }
+
+    unsafe fn create_with_attributes(device: &Device, queue_config: &IoQueueConfig, attributes:*mut WDF_OBJECT_ATTRIBUTES) -> Result<Self, NtError> {
         let mut config = to_unsafe_config(&queue_config);
         let mut queue: WDFQUEUE = core::ptr::null_mut();
+
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoQueueCreate,
                 device.as_ptr() as *mut _,
                 &mut config as *mut _,
-                wdk_sys::WDF_NO_OBJECT_ATTRIBUTES,
+                attributes,
                 &mut queue,
             )
         };
