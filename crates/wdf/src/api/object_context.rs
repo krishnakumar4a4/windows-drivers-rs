@@ -51,8 +51,8 @@ pub unsafe fn attach_context<T: FrameworkObject, U: ObjectContext>(
     let status = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfObjectAllocateContext,
-            fw_obj.as_ptr() as _,
-            &mut attributes as *mut _,
+            fw_obj.as_ptr(),
+            &mut attributes,
             core::mem::transmute(&mut wdf_context),
         )
     };
@@ -79,7 +79,7 @@ pub fn get_context<'a, T: FrameworkObject, U: ObjectContext>(
         call_unsafe_wdf_function_binding!(
             WdfObjectGetTypedContextWorker,
             fw_obj.as_ptr(),
-            &context_metadata.0 as *const WDF_OBJECT_CONTEXT_TYPE_INFO
+            &context_metadata.0
         ) as *mut U
     };
 
@@ -98,7 +98,7 @@ pub unsafe fn drop_context<U: ObjectContext>(
         call_unsafe_wdf_function_binding!(
             WdfObjectGetTypedContextWorker,
             fw_obj,
-            &context_metadata.0 as *const WDF_OBJECT_CONTEXT_TYPE_INFO
+            &context_metadata.0
         ) as *mut core::mem::ManuallyDrop<U>
     };
 

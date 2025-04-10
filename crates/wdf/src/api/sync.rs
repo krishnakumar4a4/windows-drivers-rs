@@ -27,7 +27,7 @@ impl<T> SpinLock<T> {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfSpinLockCreate,
-                &mut attributes as *mut _,
+                &mut attributes,
                 &mut spin_lock.wdf_spin_lock,
             )
         };

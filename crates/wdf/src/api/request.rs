@@ -60,7 +60,7 @@ impl FrameworkObject for Request {
     }
 
     fn as_ptr(&self) -> WDFOBJECT {
-        self.0.inner() as *mut _
+        self.0.inner()
     }
 
     fn object_type() -> FrameworkObjectType {

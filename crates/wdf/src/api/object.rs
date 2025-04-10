@@ -8,7 +8,7 @@ macro_rules! call_ref_func {
             let file = file.as_bytes() as *const _ as *const i8;
             call_unsafe_wdf_function_binding!(
                 $func,
-                $obj as *mut _,
+                $obj,
                 core::ptr::null_mut(),
                 line!() as i32,
                 file

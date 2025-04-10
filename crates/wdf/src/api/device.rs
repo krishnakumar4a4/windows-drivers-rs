@@ -20,7 +20,7 @@ impl Device {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceCreate,
-                &mut device_init_ptr as *mut _,
+                &mut device_init_ptr,
                 WDF_NO_OBJECT_ATTRIBUTES,
                 &mut device,
             )
@@ -46,7 +46,7 @@ impl Device {
                 WdfDeviceCreateDeviceInterface,
                 self.as_ptr() as *mut _,
                 interaface_class_guid.as_lpcguid(),
-                unicode_ref_str.map_or(core::ptr::null(), |s| &s as _)
+                unicode_ref_str.map_or(core::ptr::null(), |s| &s)
             )
         };
 

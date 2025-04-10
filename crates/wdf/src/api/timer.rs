@@ -37,9 +37,9 @@ impl Timer {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfTimerCreate,
-                &mut config as *mut _,
-                &mut attributes as *mut _,
-                &mut timer as *mut _,
+                &mut config,
+                &mut attributes,
+                &mut timer,
             )
         };
 

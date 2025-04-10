@@ -44,7 +44,7 @@ macro_rules! get_routine_addr {
     ($name:expr, $callback_type:ty) => {{
         let name = to_utf16_buf($name);
         let mut name = to_unicode_string(name.as_ref());
-        let addr = unsafe { MmGetSystemRoutineAddress(&mut name as *mut _) };
+        let addr = unsafe { MmGetSystemRoutineAddress(&mut name) };
         unsafe { mem::transmute::<PVOID, Option<$callback_type>>(addr) }
     }};
 }
@@ -112,11 +112,11 @@ impl Driver {
                 etw_unregister,
             });
 
-            WPP_GLOBAL_Control = &mut (TRACING_CONFIG.as_mut().unwrap().control_block) as *mut _;
+            WPP_GLOBAL_Control = &mut (TRACING_CONFIG.as_mut().unwrap().control_block);
             WPP_RECORDER_INITIALIZED = WPP_GLOBAL_Control;
 
             WppAutoLogStart(
-                &mut (TRACING_CONFIG.as_mut().unwrap().control_block) as *mut _,
+                &mut (TRACING_CONFIG.as_mut().unwrap().control_block),
                 self.driver_obj,
                 self.reg_path,
             );
@@ -167,7 +167,7 @@ pub fn call_safe_driver_entry(
     let nt_status = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfDriverCreate,
-            driver as PDRIVER_OBJECT,
+            driver,
             registry_path,
             WDF_NO_OBJECT_ATTRIBUTES,
             &mut driver_config,
@@ -372,7 +372,7 @@ fn wpp_recorder_sf_ds(
     a1: i32,
     a2: LPCSTR,
 ) {
-    let a1_len = mem::size_of::<i32>() as usize;
+    let a1_len = mem::size_of::<i32>();
 
     let null_c_str = alloc::ffi::CString::new("NULL").unwrap();
     let a2 = if !a2.is_null() {

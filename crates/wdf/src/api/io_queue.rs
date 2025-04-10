@@ -28,7 +28,6 @@ impl IoQueue {
     }
 
     pub fn create_with_context<T: ObjectContext>(device: &Device, queue_config: &IoQueueConfig, context: T) -> Result<Self, NtError> {
-        let size = core::mem::size_of::<T>() as u32;
         let mut attributes = init_attributes_for(&context);
         unsafe { Self::create_with_attributes(device, queue_config, &mut attributes) }
     }
