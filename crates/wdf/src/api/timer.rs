@@ -73,7 +73,7 @@ impl Timer {
         unsafe { call_unsafe_wdf_function_binding!(WdfTimerStop, self.0, wait as u8) != 0 }
     }
 
-    pub fn get_parent_object<P: FrameworkObject>(&self) -> Option<P> {
+    pub fn get_parent<P: FrameworkObject>(&self) -> Option<P> {
         let parent = unsafe { call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.0) };
 
         if !parent.is_null() {
