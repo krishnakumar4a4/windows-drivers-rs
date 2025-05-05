@@ -17,14 +17,14 @@ macro_rules! call_ref_func {
     };
 }
 
-pub trait FrameworkObject {
+pub trait FrameworkHandle {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self;
     fn as_ptr(&self) -> WDFOBJECT;
-    fn object_type() -> FrameworkObjectType;
+    fn object_type() -> FrameworkHandleType;
 }
 
 #[derive(PartialEq)]
-pub enum FrameworkObjectType {
+pub enum FrameworkHandleType {
     Device,
     IoQueue,
     Request,

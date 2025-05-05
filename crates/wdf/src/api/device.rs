@@ -8,7 +8,7 @@ use wdk_sys::{
     WDF_NO_OBJECT_ATTRIBUTES,
 };
 
-use super::{FrameworkObject, FrameworkObjectType};
+use super::{FrameworkHandle, FrameworkHandleType};
 
 pub struct Device(WDFDEVICE);
 
@@ -58,7 +58,7 @@ impl Device {
     }
 }
 
-impl FrameworkObject for Device {
+impl FrameworkHandle for Device {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
         Self(inner as WDFDEVICE)
     }
@@ -67,8 +67,8 @@ impl FrameworkObject for Device {
         self.0 as WDFOBJECT
     }
 
-    fn object_type() -> FrameworkObjectType {
-        FrameworkObjectType::Device
+    fn object_type() -> FrameworkHandleType {
+        FrameworkHandleType::Device
     }
 }
 

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // License: MIT OR Apache-2.0
 
-use crate::api::{init_attributes, FrameworkObject, NtResult};
+use crate::api::{init_attributes, FrameworkHandle, NtResult};
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO,
     WDF_OBJECT_ATTRIBUTES,
@@ -41,7 +41,7 @@ pub unsafe trait ObjectContext: Sync {
     fn get_destroy_callback(&self) -> unsafe extern "C" fn(WDFOBJECT);
 }
 
-pub unsafe fn attach_context<T: FrameworkObject, U: ObjectContext>(
+pub unsafe fn attach_context<T: FrameworkHandle, U: ObjectContext>(
     fw_obj: &mut T,
     context: U,
 ) -> NtResult<()> {
@@ -71,7 +71,7 @@ pub unsafe fn attach_context<T: FrameworkObject, U: ObjectContext>(
     Ok(())
 }
 
-pub fn get_context<'a, T: FrameworkObject, U: ObjectContext>(
+pub fn get_context<'a, T: FrameworkHandle, U: ObjectContext>(
     fw_obj: &'a T,
     context_metadata: &'static WdfObjectContextTypeInfo,
 ) -> Option<&'a U> {

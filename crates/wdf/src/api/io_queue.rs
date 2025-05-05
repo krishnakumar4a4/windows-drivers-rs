@@ -1,7 +1,7 @@
 use crate::api::{
     device::Device,
     error::NtError,
-    object::{wdf_struct_size, FrameworkObject, FrameworkObjectType, Rc},
+    object::{wdf_struct_size, FrameworkHandle, FrameworkHandleType, Rc},
     object_context::{ObjectContext, init_attributes_for},
     request::Request,
 };
@@ -73,7 +73,7 @@ impl IoQueue {
     }
 }
 
-impl FrameworkObject for IoQueue {
+impl FrameworkHandle for IoQueue {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
         Self(unsafe { Rc::new(inner) })
     }
@@ -82,8 +82,8 @@ impl FrameworkObject for IoQueue {
         self.0.inner() as *mut _
     }
 
-    fn object_type() -> FrameworkObjectType {
-        FrameworkObjectType::IoQueue
+    fn object_type() -> FrameworkHandleType {
+        FrameworkHandleType::IoQueue
     }
 }
 

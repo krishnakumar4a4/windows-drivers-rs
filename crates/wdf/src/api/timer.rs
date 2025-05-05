@@ -1,6 +1,6 @@
 use crate::api::{
     error::NtResult,
-    object::{wdf_struct_size, FrameworkObject, FrameworkObjectType, init_attributes},
+    object::{wdf_struct_size, FrameworkHandle, FrameworkHandleType, init_attributes},
 };
 use core::{mem::MaybeUninit, ptr::null_mut, time::Duration};
 use wdf_macros::object_context;
@@ -18,7 +18,7 @@ use wdk_sys::{
 pub struct Timer(WDFTIMER);
 
 impl Timer {
-    pub fn create<'a, P: FrameworkObject>(config: &TimerConfig<'a, P>) -> NtResult<Self> {
+    pub fn create<'a, P: FrameworkHandle>(config: &TimerConfig<'a, P>) -> NtResult<Self> {
         let context = TimerContext {
             evt_timer_func: config.evt_timer_func,
             parent_type: P::object_type(),
@@ -73,7 +73,7 @@ impl Timer {
         unsafe { call_unsafe_wdf_function_binding!(WdfTimerStop, self.0, wait as u8) != 0 }
     }
 
-    pub fn get_parent<P: FrameworkObject>(&self) -> Option<P> {
+    pub fn get_parent<P: FrameworkHandle>(&self) -> Option<P> {
         let parent = unsafe { call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.0) };
 
         if !parent.is_null() {
@@ -90,7 +90,7 @@ impl Timer {
     }
 }
 
-impl FrameworkObject for Timer {
+impl FrameworkHandle for Timer {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
         Self(inner as WDFTIMER)
     }
@@ -99,8 +99,8 @@ impl FrameworkObject for Timer {
         self.0 as *mut _
     }
 
-    fn object_type() -> FrameworkObjectType {
-        FrameworkObjectType::Timer
+    fn object_type() -> FrameworkHandleType {
+        FrameworkHandleType::Timer
     }
 }
 
@@ -111,7 +111,7 @@ impl FrameworkObject for Timer {
 unsafe impl Send for Timer {}
 unsafe impl Sync for Timer {}
 
-pub struct TimerConfig<'a, P: FrameworkObject> {
+pub struct TimerConfig<'a, P: FrameworkHandle> {
     pub evt_timer_func: fn(&mut Timer),
     pub period: u32,
     pub tolerable_delay: u32,
@@ -119,7 +119,7 @@ pub struct TimerConfig<'a, P: FrameworkObject> {
     pub parent: &'a P,
 }
 
-impl<'a, P: FrameworkObject> TimerConfig<'a, P> {
+impl<'a, P: FrameworkHandle> TimerConfig<'a, P> {
     pub fn new_non_periodic(parent: &'a P, evt_timer_func: fn(&mut Timer)) -> Self {
         Self {
             evt_timer_func,
@@ -147,7 +147,7 @@ impl<'a, P: FrameworkObject> TimerConfig<'a, P> {
     }
 }
 
-impl<'a, P: FrameworkObject> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
+impl<'a, P: FrameworkHandle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
     fn from(config: &TimerConfig<'a, P>) -> Self {
         let mut wdf_config: WDF_TIMER_CONFIG = unsafe { MaybeUninit::zeroed().assume_init() };
 
@@ -165,7 +165,7 @@ impl<'a, P: FrameworkObject> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
 #[object_context(Timer)]
 struct TimerContext {
     evt_timer_func: fn(&mut Timer),
-    parent_type: FrameworkObjectType,
+    parent_type: FrameworkHandleType,
 }
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {
