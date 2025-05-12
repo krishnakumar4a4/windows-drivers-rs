@@ -321,6 +321,12 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         &format!("__WDF_{}_TYPE_INFO", struct_name),
         struct_name.span(),
     );
+
+    let cleanup_callback_name = Ident::new(
+        &format!("__evt_{}_cleanup", struct_name),
+        struct_name.span(),
+    );
+
     let destroy_callback_name = Ident::new(
         &format!("__evt_{}_destroy", struct_name),
         struct_name.span(),
@@ -344,6 +350,10 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
                 unsafe { &*core::ptr::addr_of!(#static_name) }
             }
 
+            fn get_cleanup_callback(&self) -> unsafe extern "C" fn(#wdf_crate_path::WDFOBJECT) {
+                #cleanup_callback_name
+            }
+
             fn get_destroy_callback(&self) -> unsafe extern "C" fn(#wdf_crate_path::WDFOBJECT) {
                 #destroy_callback_name
             }
@@ -364,10 +374,15 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         #[allow(non_snake_case)]
-        extern "C" fn #destroy_callback_name(wdf_obj: #wdf_crate_path::WDFOBJECT) {
+        extern "C" fn #cleanup_callback_name(wdf_obj: #wdf_crate_path::WDFOBJECT) {
             unsafe {
                 #wdf_crate_path::drop_context::<#struct_name>(wdf_obj, &#static_name);
             }
+        }
+
+        #[allow(non_snake_case)]
+        extern "C" fn #destroy_callback_name(wdf_obj: #wdf_crate_path::WDFOBJECT) {
+            // TODO: Check ref count here and bug check if it is greater than 0
         }
     };
 

@@ -39,6 +39,7 @@ impl WdfObjectContextTypeInfo {
 pub unsafe trait ObjectContext: Sync {
     fn get_context_type_info(&self) -> &'static WdfObjectContextTypeInfo;
     fn get_destroy_callback(&self) -> unsafe extern "C" fn(WDFOBJECT);
+    fn get_cleanup_callback(&self) -> unsafe extern "C" fn(WDFOBJECT);
 }
 
 pub unsafe fn attach_context<T: FrameworkHandle, U: ObjectContext>(
@@ -112,6 +113,7 @@ pub unsafe fn drop_context<U: ObjectContext>(
 pub(crate) fn init_attributes_for<U: ObjectContext>(context: &U) -> WDF_OBJECT_ATTRIBUTES {
     let mut attributes = init_attributes();
     attributes.ContextTypeInfo = context.get_context_type_info().get_unique_type();
+    attributes.EvtCleanupCallback = Some(context.get_cleanup_callback());
     attributes.EvtDestroyCallback = Some(context.get_destroy_callback());
     attributes
 }
