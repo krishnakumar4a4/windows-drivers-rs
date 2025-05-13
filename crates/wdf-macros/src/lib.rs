@@ -300,12 +300,12 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // Make sure the struct does not have any odd alignment requirements
     // that conflict with the alignment of the framework's allocations.
-    // This boils down to ensure that the struct does not have any
+    // This boils down to ensuring that the struct does not have any
     // repr atrributes other than Rust and transparent.
     // Note that for performance reasons we check the repr attributes
     // only on the struct itself and not on its fields.
-    // Alignment violations by the fields will be caught at run time in 
-    // the `attach` method 
+    // Alignment violations by the fields will be caught at run time
+    // while attaching the context
     for attr in &context_struct.attrs {
         if attr.path().is_ident("repr") {
             let res = attr.parse_nested_meta(|meta| {
