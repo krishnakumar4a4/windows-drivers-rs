@@ -297,17 +297,32 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
 
-    // TODO: Reject the type if its required alignment is greater than 16
-    // because WDF's allocators like ExAllocatePool2 use 16 byte aligntment
-    // for types smaller than PAGE_SIZE.
-    // We may not be able to determine the type's alignment in the proc macro.
-    // But as a proxy we can check if it has #[repr(align)] on it or if any of
-    // its fields have #[repr(align)] on them recursively and reject if that is
-    // the case. Any type that does not fail this check is guaranteed to have
-    // an alignment requirement of 16 or less and should therefore be safe
-    // If this proves to be too cumbersome, and it might, we can avoid checking
-    // in this macro and instead return an error at run time from the
-    // `attach` method if the alignment is greater than 16.
+
+    // Make sure the struct does not have any odd alignment requirements
+    // that conflict with the alignment of the framework's allocations.
+    // This boils down to ensure that the struct does not have any
+    // repr atrributes other than Rust and transparent.
+    // Note that for performance reasons we check the repr attributes
+    // only on the struct itself and not on its fields.
+    // Alignment violations by the fields will be caught at run time in 
+    // the `attach` method 
+    for attr in &context_struct.attrs {
+        if attr.path().is_ident("repr") {
+            let res = attr.parse_nested_meta(|meta| {
+                if !(meta.path.is_ident("Rust") || meta.path.is_ident("transparent")) {
+                    Err(Error::new_spanned(
+                        attr,
+                        "The `object_context` attribute cannot be applied to structs with reprs other than `Rust` or `transparent`",
+                    ))
+                } else {
+                    Ok(())
+                }
+            });
+            if let Err(err) = res {
+                return err.to_compile_error().into();
+            }
+        }
+    }
 
     // Establish wdf crate's path to use
     let wdf_crate_path = if std::env::var("CARGO_PKG_NAME").ok() == Some("wdf".to_string()) {

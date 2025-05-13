@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // License: MIT OR Apache-2.0
 
-use crate::api::{init_attributes, FrameworkHandle, NtResult};
+use crate::api::{init_attributes, FrameworkHandle, NtError, NtResult};
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO,
-    WDF_OBJECT_ATTRIBUTES,
+    WDF_OBJECT_ATTRIBUTES, STATUS_INVALID_PARAMETER,
 };
 
 #[doc(hidden)]
@@ -38,14 +38,26 @@ impl WdfObjectContextTypeInfo {
 #[doc(hidden)]
 pub unsafe trait ObjectContext: Sync {
     fn get_context_type_info(&self) -> &'static WdfObjectContextTypeInfo;
-    fn get_destroy_callback(&self) -> unsafe extern "C" fn(WDFOBJECT);
     fn get_cleanup_callback(&self) -> unsafe extern "C" fn(WDFOBJECT);
+    fn get_destroy_callback(&self) -> unsafe extern "C" fn(WDFOBJECT);
 }
+
+// Smallest possible alignment of allocations made by
+// WDF on 64 bit systems is 16 which comes form ExAllocatePool2
+// or HeapAlloc which are the two functions used by WDF.
+const MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT: usize = 16;
 
 pub unsafe fn attach_context<T: FrameworkHandle, U: ObjectContext>(
     fw_obj: &mut T,
     context: U,
 ) -> NtResult<()> {
+    // Make sure the aligntment requirement of the object struct
+    // does not exceed the minimum possible alignment of allocations
+    // made by the framework.
+    if core::mem::align_of::<U>() > MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT {
+        return Err(STATUS_INVALID_PARAMETER.into());
+    }
+
     let mut attributes = init_attributes_for(&context);
 
     let mut wdf_context: *mut U = core::ptr::null_mut();
