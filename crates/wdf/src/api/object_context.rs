@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // License: MIT OR Apache-2.0
 
-use crate::api::{init_attributes, FrameworkHandle, NtError, NtResult};
+use core::sync::atomic::{AtomicUsize, Ordering};
+use crate::api::{init_attributes, FrameworkHandle, NtResult};
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO,
-    WDF_OBJECT_ATTRIBUTES, STATUS_INVALID_PARAMETER,
+    STATUS_INVALID_PARAMETER,
 };
 
 #[doc(hidden)]
@@ -34,12 +35,33 @@ impl WdfObjectContextTypeInfo {
 }
 
 
-/// Trait that must be implemented by context types
 #[doc(hidden)]
-pub unsafe trait ObjectContext: Sync {
-    fn get_context_type_info(&self) -> &'static WdfObjectContextTypeInfo;
-    fn get_cleanup_callback(&self) -> unsafe extern "C" fn(WDFOBJECT);
-    fn get_destroy_callback(&self) -> unsafe extern "C" fn(WDFOBJECT);
+pub trait RefCount {
+    fn get(&self) -> &AtomicUsize;
+    fn get_mut(&mut self) -> &mut AtomicUsize;
+}
+
+/// Trait that must be implemented by primary context types
+trait PrimaryObjectContext {
+    fn get_ref_count(&self) -> usize;
+    fn increment_ref_count(&mut self);
+    fn decrement_ref_count(&mut self);
+}
+
+impl<T: RefCount> PrimaryObjectContext for T {
+    fn get_ref_count(&self) -> usize {
+        // TODO: check if we need Ordering::Acquire here 
+        self.get().load(Ordering::Relaxed) as usize
+    }
+
+    fn increment_ref_count(&mut self) {
+        self.get_mut().fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn decrement_ref_count(&mut self) {
+        // TODO: check if we need Ordering::Release here 
+        self.get_mut().fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 // Smallest possible alignment of allocations made by
@@ -47,9 +69,12 @@ pub unsafe trait ObjectContext: Sync {
 // or HeapAlloc which are the two functions used by WDF.
 const MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT: usize = 16;
 
-pub unsafe fn attach_context<T: FrameworkHandle, U: ObjectContext>(
+pub unsafe fn attach_context<T: FrameworkHandle, U: Sync>(
     fw_obj: &mut T,
     context: U,
+    context_type_info: &'static WdfObjectContextTypeInfo,
+    cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
+    destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>
 ) -> NtResult<()> {
     // Make sure the aligntment requirement of the object struct
     // does not exceed the minimum possible alignment of allocations
@@ -58,7 +83,12 @@ pub unsafe fn attach_context<T: FrameworkHandle, U: ObjectContext>(
         return Err(STATUS_INVALID_PARAMETER.into());
     }
 
-    let mut attributes = init_attributes_for(&context);
+    let mut attributes = init_attributes();
+    attributes.ContextTypeInfo = context_type_info.get_unique_type();
+    attributes.EvtCleanupCallback = Some(cleanup_callback);
+    if destroy_callback.is_some() {
+        attributes.EvtDestroyCallback = destroy_callback;
+    }
 
     let mut wdf_context: *mut U = core::ptr::null_mut();
     let status = unsafe {
@@ -84,7 +114,7 @@ pub unsafe fn attach_context<T: FrameworkHandle, U: ObjectContext>(
     Ok(())
 }
 
-pub fn get_context<'a, T: FrameworkHandle, U: ObjectContext>(
+pub fn get_context<'a, T: FrameworkHandle, U: Sync>(
     fw_obj: &'a T,
     context_metadata: &'static WdfObjectContextTypeInfo,
 ) -> Option<&'a U> {
@@ -103,7 +133,7 @@ pub fn get_context<'a, T: FrameworkHandle, U: ObjectContext>(
     }
 }
 
-pub unsafe fn drop_context<U: ObjectContext>(
+pub unsafe fn drop_context<U: Sync>(
     fw_obj: WDFOBJECT,
     context_metadata: &'static WdfObjectContextTypeInfo,
 ) {
@@ -122,10 +152,15 @@ pub unsafe fn drop_context<U: ObjectContext>(
     }
 }
 
-pub(crate) fn init_attributes_for<U: ObjectContext>(context: &U) -> WDF_OBJECT_ATTRIBUTES {
-    let mut attributes = init_attributes();
-    attributes.ContextTypeInfo = context.get_context_type_info().get_unique_type();
-    attributes.EvtCleanupCallback = Some(context.get_cleanup_callback());
-    attributes.EvtDestroyCallback = Some(context.get_destroy_callback());
-    attributes
+#[doc(hidden)]
+pub fn _bugcheck_if_ref_count_not_zero<T: FrameworkHandle, U: PrimaryObjectContext + Sync>(
+    fw_obj: WDFOBJECT,
+    context_metadata: &'static WdfObjectContextTypeInfo,
+) {
+    let fw_handle = unsafe { T::from_ptr(fw_obj) };
+    if let Some(context) = get_context::<T, U>(&fw_handle, context_metadata) {
+        if context.get_ref_count() != 0 {
+            // Todo: Bug check here
+        }
+    }
 }

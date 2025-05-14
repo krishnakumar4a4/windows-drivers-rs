@@ -1,11 +1,12 @@
+use core::sync::atomic::AtomicUsize;
 use crate::api::{
     device::Device,
     error::NtError,
     object::{wdf_struct_size, FrameworkHandle, FrameworkHandleType, Rc},
-    object_context::{ObjectContext, init_attributes_for},
+    object_context::RefCount,
     request::Request,
 };
-use wdf_macros::object_context;
+use wdf_macros::primary_object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFQUEUE, WDFREQUEST,
     WDF_IO_QUEUE_CONFIG, WDF_IO_QUEUE_DISPATCH_TYPE, _WDF_IO_QUEUE_DISPATCH_TYPE,
@@ -27,11 +28,6 @@ impl IoQueue {
         unsafe { Self::create_with_attributes(device, queue_config, WDF_NO_OBJECT_ATTRIBUTES) }
     }
 
-    pub fn create_with_context<T: ObjectContext>(device: &Device, queue_config: &IoQueueConfig, context: T) -> Result<Self, NtError> {
-        let mut attributes = init_attributes_for(&context);
-        unsafe { Self::create_with_attributes(device, queue_config, &mut attributes) }
-    }
-
     unsafe fn create_with_attributes(device: &Device, queue_config: &IoQueueConfig, attributes:*mut WDF_OBJECT_ATTRIBUTES) -> Result<Self, NtError> {
         let mut config = to_unsafe_config(&queue_config);
         let mut queue: WDFQUEUE = core::ptr::null_mut();
@@ -48,6 +44,7 @@ impl IoQueue {
 
         if NT_SUCCESS(status) {
             let handlers = RequestHandlers {
+                ref_count: AtomicUsize::new(0),
                 evt_io_default: queue_config.evt_io_default,
                 evt_io_read: queue_config.evt_io_read,
                 evt_io_write: queue_config.evt_io_write,
@@ -184,12 +181,23 @@ fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
     config
 }
 
-#[object_context(IoQueue)]
+#[primary_object_context(IoQueue)]
 struct RequestHandlers {
+    ref_count: AtomicUsize,
     evt_io_default: Option<fn(&mut IoQueue, Request)>,
     evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
     evt_io_write: Option<fn(&mut IoQueue, Request, usize)>,
     evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
+}
+
+impl RefCount for RequestHandlers {
+    fn get(&self) -> &AtomicUsize {
+        &self.ref_count
+    }
+
+    fn get_mut(&mut self) -> &mut AtomicUsize {
+        &mut self.ref_count
+    }
 }
 
 macro_rules! unsafe_request_handler {

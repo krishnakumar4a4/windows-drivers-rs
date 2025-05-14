@@ -4,6 +4,7 @@
 //! A collection of macros used for writing WDF-based drivers in safe Rust
 
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{parse_macro_input, Error, Ident, ItemFn, ItemImpl, ItemStruct};
 
@@ -281,20 +282,45 @@ pub fn driver_entry(_args: TokenStream, input: TokenStream) -> TokenStream {
 //     wrappers
 // }
 
-/// The attribute used to mark a struct as a WDF object context
+/// The attribute used to mark a struct as a framework object context
 #[proc_macro_attribute]
 pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let wdf_obj_type_name = parse_macro_input!(attr as Ident);
+    object_context_impl::<fn(&TokenStream2, &ItemStruct, &Ident, &Ident) -> TokenStream2>("object_context", attr, item, None)
+}
+
+/// The attribute used to mark a struct as a "primary" framework object context
+/// A primary object context is the one that we attach to a framework object in order
+/// to store the object's internal Rust specific state. It is not a context the user can access
+#[doc(hidden)]
+#[proc_macro_attribute]
+pub fn primary_object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
+    object_context_impl("primary_object_context", attr, item, Some(|wdf_crate_path: &TokenStream2, context_struct: &ItemStruct, fw_obj_type_name: &Ident, static_name: &Ident| {
+        let struct_name = &context_struct.ident;
+        let destroy_callback_name = Ident::new(
+            &format!("__evt_{}_destroy", struct_name),
+            struct_name.span(),
+        );
+
+        quote! {
+            #[allow(non_snake_case)]
+            extern "C" fn #destroy_callback_name(fw_obj: #wdf_crate_path::WDFOBJECT) {
+                let context_type_info = unsafe { &*core::ptr::addr_of!(#static_name) };
+                #wdf_crate_path::_bugcheck_if_ref_count_not_zero::<#fw_obj_type_name, #struct_name>(fw_obj, context_type_info);
+            }
+        }
+    }))
+}
+
+fn object_context_impl<F: Fn(&TokenStream2, &ItemStruct, &Ident, &Ident) -> TokenStream2>(attr_name: &str, attr: TokenStream, item: TokenStream, extend: Option<F>) -> TokenStream {
+    let fw_obj_type_name = parse_macro_input!(attr as Ident);
     let context_struct = parse_macro_input!(item as ItemStruct);
 
-    // Check if the struct is generic
+    // Make sure the struct is not generic
     if !context_struct.generics.params.is_empty() {
         return Error::new_spanned(
             context_struct,
-            "The `object_context` attribute cannot be applied to generic structs.",
-        )
-        .to_compile_error()
-        .into();
+            format!("The `{}` attribute cannot be applied to generic structs", attr_name),
+        ).to_compile_error().into();
     }
 
 
@@ -308,16 +334,17 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
     // while attaching the context
     for attr in &context_struct.attrs {
         if attr.path().is_ident("repr") {
-            let res = attr.parse_nested_meta(|meta| {
+           let res = attr.parse_nested_meta(|meta| {
                 if !(meta.path.is_ident("Rust") || meta.path.is_ident("transparent")) {
                     Err(Error::new_spanned(
                         attr,
-                        "The `object_context` attribute cannot be applied to structs with reprs other than `Rust` or `transparent`",
+                        format!("The `{}` attribute cannot be applied to structs with reprs other than `Rust` or `transparent`", attr_name)
                     ))
                 } else {
                     Ok(())
                 }
             });
+
             if let Err(err) = res {
                 return err.to_compile_error().into();
             }
@@ -342,12 +369,7 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         struct_name.span(),
     );
 
-    let destroy_callback_name = Ident::new(
-        &format!("__evt_{}_destroy", struct_name),
-        struct_name.span(),
-    );
-
-    let expanded = quote! {
+    let mut expanded = quote! {
         #context_struct
 
         #[allow(non_upper_case_globals)]
@@ -360,28 +382,15 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
             EvtDriverGetUniqueContextType: None,
         });
 
-        unsafe impl #wdf_crate_path::ObjectContext for #struct_name {
-            fn get_context_type_info(&self) -> &'static #wdf_crate_path::WdfObjectContextTypeInfo {
-                unsafe { &*core::ptr::addr_of!(#static_name) }
-            }
-
-            fn get_cleanup_callback(&self) -> unsafe extern "C" fn(#wdf_crate_path::WDFOBJECT) {
-                #cleanup_callback_name
-            }
-
-            fn get_destroy_callback(&self) -> unsafe extern "C" fn(#wdf_crate_path::WDFOBJECT) {
-                #destroy_callback_name
-            }
-        }
-
         impl #struct_name {
-            fn attach(fw_obj: &mut #wdf_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
+            fn attach(fw_obj: &mut #fw_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
                 unsafe {
-                    #wdf_crate_path::attach_context(fw_obj, context)
+                    let context_type_info = unsafe { &*core::ptr::addr_of!(#static_name) };
+                    #wdf_crate_path::attach_context(fw_obj, context, context_type_info, #cleanup_callback_name, None)
                 }
             }
 
-            fn get(fw_obj: &#wdf_obj_type_name) -> Option<&#struct_name> where Self: Sync {
+            fn get(fw_obj: &#fw_obj_type_name) -> Option<&#struct_name> where Self: Sync {
                 unsafe {
                     #wdf_crate_path::get_context(fw_obj, &#static_name)
                 }
@@ -389,17 +398,17 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         #[allow(non_snake_case)]
-        extern "C" fn #cleanup_callback_name(wdf_obj: #wdf_crate_path::WDFOBJECT) {
+        extern "C" fn #cleanup_callback_name(fw_obj: #wdf_crate_path::WDFOBJECT) {
             unsafe {
-                #wdf_crate_path::drop_context::<#struct_name>(wdf_obj, &#static_name);
+                #wdf_crate_path::drop_context::<#struct_name>(fw_obj, &#static_name);
             }
-        }
-
-        #[allow(non_snake_case)]
-        extern "C" fn #destroy_callback_name(wdf_obj: #wdf_crate_path::WDFOBJECT) {
-            // TODO: Check ref count here and bug check if it is greater than 0
         }
     };
 
-    TokenStream::from(expanded)
+    if let Some(extend) = extend {
+        let extended = extend(&wdf_crate_path, &context_struct, &fw_obj_type_name, &static_name);
+        expanded.extend(extended);
+    }
+
+    expanded.into()
 }
