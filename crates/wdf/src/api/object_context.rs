@@ -50,17 +50,19 @@ trait PrimaryObjectContext {
 
 impl<T: RefCount> PrimaryObjectContext for T {
     fn get_ref_count(&self) -> usize {
-        // TODO: check if we need Ordering::Acquire here 
-        self.get().load(Ordering::Relaxed) as usize
+        self.get().load(Ordering::Acquire) as usize
     }
 
     fn increment_ref_count(&mut self) {
-        self.get_mut().fetch_add(1, Ordering::Relaxed);
+        // TODO: consider using windows native InterlockedIncrement if
+        // it is faster than Rust-native atomic operations.
+        self.get_mut().fetch_add(1, Ordering::Release);
     }
 
     fn decrement_ref_count(&mut self) {
-        // TODO: check if we need Ordering::Release here 
-        self.get_mut().fetch_sub(1, Ordering::Relaxed);
+        // TODO: consider using windows native InterlockedDecrement if
+        // it is faster than Rust-native atomic operations.
+        self.get_mut().fetch_sub(1, Ordering::Release);
     }
 }
 
