@@ -1,13 +1,13 @@
 use super::{error::NtStatus, io_queue::IoQueue, object::FrameworkHandleType, NtResult};
-use crate::{FrameworkHandle, Rc};
+use crate::api::object::FrameworkHandle;
 use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFREQUEST};
 
-pub struct Request(Rc);
+pub struct Request(WDFREQUEST);
 
 impl Request {
     pub fn id(&self) -> usize {
-        self.0.inner() as usize
+        self.0 as usize
     }
 
     pub fn complete(self, status: NtStatus) {
@@ -56,11 +56,11 @@ impl Request {
 
 impl FrameworkHandle for Request {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
-        Self(unsafe { Rc::new(inner) })
+        Self(inner as *mut _)
     }
 
     fn as_ptr(&self) -> WDFOBJECT {
-        self.0.inner()
+        self.0 as *mut _
     }
 
     fn object_type() -> FrameworkHandleType {

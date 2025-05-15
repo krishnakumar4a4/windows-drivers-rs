@@ -1,21 +1,4 @@
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_OBJECT_ATTRIBUTES};
-
-macro_rules! call_ref_func {
-    ($func:ident, $obj:expr) => {
-        unsafe {
-            let file = file!();
-            let file = if file.is_ascii() { file } else { "UTF8_name" };
-            let file = file.as_bytes() as *const _ as *const i8;
-            call_unsafe_wdf_function_binding!(
-                $func,
-                $obj,
-                core::ptr::null_mut(),
-                line!() as i32,
-                file
-            );
-        }
-    };
-}
+use wdk_sys::{WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_OBJECT_ATTRIBUTES};
 
 pub trait FrameworkHandle {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self;
@@ -29,25 +12,6 @@ pub enum FrameworkHandleType {
     IoQueue,
     Request,
     Timer,
-}
-
-pub struct Rc(WDFOBJECT);
-
-impl Rc {
-    pub unsafe fn new(wdf_obj: WDFOBJECT) -> Self {
-        call_ref_func!(WdfObjectReferenceActual, wdf_obj);
-        Self(wdf_obj)
-    }
-
-    pub fn inner(&self) -> WDFOBJECT {
-        self.0
-    }
-}
-
-impl Drop for Rc {
-    fn drop(&mut self) {
-        call_ref_func!(WdfObjectDereferenceActual, self.0);
-    }
 }
 
 macro_rules! wdf_struct_size {

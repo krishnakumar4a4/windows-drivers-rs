@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::api::{
     device::Device,
     error::NtError,
-    object::{wdf_struct_size, FrameworkHandle, FrameworkHandleType, Rc},
+    object::{wdf_struct_size, FrameworkHandle, FrameworkHandleType},
     object_context::RefCount,
     request::Request,
 };
@@ -13,15 +13,11 @@ use wdk_sys::{
     WDF_OBJECT_ATTRIBUTES, WDF_NO_OBJECT_ATTRIBUTES
 };
 
-pub struct IoQueue(Rc);
+pub struct IoQueue(WDFQUEUE);
 
 impl IoQueue {
     pub(crate) unsafe fn new(inner: WDFQUEUE) -> Self {
-        Self(unsafe { Rc::new(inner as *mut _) })
-    }
-
-    pub fn as_ptr(&self) -> WDFOBJECT {
-        self.0.inner() as *mut _
+        Self::from_ptr(inner as WDFOBJECT)
     }
 
     pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Self, NtError> {
@@ -72,11 +68,11 @@ impl IoQueue {
 
 impl FrameworkHandle for IoQueue {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
-        Self(unsafe { Rc::new(inner) })
+        Self(inner as *mut _)
     }
 
     fn as_ptr(&self) -> WDFOBJECT {
-        self.0.inner() as *mut _
+        self.0 as *mut _
     }
 
     fn object_type() -> FrameworkHandleType {
