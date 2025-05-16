@@ -2,7 +2,7 @@
 // License: MIT OR Apache-2.0
 
 use core::sync::atomic::{AtomicUsize, Ordering};
-use crate::api::{init_attributes, Handle, NtResult};
+use crate::api::{init_attributes, Handle, RefCountedHandle, NtResult};
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO,
     STATUS_INVALID_PARAMETER,
@@ -44,31 +44,6 @@ pub trait RefCount {
 /// Marker trait that must be implemented by
 /// any types that are to be used as context objects
 pub unsafe trait ObjectContext: Sync {
-}
-
-/// Trait that must be implemented by primary context types
-trait PrimaryObjectContext {
-    fn get_ref_count(&self) -> usize;
-    fn increment_ref_count(&mut self);
-    fn decrement_ref_count(&mut self);
-}
-
-impl<T: RefCount> PrimaryObjectContext for T {
-    fn get_ref_count(&self) -> usize {
-        self.get().load(Ordering::Acquire) as usize
-    }
-
-    fn increment_ref_count(&mut self) {
-        // TODO: consider using windows native InterlockedIncrement if
-        // it is faster than Rust-native atomic operations.
-        self.get().fetch_add(1, Ordering::Release);
-    }
-
-    fn decrement_ref_count(&mut self) {
-        // TODO: consider using windows native InterlockedDecrement if
-        // it is faster than Rust-native atomic operations.
-        self.get().fetch_sub(1, Ordering::Release);
-    }
 }
 
 // Smallest possible alignment of allocations made by
@@ -160,23 +135,18 @@ pub unsafe fn drop_context<U: ObjectContext>(
 }
 
 #[doc(hidden)]
-pub fn _bugcheck_if_ref_count_not_zero<T: Handle, U: PrimaryObjectContext + ObjectContext>(
-    fw_obj: WDFOBJECT,
-    context_metadata: &'static WdfObjectContextTypeInfo,
-) {
-    let fw_handle = unsafe { T::from_ptr(fw_obj) };
-    if let Some(context) = get_context::<T, U>(&fw_handle, context_metadata) {
-        if context.get_ref_count() != 0 {
-            unsafe {
-                KeBugCheckEx(
-                    0xDEADDEAD,
-                    fw_obj as u64,
-                    context.get_ref_count() as u64,
-                    0,
-                    0,
-                );
-            }
-
+pub(crate) fn _bugcheck_if_ref_count_not_zero<T: RefCountedHandle, U: ObjectContext>(obj: WDFOBJECT) {
+    let handle = unsafe { T::from_ptr(obj) };
+    let ref_count = handle.get_ref_count().load(Ordering::Acquire);
+    if ref_count > 0 {
+        unsafe {
+            KeBugCheckEx(
+                0xDEADDEAD,
+                obj as u64,
+                ref_count as u64,
+                0,
+                0,
+            );
         }
     }
 }

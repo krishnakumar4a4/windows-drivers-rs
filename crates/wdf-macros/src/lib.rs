@@ -178,8 +178,7 @@ pub fn primary_object_context(attr: TokenStream, item: TokenStream) -> TokenStre
         quote! {
             #[allow(non_snake_case)]
             extern "C" fn #destroy_callback_name(fw_obj: #wdf_crate_path::WDFOBJECT) {
-                let context_type_info = unsafe { &*core::ptr::addr_of!(#static_name) };
-                #wdf_crate_path::_bugcheck_if_ref_count_not_zero::<#fw_obj_type_name, #struct_name>(fw_obj, context_type_info);
+                #wdf_crate_path::_bugcheck_if_ref_count_not_zero::<#fw_obj_type_name, #struct_name>(fw_obj);
             }
         }
     }))
