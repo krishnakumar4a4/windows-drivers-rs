@@ -6,6 +6,7 @@ use crate::api::{init_attributes, Handle, NtResult};
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO,
     STATUS_INVALID_PARAMETER,
+    ntddk::KeBugCheckEx,
 };
 
 #[doc(hidden)]
@@ -166,7 +167,16 @@ pub fn _bugcheck_if_ref_count_not_zero<T: Handle, U: PrimaryObjectContext + Obje
     let fw_handle = unsafe { T::from_ptr(fw_obj) };
     if let Some(context) = get_context::<T, U>(&fw_handle, context_metadata) {
         if context.get_ref_count() != 0 {
-            // Todo: Bug check here
+            unsafe {
+                KeBugCheckEx(
+                    0xDEADDEAD,
+                    fw_obj as u64,
+                    context.get_ref_count() as u64,
+                    0,
+                    0,
+                );
+            }
+
         }
     }
 }
