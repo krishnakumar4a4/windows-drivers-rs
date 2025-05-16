@@ -24,7 +24,6 @@ macro_rules! impl_ref_counted_handle {
         // Declare the tuple struct
         pub struct $obj(pub $raw_ptr);
 
-        // Implement Handle for the struct
         impl Handle for $obj {
             unsafe fn from_raw(inner: WDFOBJECT) -> Self {
                 let obj = Self(inner as $raw_ptr);
