@@ -1,18 +1,18 @@
 use core::sync::atomic::AtomicUsize;
 use wdk_sys::{WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_OBJECT_ATTRIBUTES};
 
-pub trait FrameworkHandle {
+pub trait Handle {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self;
     fn as_ptr(&self) -> WDFOBJECT;
-    fn object_type() -> FrameworkHandleType;
+    fn object_type() -> HandleType;
 }
 
-pub(crate) trait RefCountedFrameworkHandle: FrameworkHandle {
+pub(crate) trait RefCountedHandle: Handle {
     fn get_ref_count(&self) -> &AtomicUsize;
 }
 
 #[derive(PartialEq)]
-pub enum FrameworkHandleType {
+pub enum HandleType {
     Device,
     IoQueue,
     Request,
@@ -24,11 +24,11 @@ macro_rules! define_ref_counted_framework_handle {
         // Declare the tuple struct
         pub struct $obj(pub $raw_ptr);
 
-        // Implement FrameworkHandle for the struct
-        impl FrameworkHandle for $obj {
+        // Implement Handle for the struct
+        impl Handle for $obj {
             unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
                 let obj = Self(inner as $raw_ptr);
-                let ref_count = <Self as crate::api::object::RefCountedFrameworkHandle>::get_ref_count(&obj);
+                let ref_count = <Self as crate::api::object::RefCountedHandle>::get_ref_count(&obj);
                 ref_count.fetch_add(1, core::sync::atomic::Ordering::Release);
 
                 obj
@@ -38,12 +38,12 @@ macro_rules! define_ref_counted_framework_handle {
                 self.0 as WDFOBJECT
             }
 
-            fn object_type() -> crate::api::object::FrameworkHandleType {
-                crate::api::object::FrameworkHandleType::$obj
+            fn object_type() -> crate::api::object::HandleType {
+                crate::api::object::HandleType::$obj
             }
         }
 
-        impl crate::api::object::RefCountedFrameworkHandle for $obj {
+        impl crate::api::object::RefCountedHandle for $obj {
             fn get_ref_count(&self) -> &AtomicUsize {
                 let primary_context = <$primary_context>::get(self).expect("Failed to get primary context");
                 primary_context.get()
@@ -58,7 +58,7 @@ macro_rules! define_ref_counted_framework_handle {
 
         impl Drop for $obj {
             fn drop(&mut self) {
-                let ref_count = <Self as crate::api::object::RefCountedFrameworkHandle>::get_ref_count(self);
+                let ref_count = <Self as crate::api::object::RefCountedHandle>::get_ref_count(self);
                 ref_count.fetch_sub(1, core::sync::atomic::Ordering::Release);
             }
         }

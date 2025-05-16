@@ -2,7 +2,7 @@
 // License: MIT OR Apache-2.0
 
 use core::sync::atomic::{AtomicUsize, Ordering};
-use crate::api::{init_attributes, FrameworkHandle, NtResult};
+use crate::api::{init_attributes, Handle, NtResult};
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO,
     STATUS_INVALID_PARAMETER,
@@ -75,7 +75,7 @@ impl<T: RefCount> PrimaryObjectContext for T {
 // or HeapAlloc which are the two functions used by WDF.
 const MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT: usize = 16;
 
-pub unsafe fn attach_context<T: FrameworkHandle, U: ObjectContext>(
+pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
     fw_obj: &mut T,
     context: U,
     context_type_info: &'static WdfObjectContextTypeInfo,
@@ -120,7 +120,7 @@ pub unsafe fn attach_context<T: FrameworkHandle, U: ObjectContext>(
     Ok(())
 }
 
-pub fn get_context<'a, T: FrameworkHandle, U: ObjectContext>(
+pub fn get_context<'a, T: Handle, U: ObjectContext>(
     fw_obj: &'a T,
     context_metadata: &'static WdfObjectContextTypeInfo,
 ) -> Option<&'a U> {
@@ -159,7 +159,7 @@ pub unsafe fn drop_context<U: ObjectContext>(
 }
 
 #[doc(hidden)]
-pub fn _bugcheck_if_ref_count_not_zero<T: FrameworkHandle, U: PrimaryObjectContext + ObjectContext>(
+pub fn _bugcheck_if_ref_count_not_zero<T: Handle, U: PrimaryObjectContext + ObjectContext>(
     fw_obj: WDFOBJECT,
     context_metadata: &'static WdfObjectContextTypeInfo,
 ) {

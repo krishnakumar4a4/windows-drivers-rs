@@ -1,5 +1,5 @@
-use super::{error::NtStatus, io_queue::IoQueue, object::FrameworkHandleType, NtResult};
-use crate::api::object::FrameworkHandle;
+use super::{error::NtStatus, io_queue::IoQueue, object::HandleType, NtResult};
+use crate::api::object::Handle;
 use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFREQUEST};
 
@@ -54,7 +54,7 @@ impl Request {
     }
 }
 
-impl FrameworkHandle for Request {
+impl Handle for Request {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
         Self(inner as *mut _)
     }
@@ -63,8 +63,8 @@ impl FrameworkHandle for Request {
         self.0 as *mut _
     }
 
-    fn object_type() -> FrameworkHandleType {
-        FrameworkHandleType::Request
+    fn object_type() -> HandleType {
+        HandleType::Request
     }
 }
 
@@ -104,7 +104,7 @@ impl CancellableMarkedRequest {
     }
 }
 
-impl FrameworkHandle for CancellableMarkedRequest {
+impl Handle for CancellableMarkedRequest {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
         Self(unsafe { Request::from_ptr(inner) })
     }
@@ -113,8 +113,8 @@ impl FrameworkHandle for CancellableMarkedRequest {
         self.0.as_ptr()
     }
 
-    fn object_type() -> FrameworkHandleType {
-        FrameworkHandleType::Request
+    fn object_type() -> HandleType {
+        HandleType::Request
     }
 }
 

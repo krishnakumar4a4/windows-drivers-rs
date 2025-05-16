@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::api::{
     device::Device,
     error::NtError,
-    object::{define_ref_counted_framework_handle, wdf_struct_size, FrameworkHandle},
+    object::{define_ref_counted_framework_handle, wdf_struct_size, Handle},
     object_context::RefCount,
     request::Request,
 };
