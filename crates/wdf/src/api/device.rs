@@ -27,7 +27,7 @@ impl Device {
         };
 
         if NT_SUCCESS(status) {
-            Ok(unsafe { Self::from_ptr(device as *mut _) })
+            Ok(unsafe { Self::from_raw(device as *mut _) })
         } else {
             Err(status.into())
         }
@@ -44,7 +44,7 @@ impl Device {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceCreateDeviceInterface,
-                self.as_ptr() as *mut _,
+                self.as_raw() as *mut _,
                 interaface_class_guid.as_lpcguid(),
                 unicode_ref_str.map_or(core::ptr::null(), |s| &s)
             )
@@ -59,11 +59,11 @@ impl Device {
 }
 
 impl Handle for Device {
-    unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
+    unsafe fn from_raw(inner: WDFOBJECT) -> Self {
         Self(inner as WDFDEVICE)
     }
 
-    fn as_ptr(&self) -> WDFOBJECT {
+    fn as_raw(&self) -> WDFOBJECT {
         self.0 as WDFOBJECT
     }
 

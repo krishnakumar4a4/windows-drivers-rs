@@ -2,8 +2,8 @@ use core::sync::atomic::AtomicUsize;
 use wdk_sys::{WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_OBJECT_ATTRIBUTES};
 
 pub trait Handle {
-    unsafe fn from_ptr(inner: WDFOBJECT) -> Self;
-    fn as_ptr(&self) -> WDFOBJECT;
+    unsafe fn from_raw(inner: WDFOBJECT) -> Self;
+    fn as_raw(&self) -> WDFOBJECT;
     fn handle_type() -> HandleType;
 }
 
@@ -26,7 +26,7 @@ macro_rules! define_ref_counted_framework_handle {
 
         // Implement Handle for the struct
         impl Handle for $obj {
-            unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
+            unsafe fn from_raw(inner: WDFOBJECT) -> Self {
                 let obj = Self(inner as $raw_ptr);
                 let ref_count = <Self as crate::api::object::RefCountedHandle>::get_ref_count(&obj);
                 ref_count.fetch_add(1, core::sync::atomic::Ordering::Release);
@@ -34,7 +34,7 @@ macro_rules! define_ref_counted_framework_handle {
                 obj
             }
 
-            fn as_ptr(&self) -> WDFOBJECT {
+            fn as_raw(&self) -> WDFOBJECT {
                 self.0 as WDFOBJECT
             }
 
@@ -52,7 +52,7 @@ macro_rules! define_ref_counted_framework_handle {
 
         impl Clone for $obj {
             fn clone(&self) -> Self {
-                unsafe { Self::from_ptr(self.0 as WDFOBJECT) }
+                unsafe { Self::from_raw(self.0 as WDFOBJECT) }
             }
         }
 

@@ -76,7 +76,7 @@ pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
     let status = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfObjectAllocateContext,
-            fw_obj.as_ptr(),
+            fw_obj.as_raw(),
             &mut attributes,
             core::mem::transmute(&mut wdf_context),
         )
@@ -103,7 +103,7 @@ pub fn get_context<'a, T: Handle, U: ObjectContext>(
     let state = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfObjectGetTypedContextWorker,
-            fw_obj.as_ptr(),
+            fw_obj.as_raw(),
             &context_metadata.0
         ) as *mut U
     };
@@ -136,7 +136,7 @@ pub unsafe fn drop_context<U: ObjectContext>(
 
 #[doc(hidden)]
 pub(crate) fn _bugcheck_if_ref_count_not_zero<T: RefCountedHandle, U: ObjectContext>(obj: WDFOBJECT) {
-    let handle = unsafe { T::from_ptr(obj) };
+    let handle = unsafe { T::from_raw(obj) };
     let ref_count = handle.get_ref_count().load(Ordering::Acquire);
     if ref_count > 0 {
         unsafe {

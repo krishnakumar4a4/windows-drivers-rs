@@ -21,7 +21,7 @@ define_ref_counted_framework_handle!(
 
 impl IoQueue {
     pub(crate) unsafe fn new(inner: WDFQUEUE) -> Self {
-        Self::from_ptr(inner as WDFOBJECT)
+        Self::from_raw(inner as WDFOBJECT)
     }
 
     pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Self, NtError> {
@@ -35,7 +35,7 @@ impl IoQueue {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoQueueCreate,
-                device.as_ptr() as *mut _,
+                device.as_raw() as *mut _,
                 &mut config as *mut _,
                 attributes,
                 &mut queue,
@@ -64,8 +64,8 @@ impl IoQueue {
     pub fn get_device(&self) -> Device {
         unsafe {
             let device =
-                call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr() as *mut _);
-            Device::from_ptr(device as *mut _)
+                call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_raw() as *mut _);
+            Device::from_raw(device as *mut _)
         }
     }
 }
@@ -186,8 +186,8 @@ macro_rules! unsafe_request_handler {
     ($handler_name:ident $(, $arg_name:ident: $arg_type:ty)*) => {
         paste::paste! {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
-                let mut queue = unsafe { IoQueue::from_ptr(queue as *mut _) };
-                let request = unsafe { Request::from_ptr(request as *mut _) };
+                let mut queue = unsafe { IoQueue::from_raw(queue as *mut _) };
+                let request = unsafe { Request::from_raw(request as *mut _) };
                 if let Some(handlers) = IoQueueContext::get(&queue) {
                     if let Some(handler) = handlers.$handler_name {
                         handler(&mut queue, request $(, $arg_name)*);

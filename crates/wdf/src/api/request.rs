@@ -14,7 +14,7 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestComplete,
-                self.as_ptr() as *mut _,
+                self.as_raw() as *mut _,
                 status.nt_status()
             )
         };
@@ -37,7 +37,7 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestMarkCancelable,
-                self.as_ptr() as *mut _,
+                self.as_raw() as *mut _,
                 Some(__evt_request_cancel)
             );
         };
@@ -48,18 +48,18 @@ impl Request {
     pub fn get_io_queue(&self) -> IoQueue {
         unsafe {
             let queue =
-                call_unsafe_wdf_function_binding!(WdfRequestGetIoQueue, self.as_ptr() as *mut _);
+                call_unsafe_wdf_function_binding!(WdfRequestGetIoQueue, self.as_raw() as *mut _);
             IoQueue::new(queue)
         }
     }
 }
 
 impl Handle for Request {
-    unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
+    unsafe fn from_raw(inner: WDFOBJECT) -> Self {
         Self(inner as *mut _)
     }
 
-    fn as_ptr(&self) -> WDFOBJECT {
+    fn as_raw(&self) -> WDFOBJECT {
         self.0 as *mut _
     }
 
@@ -80,7 +80,7 @@ struct RequestContext {
 }
 
 pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
-    if let Some(context) = RequestContext::get(unsafe { &Request::from_ptr(request as _) }) {
+    if let Some(context) = RequestContext::get(unsafe { &Request::from_raw(request as _) }) {
         (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
     }
 }
@@ -97,7 +97,7 @@ impl CancellableMarkedRequest {
         // the return value.
         // TODO: Redesign this and make sure we can handle genuine errors
         let _ = unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr() as *mut _)
+            call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_raw() as *mut _)
         };
 
         self.0.complete(status);
@@ -105,12 +105,12 @@ impl CancellableMarkedRequest {
 }
 
 impl Handle for CancellableMarkedRequest {
-    unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
-        Self(unsafe { Request::from_ptr(inner) })
+    unsafe fn from_raw(inner: WDFOBJECT) -> Self {
+        Self(unsafe { Request::from_raw(inner) })
     }
 
-    fn as_ptr(&self) -> WDFOBJECT {
-        self.0.as_ptr()
+    fn as_raw(&self) -> WDFOBJECT {
+        self.0.as_raw()
     }
 
     fn handle_type() -> HandleType {
@@ -128,7 +128,7 @@ pub struct RequestCancellationToken(Request);
 
 impl RequestCancellationToken {
     unsafe fn new(inner: WDFOBJECT) -> Self {
-        Self(unsafe { Request::from_ptr(inner) })
+        Self(unsafe { Request::from_raw(inner) })
     }
 
     pub fn RequestId(&self) -> usize {

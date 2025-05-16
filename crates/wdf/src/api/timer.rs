@@ -27,7 +27,7 @@ impl Timer {
         let mut timer: WDFTIMER = null_mut();
 
         let mut attributes = init_attributes();
-        attributes.ParentObject = config.parent.as_ptr();
+        attributes.ParentObject = config.parent.as_raw();
 
         let mut config: WDF_TIMER_CONFIG = config.into();
 
@@ -44,7 +44,7 @@ impl Timer {
         };
 
         if NT_SUCCESS(status) {
-            let mut timer = unsafe { Timer::from_ptr(timer as *mut _) };
+            let mut timer = unsafe { Timer::from_raw(timer as *mut _) };
 
             TimerContext::attach(&mut timer, context)?;
 
@@ -79,7 +79,7 @@ impl Timer {
         if !parent.is_null() {
             TimerContext::get(&self).and_then(|context| {
                 if context.parent_type == P::handle_type() {
-                    Some(unsafe { P::from_ptr(parent) })
+                    Some(unsafe { P::from_raw(parent) })
                 } else {
                     None
                 }
@@ -91,11 +91,11 @@ impl Timer {
 }
 
 impl Handle for Timer {
-    unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
+    unsafe fn from_raw(inner: WDFOBJECT) -> Self {
         Self(inner as WDFTIMER)
     }
 
-    fn as_ptr(&self) -> *mut core::ffi::c_void {
+    fn as_raw(&self) -> *mut core::ffi::c_void {
         self.0 as *mut _
     }
 
@@ -169,7 +169,7 @@ struct TimerContext {
 }
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {
-    let mut timer = unsafe { Timer::from_ptr(timer as WDFOBJECT) };
+    let mut timer = unsafe { Timer::from_raw(timer as WDFOBJECT) };
     if let Some(timer_state) = TimerContext::get(&timer) {
         (timer_state.evt_timer_func)(&mut timer);
     }
