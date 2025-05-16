@@ -1,16 +1,21 @@
+use core::sync::atomic::AtomicUsize;
 use crate::api::{
     error::NtResult,
     guid::Guid,
+    object::{Handle, impl_ref_counted_handle},
     string::{to_unicode_string, to_utf16_buf},
 };
+use wdf_macros::primary_object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, WDFDEVICE, WDFDEVICE_INIT, WDFOBJECT, WDF_NO_HANDLE,
     WDF_NO_OBJECT_ATTRIBUTES,
 };
 
-use super::{Handle, HandleType};
-
-pub struct Device(WDFDEVICE);
+impl_ref_counted_handle!(
+    Device,
+    WDFDEVICE,
+    DeviceContext
+);
 
 impl Device {
     pub fn create(device_init: &mut DeviceInit) -> NtResult<Self> {
@@ -58,20 +63,6 @@ impl Device {
     }
 }
 
-impl Handle for Device {
-    unsafe fn from_raw(inner: WDFOBJECT) -> Self {
-        Self(inner as WDFDEVICE)
-    }
-
-    fn as_raw(&self) -> WDFOBJECT {
-        self.0 as WDFOBJECT
-    }
-
-    fn handle_type() -> HandleType {
-        HandleType::Device
-    }
-}
-
 pub struct DeviceInit(*mut WDFDEVICE_INIT);
 
 impl DeviceInit {
@@ -82,4 +73,9 @@ impl DeviceInit {
     pub fn as_ptr_mut(&self) -> *mut WDFDEVICE_INIT {
         self.0
     }
+}
+
+#[primary_object_context(Device)]
+struct DeviceContext {
+    ref_count: AtomicUsize,
 }
