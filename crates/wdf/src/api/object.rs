@@ -19,7 +19,7 @@ pub enum HandleType {
     Timer,
 }
 
-macro_rules! define_ref_counted_framework_handle {
+macro_rules! impl_ref_counted_handle {
     ($obj:ident, $raw_ptr:ty, $primary_context:ty) => {
         // Declare the tuple struct
         pub struct $obj(pub $raw_ptr);
@@ -83,7 +83,7 @@ macro_rules! wdf_struct_size {
     }};
 }
 
-pub(crate) use define_ref_counted_framework_handle;
+pub(crate) use impl_ref_counted_handle;
 pub(crate) use wdf_struct_size;
 
 pub fn init_attributes() -> WDF_OBJECT_ATTRIBUTES {

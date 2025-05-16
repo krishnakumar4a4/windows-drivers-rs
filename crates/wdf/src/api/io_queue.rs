@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::api::{
     device::Device,
     error::NtError,
-    object::{define_ref_counted_framework_handle, wdf_struct_size, Handle},
+    object::{impl_ref_counted_handle, wdf_struct_size, Handle},
     object_context::RefCount,
     request::Request,
 };
@@ -13,7 +13,7 @@ use wdk_sys::{
     WDF_OBJECT_ATTRIBUTES, WDF_NO_OBJECT_ATTRIBUTES
 };
 
-define_ref_counted_framework_handle!(
+impl_ref_counted_handle!(
     IoQueue,
     WDFQUEUE,
     IoQueueContext
