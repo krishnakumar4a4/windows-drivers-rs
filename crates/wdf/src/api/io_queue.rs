@@ -3,7 +3,6 @@ use crate::api::{
     device::Device,
     error::NtError,
     object::{impl_ref_counted_handle, wdf_struct_size, Handle},
-    object_context::RefCount,
     request::Request,
 };
 use wdf_macros::primary_object_context;
@@ -174,12 +173,6 @@ struct IoQueueContext {
     evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
     evt_io_write: Option<fn(&mut IoQueue, Request, usize)>,
     evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
-}
-
-impl RefCount for IoQueueContext {
-    fn get(&self) -> &AtomicUsize {
-        &self.ref_count
-    }
 }
 
 macro_rules! unsafe_request_handler {

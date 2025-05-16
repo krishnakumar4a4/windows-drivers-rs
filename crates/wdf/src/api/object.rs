@@ -45,7 +45,7 @@ macro_rules! impl_ref_counted_handle {
         impl crate::api::object::RefCountedHandle for $obj {
             fn get_ref_count(&self) -> &AtomicUsize {
                 let primary_context = <$primary_context>::get(self).expect("Failed to get primary context");
-                primary_context.get()
+                &primary_context.ref_count
             }
         }
 

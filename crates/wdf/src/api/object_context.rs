@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // License: MIT OR Apache-2.0
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::Ordering;
 use crate::api::{init_attributes, Handle, RefCountedHandle, NtResult};
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO,
@@ -33,12 +33,6 @@ impl WdfObjectContextTypeInfo {
         // declared as repr(transparent)
         unsafe { *inner }.UniqueType
     }
-}
-
-
-#[doc(hidden)]
-pub trait RefCount {
-    fn get(&self) -> &AtomicUsize;
 }
 
 /// Marker trait that must be implemented by
