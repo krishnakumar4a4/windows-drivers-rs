@@ -1,9 +1,10 @@
+use core::sync::atomic::AtomicUsize;
 use crate::api::{
     error::NtResult,
-    object::{wdf_struct_size, Handle, HandleType, init_attributes},
+    object::{wdf_struct_size, impl_ref_counted_handle, Handle, HandleType, init_attributes},
 };
 use core::{mem::MaybeUninit, ptr::null_mut, time::Duration};
-use wdf_macros::object_context;
+use wdf_macros::primary_object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFTIMER, WDF_TIMER_CONFIG,
 };
@@ -14,12 +15,16 @@ use wdk_sys::{
 // use_high_resolution_timer is set to true which would
 // crash the system.
 
-/// A WDF timer
-pub struct Timer(WDFTIMER);
+impl_ref_counted_handle!(
+    Timer,
+    WDFTIMER,
+    TimerContext
+);
 
 impl Timer {
     pub fn create<'a, P: Handle>(config: &TimerConfig<'a, P>) -> NtResult<Self> {
         let context = TimerContext {
+            ref_count: AtomicUsize::new(0),
             evt_timer_func: config.evt_timer_func,
             parent_type: P::handle_type(),
         };
@@ -90,19 +95,6 @@ impl Timer {
     }
 }
 
-impl Handle for Timer {
-    unsafe fn from_raw(inner: WDFOBJECT) -> Self {
-        Self(inner as WDFTIMER)
-    }
-
-    fn as_raw(&self) -> *mut core::ffi::c_void {
-        self.0 as *mut _
-    }
-
-    fn handle_type() -> HandleType {
-        HandleType::Timer
-    }
-}
 
 /// SAFETY: This is safe because all the WDF functions
 /// that operate on WDFTIMER do so in a thread-safe manner.
@@ -162,8 +154,9 @@ impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
     }
 }
 
-#[object_context(Timer)]
+#[primary_object_context(Timer)]
 struct TimerContext {
+    ref_count: AtomicUsize,
     evt_timer_func: fn(&mut Timer),
     parent_type: HandleType,
 }
