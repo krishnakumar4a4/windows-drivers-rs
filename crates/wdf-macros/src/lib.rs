@@ -4,7 +4,6 @@
 //! A collection of macros used for writing WDF-based drivers in safe Rust
 
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{parse_macro_input, Error, Ident, ItemFn, ItemImpl, ItemStruct};
 
@@ -159,7 +158,7 @@ pub fn driver_entry(_args: TokenStream, input: TokenStream) -> TokenStream {
 /// The attribute used to mark a struct as a framework object context
 #[proc_macro_attribute]
 pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
-    object_context_impl::<fn(&TokenStream2, &ItemStruct, &Ident, &Ident) -> TokenStream2>("object_context", attr, item, None)
+    object_context_impl("object_context", attr, item, false)
 }
 
 /// The attribute used to mark a struct as a "primary" framework object context
@@ -168,23 +167,10 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[doc(hidden)]
 #[proc_macro_attribute]
 pub fn primary_object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
-    object_context_impl("primary_object_context", attr, item, Some(|wdf_crate_path: &TokenStream2, context_struct: &ItemStruct, fw_obj_type_name: &Ident, static_name: &Ident| {
-        let struct_name = &context_struct.ident;
-        let destroy_callback_name = Ident::new(
-            &format!("__evt_{}_destroy", struct_name),
-            struct_name.span(),
-        );
-
-        quote! {
-            #[allow(non_snake_case)]
-            extern "C" fn #destroy_callback_name(fw_obj: #wdf_crate_path::WDFOBJECT) {
-                #wdf_crate_path::_bugcheck_if_ref_count_not_zero::<#fw_obj_type_name, #struct_name>(fw_obj);
-            }
-        }
-    }))
+    object_context_impl("primary_object_context", attr, item, true)
 }
 
-fn object_context_impl<F: Fn(&TokenStream2, &ItemStruct, &Ident, &Ident) -> TokenStream2>(attr_name: &str, attr: TokenStream, item: TokenStream, extend: Option<F>) -> TokenStream {
+fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, parent_is_ref_counted: bool) -> TokenStream {
     let fw_obj_type_name = parse_macro_input!(attr as Ident);
     let context_struct = parse_macro_input!(item as ItemStruct);
 
@@ -242,6 +228,17 @@ fn object_context_impl<F: Fn(&TokenStream2, &ItemStruct, &Ident, &Ident) -> Toke
         struct_name.span(),
     );
 
+    let destroy_callback_name = Ident::new(
+        &format!("__evt_{}_destroy", struct_name),
+        struct_name.span(),
+    );
+
+    let attach_param_destroy_callback_name = if parent_is_ref_counted {
+        quote! { Some(#destroy_callback_name) }
+    } else {
+        quote! { None }
+    };
+
     let mut expanded = quote! {
         #context_struct
 
@@ -262,7 +259,7 @@ fn object_context_impl<F: Fn(&TokenStream2, &ItemStruct, &Ident, &Ident) -> Toke
             fn attach(fw_obj: &mut #fw_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
                 unsafe {
                     let context_type_info = unsafe { &*core::ptr::addr_of!(#static_name) };
-                    #wdf_crate_path::attach_context(fw_obj, context, context_type_info, #cleanup_callback_name, None)
+                    #wdf_crate_path::attach_context(fw_obj, context, context_type_info, #cleanup_callback_name, #attach_param_destroy_callback_name)
                 }
             }
 
@@ -281,8 +278,14 @@ fn object_context_impl<F: Fn(&TokenStream2, &ItemStruct, &Ident, &Ident) -> Toke
         }
     };
 
-    if let Some(extend) = extend {
-        let extended = extend(&wdf_crate_path, &context_struct, &fw_obj_type_name, &static_name);
+    if parent_is_ref_counted {
+        let extended = quote! {
+            #[allow(non_snake_case)]
+            extern "C" fn #destroy_callback_name(fw_obj: #wdf_crate_path::WDFOBJECT) {
+                #wdf_crate_path::_bugcheck_if_ref_count_not_zero::<#fw_obj_type_name, #struct_name>(fw_obj);
+            }
+        };
+
         expanded.extend(extended);
     }
 
