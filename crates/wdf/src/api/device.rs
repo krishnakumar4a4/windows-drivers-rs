@@ -67,7 +67,7 @@ impl Handle for Device {
         self.0 as WDFOBJECT
     }
 
-    fn object_type() -> HandleType {
+    fn handle_type() -> HandleType {
         HandleType::Device
     }
 }

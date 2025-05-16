@@ -21,7 +21,7 @@ impl Timer {
     pub fn create<'a, P: Handle>(config: &TimerConfig<'a, P>) -> NtResult<Self> {
         let context = TimerContext {
             evt_timer_func: config.evt_timer_func,
-            parent_type: P::object_type(),
+            parent_type: P::handle_type(),
         };
 
         let mut timer: WDFTIMER = null_mut();
@@ -78,7 +78,7 @@ impl Timer {
 
         if !parent.is_null() {
             TimerContext::get(&self).and_then(|context| {
-                if context.parent_type == P::object_type() {
+                if context.parent_type == P::handle_type() {
                     Some(unsafe { P::from_ptr(parent) })
                 } else {
                     None
@@ -99,7 +99,7 @@ impl Handle for Timer {
         self.0 as *mut _
     }
 
-    fn object_type() -> HandleType {
+    fn handle_type() -> HandleType {
         HandleType::Timer
     }
 }

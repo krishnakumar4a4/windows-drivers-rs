@@ -63,7 +63,7 @@ impl Handle for Request {
         self.0 as *mut _
     }
 
-    fn object_type() -> HandleType {
+    fn handle_type() -> HandleType {
         HandleType::Request
     }
 }
@@ -113,7 +113,7 @@ impl Handle for CancellableMarkedRequest {
         self.0.as_ptr()
     }
 
-    fn object_type() -> HandleType {
+    fn handle_type() -> HandleType {
         HandleType::Request
     }
 }

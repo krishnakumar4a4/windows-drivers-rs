@@ -4,7 +4,7 @@ use wdk_sys::{WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_O
 pub trait Handle {
     unsafe fn from_ptr(inner: WDFOBJECT) -> Self;
     fn as_ptr(&self) -> WDFOBJECT;
-    fn object_type() -> HandleType;
+    fn handle_type() -> HandleType;
 }
 
 pub(crate) trait RefCountedHandle: Handle {
@@ -38,7 +38,7 @@ macro_rules! define_ref_counted_framework_handle {
                 self.0 as WDFOBJECT
             }
 
-            fn object_type() -> crate::api::object::HandleType {
+            fn handle_type() -> crate::api::object::HandleType {
                 crate::api::object::HandleType::$obj
             }
         }
