@@ -256,6 +256,9 @@ fn object_context_impl<F: Fn(&TokenStream2, &ItemStruct, &Ident, &Ident) -> Toke
             EvtDriverGetUniqueContextType: None,
         });
 
+        unsafe impl #wdf_crate_path::ObjectContext for #struct_name {
+        }
+
         impl #struct_name {
             fn attach(fw_obj: &mut #fw_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
                 unsafe {
