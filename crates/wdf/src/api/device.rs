@@ -32,7 +32,9 @@ impl Device {
         };
 
         if NT_SUCCESS(status) {
-            Ok(unsafe { Self::from_raw(device as *mut _) })
+            let mut device = unsafe { Self::from_raw(device as *mut _) };
+            DeviceContext::attach(&mut device, DeviceContext { ref_count: AtomicUsize::new(0) })?;
+            Ok(device)
         } else {
             Err(status.into())
         }
