@@ -24,7 +24,7 @@ macro_rules! impl_ref_counted_handle {
         // Declare the tuple struct
         pub struct $obj(pub $raw_ptr);
 
-        impl Handle for $obj {
+        impl crate::api::object::Handle for $obj {
             unsafe fn from_raw(inner: WDFOBJECT) -> Self {
                 let obj = Self(inner as $raw_ptr);
                 let ref_count = <Self as crate::api::object::RefCountedHandle>::get_ref_count(&obj);
