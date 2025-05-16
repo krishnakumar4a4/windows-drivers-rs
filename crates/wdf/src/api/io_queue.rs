@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::api::{
     device::Device,
     error::NtError,
-    object::{wdf_struct_size, FrameworkHandle, FrameworkHandleType},
+    object::{define_ref_counted_framework_handle, wdf_struct_size, FrameworkHandle},
     object_context::RefCount,
     request::Request,
 };
@@ -13,7 +13,11 @@ use wdk_sys::{
     WDF_OBJECT_ATTRIBUTES, WDF_NO_OBJECT_ATTRIBUTES
 };
 
-pub struct IoQueue(WDFQUEUE);
+define_ref_counted_framework_handle!(
+    IoQueue,
+    WDFQUEUE,
+    IoQueueContext
+);
 
 impl IoQueue {
     pub(crate) unsafe fn new(inner: WDFQUEUE) -> Self {
@@ -39,7 +43,7 @@ impl IoQueue {
         };
 
         if NT_SUCCESS(status) {
-            let handlers = RequestHandlers {
+            let ctxt = IoQueueContext {
                 ref_count: AtomicUsize::new(0),
                 evt_io_default: queue_config.evt_io_default,
                 evt_io_read: queue_config.evt_io_read,
@@ -49,7 +53,7 @@ impl IoQueue {
 
             let mut queue = unsafe { IoQueue::new(queue) };
 
-            RequestHandlers::attach(&mut queue, handlers)?;
+            IoQueueContext::attach(&mut queue, ctxt)?;
 
             Ok(queue)
         } else {
@@ -63,20 +67,6 @@ impl IoQueue {
                 call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr() as *mut _);
             Device::from_ptr(device as *mut _)
         }
-    }
-}
-
-impl FrameworkHandle for IoQueue {
-    unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
-        Self(inner as *mut _)
-    }
-
-    fn as_ptr(&self) -> WDFOBJECT {
-        self.0 as *mut _
-    }
-
-    fn object_type() -> FrameworkHandleType {
-        FrameworkHandleType::IoQueue
     }
 }
 
@@ -178,7 +168,7 @@ fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
 }
 
 #[primary_object_context(IoQueue)]
-struct RequestHandlers {
+struct IoQueueContext {
     ref_count: AtomicUsize,
     evt_io_default: Option<fn(&mut IoQueue, Request)>,
     evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
@@ -186,13 +176,9 @@ struct RequestHandlers {
     evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
 }
 
-impl RefCount for RequestHandlers {
+impl RefCount for IoQueueContext {
     fn get(&self) -> &AtomicUsize {
         &self.ref_count
-    }
-
-    fn get_mut(&mut self) -> &mut AtomicUsize {
-        &mut self.ref_count
     }
 }
 
@@ -202,7 +188,7 @@ macro_rules! unsafe_request_handler {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
                 let mut queue = unsafe { IoQueue::from_ptr(queue as *mut _) };
                 let request = unsafe { Request::from_ptr(request as *mut _) };
-                if let Some(handlers) = RequestHandlers::get(&queue) {
+                if let Some(handlers) = IoQueueContext::get(&queue) {
                     if let Some(handler) = handlers.$handler_name {
                         handler(&mut queue, request $(, $arg_name)*);
                         return;

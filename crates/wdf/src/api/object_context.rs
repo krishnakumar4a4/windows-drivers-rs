@@ -38,7 +38,6 @@ impl WdfObjectContextTypeInfo {
 #[doc(hidden)]
 pub trait RefCount {
     fn get(&self) -> &AtomicUsize;
-    fn get_mut(&mut self) -> &mut AtomicUsize;
 }
 
 /// Marker trait that must be implemented by
@@ -61,13 +60,13 @@ impl<T: RefCount> PrimaryObjectContext for T {
     fn increment_ref_count(&mut self) {
         // TODO: consider using windows native InterlockedIncrement if
         // it is faster than Rust-native atomic operations.
-        self.get_mut().fetch_add(1, Ordering::Release);
+        self.get().fetch_add(1, Ordering::Release);
     }
 
     fn decrement_ref_count(&mut self) {
         // TODO: consider using windows native InterlockedDecrement if
         // it is faster than Rust-native atomic operations.
-        self.get_mut().fetch_sub(1, Ordering::Release);
+        self.get().fetch_sub(1, Ordering::Release);
     }
 }
 

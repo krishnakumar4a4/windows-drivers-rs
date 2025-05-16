@@ -1,3 +1,4 @@
+use core::sync::atomic::AtomicUsize;
 use wdk_sys::{WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_OBJECT_ATTRIBUTES};
 
 pub trait FrameworkHandle {
@@ -6,12 +7,63 @@ pub trait FrameworkHandle {
     fn object_type() -> FrameworkHandleType;
 }
 
+pub(crate) trait RefCountedFrameworkHandle: FrameworkHandle {
+    fn get_ref_count(&self) -> &AtomicUsize;
+}
+
 #[derive(PartialEq)]
 pub enum FrameworkHandleType {
     Device,
     IoQueue,
     Request,
     Timer,
+}
+
+macro_rules! define_ref_counted_framework_handle {
+    ($obj:ident, $raw_ptr:ty, $primary_context:ty) => {
+        // Declare the tuple struct
+        pub struct $obj(pub $raw_ptr);
+
+        // Implement FrameworkHandle for the struct
+        impl FrameworkHandle for $obj {
+            unsafe fn from_ptr(inner: WDFOBJECT) -> Self {
+                let obj = Self(inner as $raw_ptr);
+                let ref_count = <Self as crate::api::object::RefCountedFrameworkHandle>::get_ref_count(&obj);
+                ref_count.fetch_add(1, core::sync::atomic::Ordering::Release);
+
+                obj
+            }
+
+            fn as_ptr(&self) -> WDFOBJECT {
+                self.0 as WDFOBJECT
+            }
+
+            fn object_type() -> crate::api::object::FrameworkHandleType {
+                crate::api::object::FrameworkHandleType::$obj
+            }
+        }
+
+        impl crate::api::object::RefCountedFrameworkHandle for $obj {
+            fn get_ref_count(&self) -> &AtomicUsize {
+                let primary_context = <$primary_context>::get(self).expect("Failed to get primary context");
+                primary_context.get()
+            }
+        }
+
+        impl Clone for $obj {
+            fn clone(&self) -> Self {
+                unsafe { Self::from_ptr(self.0 as WDFOBJECT) }
+            }
+        }
+
+        impl Drop for $obj {
+            fn drop(&mut self) {
+                let ref_count = <Self as crate::api::object::RefCountedFrameworkHandle>::get_ref_count(self);
+                ref_count.fetch_sub(1, core::sync::atomic::Ordering::Release);
+            }
+        }
+
+    }
 }
 
 macro_rules! wdf_struct_size {
@@ -31,6 +83,7 @@ macro_rules! wdf_struct_size {
     }};
 }
 
+pub(crate) use define_ref_counted_framework_handle;
 pub(crate) use wdf_struct_size;
 
 pub fn init_attributes() -> WDF_OBJECT_ATTRIBUTES {
