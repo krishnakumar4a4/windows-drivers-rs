@@ -21,7 +21,8 @@ pub enum HandleType {
 
 macro_rules! impl_ref_counted_handle {
     ($obj:ident, $raw_ptr:ty, $primary_context:ty) => {
-        // Declare the tuple struct
+        #[derive(Debug)]
+        #[repr(transparent)]
         pub struct $obj(pub $raw_ptr);
 
         impl crate::api::object::Handle for $obj {

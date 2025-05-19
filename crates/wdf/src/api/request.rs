@@ -3,6 +3,8 @@ use crate::api::object::Handle;
 use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFREQUEST};
 
+#[derive(Debug)]
+#[repr(transparent)]
 pub struct Request(WDFREQUEST);
 
 impl Request {
