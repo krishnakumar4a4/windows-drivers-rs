@@ -217,6 +217,8 @@ fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, pa
         quote!(::wdf) // Outside of `wdf`, use the global path
     };
 
+    
+
     let struct_name = &context_struct.ident;
     let static_name = Ident::new(
         &format!("__WDF_{}_TYPE_INFO", struct_name),

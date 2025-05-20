@@ -5,8 +5,7 @@ use core::sync::atomic::Ordering;
 use crate::api::{init_attributes, Handle, RefCountedHandle, NtResult};
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO,
-    STATUS_INVALID_PARAMETER,
-    ntddk::KeBugCheckEx,
+    WDF_OBJECT_ATTRIBUTES, STATUS_INVALID_PARAMETER, ntddk::KeBugCheckEx,
 };
 
 #[doc(hidden)]
@@ -52,6 +51,63 @@ pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
     cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
     destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>
 ) -> NtResult<()> {
+    set_up_context::<T, U>(
+        context,
+        |mut attributes| {
+            let mut wdf_context: *mut U = core::ptr::null_mut();
+            let status = unsafe {
+                call_unsafe_wdf_function_binding!(
+                    WdfObjectAllocateContext,
+                    fw_obj.as_raw(),
+                    &mut attributes,
+                    core::mem::transmute(&mut wdf_context),
+                )
+            };
+
+            if !NT_SUCCESS(status) {
+                return Err(status.into());
+            }
+
+            Ok(wdf_context)
+        },
+        cleanup_callback,
+        destroy_callback
+    )
+}
+
+pub unsafe fn create_with_context<T: Handle, U: ObjectContext>(
+    create: impl Fn(WDF_OBJECT_ATTRIBUTES) -> NtResult<T>,
+    context: U,
+    cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
+    destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>
+) -> NtResult<T> {
+    let mut created_obj: Option<T> = None;
+    set_up_context::<T, U>(
+        context,
+        |attributes| {
+            let obj = create(attributes)?;
+            let raw_context = get_context_raw::<U>(obj.as_raw());
+            if raw_context.is_null() {
+                return Err(STATUS_INVALID_PARAMETER.into());
+            }
+
+            created_obj = Some(obj);
+
+            Ok(raw_context)
+        },
+        cleanup_callback,
+        destroy_callback
+    )?;
+
+    Ok(created_obj.unwrap()) // The object is guaranteed to be valid here
+}
+
+fn set_up_context<T: Handle, U: ObjectContext>(
+    context: U,
+    mut create_wdf_context: impl FnMut(WDF_OBJECT_ATTRIBUTES) -> NtResult<*mut U>,
+    cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
+    destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>
+) -> NtResult<()> {
     // Make sure the aligntment requirement of the object struct
     // does not exceed the minimum possible alignment of allocations
     // made by the framework.
@@ -66,45 +122,43 @@ pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
         attributes.EvtDestroyCallback = destroy_callback;
     }
 
-    let mut wdf_context: *mut U = core::ptr::null_mut();
-    let status = unsafe {
-        call_unsafe_wdf_function_binding!(
-            WdfObjectAllocateContext,
-            fw_obj.as_raw(),
-            &mut attributes,
-            core::mem::transmute(&mut wdf_context),
-        )
-    };
+    let wdf_context: *mut U = create_wdf_context(attributes)?;
 
-    if !NT_SUCCESS(status) {
-        return Err(status.into());
-    }
-
+    // SAFETY: The required alignment of the Rust context type
+    // is guaranteed to not conflict with the alignment of the
+    // memory allocated by the framework thanks to the alignment
+    // check above.
     unsafe {
-        // TODO: Check if we're violating any alignment expectations
-        // when we write this struct to C allocated pointer.
-        // Most likely we are!!
         core::ptr::write(wdf_context, context);
     }
 
     Ok(())
 }
 
-pub fn get_context<'a, T: Handle, U: ObjectContext>(fw_obj: &'a T) -> Option<&'a U> {
-    let context_metadata = U::get_type_info();
+/// Gets context of type `U` for the given frameework object if it exists
+pub fn get_context<T: Handle, U: ObjectContext>(fw_obj: &T) -> Option<&U> {
+    // SAFETY: The pointer to framewok object is obtained via as_raw()
+    // which is guaranteed to be valid
+    let context = unsafe { get_context_raw::<U>(fw_obj.as_raw()) };
 
-    let state = unsafe {
-        call_unsafe_wdf_function_binding!(
-            WdfObjectGetTypedContextWorker,
-            fw_obj.as_raw(),
-            &context_metadata.0
-        ) as *mut U
-    };
-
-    if !state.is_null() {
-        Some(unsafe { &*state })
+    if !context.is_null() {
+        Some(unsafe { &*context })
     } else {
         None
+    }
+}
+
+/// Gets raw pointer to the context object for a given raw framework handle.
+// SAFETY: The pointer to WDF object must point to a valid WDF object
+unsafe fn get_context_raw<U: ObjectContext>(fw_obj: WDFOBJECT) -> *mut U {
+    let context_metadata = U::get_type_info();
+
+    unsafe {
+        call_unsafe_wdf_function_binding!(
+            WdfObjectGetTypedContextWorker,
+            fw_obj,
+            &context_metadata.0
+        ) as *mut U
     }
 }
 
