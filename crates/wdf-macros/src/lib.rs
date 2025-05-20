@@ -253,19 +253,21 @@ fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, pa
         });
 
         unsafe impl #wdf_crate_path::ObjectContext for #struct_name {
+            fn get_type_info() -> &'static #wdf_crate_path::WdfObjectContextTypeInfo {
+                &#static_name
+            }
         }
 
         impl #struct_name {
             fn attach(fw_obj: &mut #fw_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
                 unsafe {
-                    let context_type_info = unsafe { &*core::ptr::addr_of!(#static_name) };
-                    #wdf_crate_path::attach_context(fw_obj, context, context_type_info, #cleanup_callback_name, #attach_param_destroy_callback_name)
+                    #wdf_crate_path::attach_context(fw_obj, context, #cleanup_callback_name, #attach_param_destroy_callback_name)
                 }
             }
 
             fn get(fw_obj: &#fw_obj_type_name) -> Option<&#struct_name> where Self: Sync {
                 unsafe {
-                    #wdf_crate_path::get_context(fw_obj, &#static_name)
+                    #wdf_crate_path::get_context(fw_obj)
                 }
             }
         }
@@ -273,7 +275,7 @@ fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, pa
         #[allow(non_snake_case)]
         extern "C" fn #cleanup_callback_name(fw_obj: #wdf_crate_path::WDFOBJECT) {
             unsafe {
-                #wdf_crate_path::drop_context::<#struct_name>(fw_obj, &#static_name);
+                #wdf_crate_path::drop_context::<#struct_name>(fw_obj);
             }
         }
     };

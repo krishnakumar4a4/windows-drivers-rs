@@ -38,6 +38,7 @@ impl WdfObjectContextTypeInfo {
 /// Marker trait that must be implemented by
 /// any types that are to be used as context objects
 pub unsafe trait ObjectContext: Sync {
+    fn get_type_info() -> &'static WdfObjectContextTypeInfo;
 }
 
 // Smallest possible alignment of allocations made by
@@ -48,7 +49,6 @@ const MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT: usize = 16;
 pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
     fw_obj: &mut T,
     context: U,
-    context_type_info: &'static WdfObjectContextTypeInfo,
     cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
     destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>
 ) -> NtResult<()> {
@@ -60,7 +60,7 @@ pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
     }
 
     let mut attributes = init_attributes();
-    attributes.ContextTypeInfo = context_type_info.get_unique_type();
+    attributes.ContextTypeInfo = U::get_type_info().get_unique_type();
     attributes.EvtCleanupCallback = Some(cleanup_callback);
     if destroy_callback.is_some() {
         attributes.EvtDestroyCallback = destroy_callback;
@@ -90,10 +90,9 @@ pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
     Ok(())
 }
 
-pub fn get_context<'a, T: Handle, U: ObjectContext>(
-    fw_obj: &'a T,
-    context_metadata: &'static WdfObjectContextTypeInfo,
-) -> Option<&'a U> {
+pub fn get_context<'a, T: Handle, U: ObjectContext>(fw_obj: &'a T) -> Option<&'a U> {
+    let context_metadata = U::get_type_info();
+
     let state = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfObjectGetTypedContextWorker,
@@ -109,10 +108,9 @@ pub fn get_context<'a, T: Handle, U: ObjectContext>(
     }
 }
 
-pub unsafe fn drop_context<U: ObjectContext>(
-    fw_obj: WDFOBJECT,
-    context_metadata: &'static WdfObjectContextTypeInfo,
-) {
+pub unsafe fn drop_context<U: ObjectContext>(fw_obj: WDFOBJECT) {
+    let context_metadata = U::get_type_info();
+
     let context = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfObjectGetTypedContextWorker,
