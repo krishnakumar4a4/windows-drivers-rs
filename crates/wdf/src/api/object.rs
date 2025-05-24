@@ -7,7 +7,7 @@ pub trait Handle {
     fn handle_type() -> HandleType;
 }
 
-pub(crate) trait RefCountedHandle: Handle {
+pub(crate) trait RefCountedHandle: Handle + Clone {
     fn get_ref_count(&self) -> &AtomicUsize;
 }
 
