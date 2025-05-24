@@ -181,18 +181,27 @@ pub unsafe fn drop_context<U: ObjectContext>(fw_obj: WDFOBJECT) {
 }
 
 #[doc(hidden)]
-pub(crate) fn _bugcheck_if_ref_count_not_zero<T: RefCountedHandle, U: ObjectContext>(obj: WDFOBJECT) {
+pub(crate) fn bug_check_if_ref_count_not_zero<T: RefCountedHandle, U: ObjectContext>(obj: WDFOBJECT) {
     let handle = unsafe { T::from_raw(obj) };
     let ref_count = handle.get_ref_count().load(Ordering::Acquire);
     if ref_count > 0 {
-        unsafe {
-            KeBugCheckEx(
-                0xDEADDEAD,
-                obj as u64,
-                ref_count as u64,
-                0,
-                0,
-            );
-        }
+        bug_check(0xDEADDEAD, obj, Some(ref_count));
+    }
+}
+
+pub(crate) fn bug_check(
+    code: u32,
+    obj: WDFOBJECT,
+    ref_count: Option<usize>,
+) {
+    let ref_count = ref_count.unwrap_or(0);
+    unsafe {
+        KeBugCheckEx(
+            code,
+            obj as u64,
+            ref_count as u64,
+            0,
+            0,
+        );
     }
 }

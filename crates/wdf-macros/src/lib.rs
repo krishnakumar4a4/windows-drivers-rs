@@ -286,7 +286,7 @@ fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, pa
         let extended = quote! {
             #[allow(non_snake_case)]
             extern "C" fn #destroy_callback_name(fw_obj: #wdf_crate_path::WDFOBJECT) {
-                #wdf_crate_path::_bugcheck_if_ref_count_not_zero::<#fw_obj_type_name, #struct_name>(fw_obj);
+                #wdf_crate_path::bug_check_if_ref_count_not_zero::<#fw_obj_type_name, #struct_name>(fw_obj);
             }
         };
 
