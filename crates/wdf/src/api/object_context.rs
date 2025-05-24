@@ -180,7 +180,6 @@ pub unsafe fn drop_context<U: ObjectContext>(fw_obj: WDFOBJECT) {
     }
 }
 
-#[doc(hidden)]
 pub(crate) fn bug_check_if_ref_count_not_zero<T: RefCountedHandle, U: ObjectContext>(obj: WDFOBJECT) {
     let handle = unsafe { T::from_raw(obj) };
     let ref_count = handle.get_ref_count().load(Ordering::Acquire);
