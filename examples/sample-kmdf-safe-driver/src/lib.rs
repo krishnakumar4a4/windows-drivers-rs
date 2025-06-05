@@ -62,7 +62,7 @@ fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), NtError>
     Ok(())
 }
 
-// Callback that is called when a device is added
+/// Callback that is called when a device is added
 fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     println!("evt_device_add called");
 
@@ -100,7 +100,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     Ok(())
 }
 
-// Callback that is called when a write request is received
+/// Callback that is called when a write request is received
 fn evt_io_write(queue: &mut IoQueue, request: Request, _length: usize) {
     println!("evt_io_write called");
 
@@ -123,9 +123,9 @@ fn evt_io_write(queue: &mut IoQueue, request: Request, _length: usize) {
     }
 }
 
-// Callback that is called when the request is cancelled.
-// It cancels the request identified by the `token` parameter
-// if it is found in the context.
+/// Callback that is called when the request is cancelled.
+/// It cancels the request identified by the `token` parameter
+/// if it is found in the context.
 fn evt_request_cancel(token: &RequestCancellationToken) {
     println!("evt_request_cancel called");
 
@@ -144,9 +144,9 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
     }
 }
 
-// Callback that is called when the timer fires.
-// It fetches the request stored in the context
-// and completes it
+/// Callback that is called when the timer fires.
+/// It fetches the request stored in the context
+/// and completes it
 fn evt_timer(timer: &mut Timer) {
     println!("evt_timer called");
     if let Some(queue) = timer.get_parent::<IoQueue>() {
