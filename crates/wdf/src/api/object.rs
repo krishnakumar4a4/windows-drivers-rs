@@ -7,7 +7,7 @@ pub trait Handle {
     fn handle_type() -> HandleType;
 }
 
-pub(crate) trait RefCountedHandle: Handle + Clone {
+pub trait RefCountedHandle: Handle {
     fn get_ref_count(&self) -> &AtomicUsize;
 }
 
@@ -27,23 +27,7 @@ macro_rules! impl_ref_counted_handle {
 
         impl crate::api::object::Handle for $obj {
             unsafe fn from_raw(inner: WDFOBJECT) -> Self {
-                let obj = Self(inner as $raw_ptr);
-                let ref_count = <Self as crate::api::object::RefCountedHandle>::get_ref_count(&obj);
-
-                // Relaxed ordering is fine here since we do not care if operations
-                // on other variables such as T (i.e. the data we are carrying)
-                // get reordered with respect to fetch_add. 
-                // After all it is totally okay to access T after the ref count has 
-                // been incremented because the object is guaranteed to be alive
-                // thanks to this very increment.
-                // We also prevent the ref count from overflowing here by bugchecking
-                // if it gets too high because an overflow would lead to all kinds of unsafety.
-                if ref_count.fetch_add(1, core::sync::atomic::Ordering::Relaxed) > usize::MAX / 2 {
-                    let ref_count = ref_count.load(core::sync::atomic::Ordering::Relaxed);
-                    crate::api::object_context::bug_check(0xDEADDEAD, obj.as_raw(), Some(ref_count));
-                }
-
-                obj
+                Self(inner as $raw_ptr)
             }
 
             fn as_raw(&self) -> WDFOBJECT {
@@ -61,42 +45,6 @@ macro_rules! impl_ref_counted_handle {
                 &primary_context.ref_count
             }
         }
-
-        impl Clone for $obj {
-            fn clone(&self) -> Self {
-                unsafe { Self::from_raw(self.0 as WDFOBJECT) }
-            }
-        }
-
-        impl Drop for $obj {
-            fn drop(&mut self) {
-                let ref_count = <Self as crate::api::object::RefCountedHandle>::get_ref_count(self);
-                // We need to ensure here that:
-                // 1. Access to T, the data we are carrying, is not reordered
-                // AFTER the fetch_sub operation because that might lead to
-                // a use-after-free in case the data has already been freed.
-                // 2. The call to WdfObjectDelete is not reordered BEFORE
-                // fetch_sub because it is wrong to delete T before the ref count
-                // has dropped to zero.
-
-                // We could have achieved both of those by using the AcqRel
-                // ordering.  However, the call to WdfObjectDelete is made
-                // only when the ref count drops to zero. Therefore we do
-                // not need Acquire every time fetch_sub is called. It is needed
-                // only when the ref count has become zero. Hence, here we use
-                // only Release in fetch_sub and have a separate fench with
-                // Acquire inside the if block.
-                if ref_count.fetch_sub(1, core::sync::atomic::Ordering::Release) == 0 {
-                    core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
-                    // SAFETY: The object is guarateed to be valid here
-                    // because it is deleted only here and no place else
-                    unsafe {
-                        call_unsafe_wdf_function_binding!(WdfObjectDelete, self.as_raw());
-                    }
-                }
-            }
-        }
-
     }
 }
 

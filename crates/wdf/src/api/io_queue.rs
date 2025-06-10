@@ -4,6 +4,7 @@ use crate::api::{
     error::NtError,
     object::{impl_ref_counted_handle, wdf_struct_size, Handle},
     request::Request,
+    sync::Arc,
 };
 use wdf_macros::primary_object_context;
 use wdk_sys::{
@@ -23,11 +24,11 @@ impl IoQueue {
         Self::from_raw(inner as WDFOBJECT)
     }
 
-    pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Self, NtError> {
+    pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Arc<Self>, NtError> {
         unsafe { Self::create_with_attributes(device, queue_config, WDF_NO_OBJECT_ATTRIBUTES) }
     }
 
-    unsafe fn create_with_attributes(device: &Device, queue_config: &IoQueueConfig, attributes:*mut WDF_OBJECT_ATTRIBUTES) -> Result<Self, NtError> {
+    unsafe fn create_with_attributes(device: &Device, queue_config: &IoQueueConfig, attributes:*mut WDF_OBJECT_ATTRIBUTES) -> Result<Arc<Self>, NtError> {
         let mut config = to_unsafe_config(&queue_config);
         let mut queue: WDFQUEUE = core::ptr::null_mut();
 
@@ -54,7 +55,7 @@ impl IoQueue {
 
             IoQueueContext::attach(&mut queue, ctxt)?;
 
-            Ok(queue)
+            Ok(Arc::new(queue))
         } else {
             Err(status.into())
         }

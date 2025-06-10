@@ -2,6 +2,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::api::{
     error::NtResult,
     object::{wdf_struct_size, impl_ref_counted_handle, Handle, HandleType, init_attributes},
+    sync::Arc
 };
 use core::{mem::MaybeUninit, ptr::null_mut, time::Duration};
 use wdf_macros::primary_object_context;
@@ -22,7 +23,7 @@ impl_ref_counted_handle!(
 );
 
 impl Timer {
-    pub fn create<'a, P: Handle>(config: &TimerConfig<'a, P>) -> NtResult<Self> {
+    pub fn create<'a, P: Handle>(config: &TimerConfig<'a, P>) -> NtResult<Arc<Self>> {
         let context = TimerContext {
             ref_count: AtomicUsize::new(0),
             evt_timer_func: config.evt_timer_func,
@@ -53,7 +54,7 @@ impl Timer {
 
             TimerContext::attach(&mut timer, context)?;
 
-            Ok(timer)
+            Ok(Arc::new(timer))
         } else {
             Err(status.into())
         }

@@ -19,7 +19,7 @@
 #![no_std]
 
 use wdf::{
-    driver_entry, object_context, println, trace, CancellableMarkedRequest, Request,
+    Arc, driver_entry, object_context, println, trace, CancellableMarkedRequest, Request,
     RequestCancellationToken, Device, DeviceInit, Driver, Guid, IoQueue,
     IoQueueConfig, NtError, NtStatus, SpinLock, Timer, TimerConfig
 };
@@ -38,7 +38,7 @@ struct QueueContext {
     request: SpinLock<Option<CancellableMarkedRequest>>,
 
     // The timer that is used to complete the request
-    timer: Timer
+    timer: Arc<Timer>
 }
 
 /// The entry point for the driver
