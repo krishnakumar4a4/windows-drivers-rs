@@ -1,5 +1,6 @@
 use core::sync::atomic::AtomicUsize;
 use crate::api::{
+    device::Device,
     error::NtResult,
     object::{wdf_struct_size, impl_ref_counted_handle, Handle, HandleType, init_attributes},
     sync::Arc
@@ -93,6 +94,16 @@ impl Timer {
         } else {
             None
         }
+    }
+
+    pub fn get_device(&self) -> &Device {
+        let parent = unsafe { call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.0) };
+
+        if parent.is_null() {
+            panic!("Timer has no parent device");
+        }
+
+        unsafe { &*parent.cast::<Device>() }
     }
 }
 

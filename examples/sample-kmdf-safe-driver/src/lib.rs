@@ -149,6 +149,8 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 /// and completes it
 fn evt_timer(timer: &mut Timer) {
     println!("evt_timer called");
+    let device = timer.get_device();
+    println!("Timer parent device: {:?}", device);
     if let Some(queue) = timer.get_parent::<IoQueue>() {
         let context = QueueContext::get(&queue).unwrap();
         let mut req = context.request.lock();
