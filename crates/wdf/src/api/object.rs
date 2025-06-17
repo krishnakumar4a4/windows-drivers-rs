@@ -4,19 +4,10 @@ use wdk_sys::{WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_O
 pub trait Handle {
     unsafe fn from_raw(inner: WDFOBJECT) -> Self;
     fn as_raw(&self) -> WDFOBJECT;
-    fn handle_type() -> HandleType;
 }
 
 pub trait RefCountedHandle: Handle {
     fn get_ref_count(&self) -> &AtomicUsize;
-}
-
-#[derive(PartialEq)]
-pub enum HandleType {
-    Device,
-    IoQueue,
-    Request,
-    Timer,
 }
 
 macro_rules! impl_ref_counted_handle {
@@ -32,10 +23,6 @@ macro_rules! impl_ref_counted_handle {
 
             fn as_raw(&self) -> WDFOBJECT {
                 self.0 as WDFOBJECT
-            }
-
-            fn handle_type() -> crate::api::object::HandleType {
-                crate::api::object::HandleType::$obj
             }
         }
 

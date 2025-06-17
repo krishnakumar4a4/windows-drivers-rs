@@ -181,10 +181,6 @@ impl<T: RefCountedHandle> Handle for Arc<T> {
     fn as_raw(&self) -> WDFOBJECT {
         self.0.as_raw()
     }
-
-    fn handle_type() -> crate::api::object::HandleType {
-        T::handle_type()
-    }
 }
 
 impl<T: RefCountedHandle> Deref for Arc<T> {

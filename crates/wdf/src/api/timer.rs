@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::api::{
     device::Device,
     error::NtResult,
-    object::{wdf_struct_size, impl_ref_counted_handle, Handle, HandleType, init_attributes},
+    object::{wdf_struct_size, impl_ref_counted_handle, Handle, init_attributes},
     sync::Arc
 };
 use core::{mem::MaybeUninit, ptr::null_mut, time::Duration};
@@ -28,7 +28,6 @@ impl Timer {
         let context = TimerContext {
             ref_count: AtomicUsize::new(0),
             evt_timer_func: config.evt_timer_func,
-            parent_type: P::handle_type(),
         };
 
         let mut timer: WDFTIMER = null_mut();
@@ -154,7 +153,6 @@ impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
 struct TimerContext {
     ref_count: AtomicUsize,
     evt_timer_func: fn(&mut Timer),
-    parent_type: HandleType,
 }
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {

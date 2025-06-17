@@ -1,4 +1,4 @@
-use super::{error::NtStatus, io_queue::IoQueue, object::HandleType, NtResult};
+use super::{error::NtStatus, io_queue::IoQueue, NtResult};
 use crate::api::object::Handle;
 use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFREQUEST};
@@ -64,10 +64,6 @@ impl Handle for Request {
     fn as_raw(&self) -> WDFOBJECT {
         self.0 as *mut _
     }
-
-    fn handle_type() -> HandleType {
-        HandleType::Request
-    }
 }
 
 /// SAFETY: This is safe because all the WDF functions
@@ -113,10 +109,6 @@ impl Handle for CancellableMarkedRequest {
 
     fn as_raw(&self) -> WDFOBJECT {
         self.0.as_raw()
-    }
-
-    fn handle_type() -> HandleType {
-        HandleType::Request
     }
 }
 
