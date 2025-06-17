@@ -26,7 +26,7 @@ use wdf::{
 
 use core::time::Duration;
 
-/// Context object to be attached to the queue
+/// Context object to be attached to a queue
 #[object_context(IoQueue)]
 struct QueueContext {
     // Field that stores the in-flight request.
@@ -39,6 +39,12 @@ struct QueueContext {
 
     // The timer that is used to complete the request
     timer: Arc<Timer>
+}
+
+/// Context object to be attached to a timer
+#[object_context(Timer)]
+struct TimerContext {
+    queue: Arc<IoQueue>
 }
 
 /// The entry point for the driver
@@ -80,15 +86,22 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     // Create timer
     let timer_config = TimerConfig::new_non_periodic(&queue, evt_timer);
 
-    let timer = Timer::create(&timer_config)?;
+    let mut timer = Timer::create(&timer_config)?;
+
+    // Attach context to the timer
+    let timer_context = TimerContext {
+        queue: queue.clone()
+    };
+
+    TimerContext::attach(&mut timer, timer_context)?;
 
     // Attach context to the queue
-    let context = QueueContext {
+    let queue_context = QueueContext {
         request: SpinLock::create(None)?,
         timer
     };
 
-    QueueContext::attach(&mut queue, context)?;
+    QueueContext::attach(&mut queue, queue_context)?;
 
     // Create device interface
     let _ = device.create_interface(
@@ -149,17 +162,19 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 /// and completes it
 fn evt_timer(timer: &mut Timer) {
     println!("evt_timer called");
-    let device = timer.get_device();
-    println!("Timer parent device: {:?}", device);
-    if let Some(queue) = timer.get_parent::<IoQueue>() {
-        let context = QueueContext::get(&queue).unwrap();
-        let mut req = context.request.lock();
-        if let Some(req) = req.take() {
-            req.complete(NtStatus::Success);
-            println!("Request completed");
-        } else {
-            println!("Request already cancelled or completed");
-        }
+
+    let queue = &TimerContext::get(timer)
+        .expect("Failed to get timer context")
+        .queue;
+
+    let req = QueueContext::get(queue)
+        .and_then(|context| context.request.lock().take());
+
+    if let Some(req) = req {
+        req.complete(NtStatus::Success);
+        println!("Request completed");
+    } else {
+        println!("Request already cancelled or completed");
     }
 
     timer.stop(false);
