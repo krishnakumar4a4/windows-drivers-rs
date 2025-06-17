@@ -80,22 +80,6 @@ impl Timer {
         unsafe { call_unsafe_wdf_function_binding!(WdfTimerStop, self.0, wait as u8) != 0 }
     }
 
-    pub fn get_parent<P: Handle>(&self) -> Option<P> {
-        let parent = unsafe { call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.0) };
-
-        if !parent.is_null() {
-            TimerContext::get(&self).and_then(|context| {
-                if context.parent_type == P::handle_type() {
-                    Some(unsafe { P::from_raw(parent) })
-                } else {
-                    None
-                }
-            })
-        } else {
-            None
-        }
-    }
-
     pub fn get_device(&self) -> &Device {
         let parent = unsafe { call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.0) };
 
