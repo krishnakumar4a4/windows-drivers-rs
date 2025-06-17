@@ -19,6 +19,14 @@ impl_ref_counted_handle!(
     IoQueueContext
 );
 
+/// SAFETY: This is safe because all the WDF functions
+/// that operate on WDFQUEUE do so in a thread-safe manner.
+/// As a result, all the Rust methods on this struct are
+/// also thread-safe.
+unsafe impl Send for IoQueue {}
+unsafe impl Sync for IoQueue {}
+
+
 impl IoQueue {
     pub(crate) unsafe fn new(inner: WDFQUEUE) -> Self {
         Self::from_raw(inner as WDFOBJECT)
