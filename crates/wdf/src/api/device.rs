@@ -18,7 +18,7 @@ impl_ref_counted_handle!(
 );
 
 impl Device {
-    pub fn create(device_init: &mut DeviceInit) -> NtResult<Self> {
+    pub fn create(device_init: &mut DeviceInit) -> NtResult<&Self> {
         let mut device: WDFDEVICE = WDF_NO_HANDLE.cast();
         let mut device_init_ptr: *mut WDFDEVICE_INIT = device_init.as_ptr_mut();
 
@@ -32,8 +32,8 @@ impl Device {
         };
 
         if NT_SUCCESS(status) {
-            let mut device = unsafe { Self::from_raw(device as *mut _) };
-            DeviceContext::attach(&mut device, DeviceContext { ref_count: AtomicUsize::new(0) })?;
+            let device = unsafe { &*(device as *mut _) };
+            DeviceContext::attach(device, DeviceContext { ref_count: AtomicUsize::new(0) })?;
             Ok(device)
         } else {
             Err(status.into())
@@ -51,7 +51,7 @@ impl Device {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceCreateDeviceInterface,
-                self.as_raw() as *mut _,
+                self.as_ptr() as *mut _,
                 interaface_class_guid.as_lpcguid(),
                 unicode_ref_str.map_or(core::ptr::null(), |s| &s)
             )

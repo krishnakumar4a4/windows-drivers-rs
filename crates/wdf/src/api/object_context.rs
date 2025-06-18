@@ -46,7 +46,7 @@ pub unsafe trait ObjectContext: Sync {
 const MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT: usize = 16;
 
 pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
-    fw_obj: &mut T,
+    fw_obj: &T,
     context: U,
     cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
     destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>
@@ -58,7 +58,7 @@ pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
             let status = unsafe {
                 call_unsafe_wdf_function_binding!(
                     WdfObjectAllocateContext,
-                    fw_obj.as_raw(),
+                    fw_obj.as_ptr(),
                     &mut attributes,
                     core::mem::transmute(&mut wdf_context),
                 )
@@ -86,7 +86,7 @@ pub unsafe fn create_with_context<T: Handle, U: ObjectContext>(
         context,
         |attributes| {
             let obj = create(attributes)?;
-            let raw_context = get_context_raw::<U>(obj.as_raw());
+            let raw_context = get_context_raw::<U>(obj.as_ptr());
             if raw_context.is_null() {
                 return Err(STATUS_INVALID_PARAMETER.into());
             }
@@ -139,7 +139,7 @@ fn set_up_context<T: Handle, U: ObjectContext>(
 pub fn get_context<T: Handle, U: ObjectContext>(fw_obj: &T) -> Option<&U> {
     // SAFETY: The pointer to framewok object is obtained via as_raw()
     // which is guaranteed to be valid
-    let context = unsafe { get_context_raw::<U>(fw_obj.as_raw()) };
+    let context = unsafe { get_context_raw::<U>(fw_obj.as_ptr()) };
 
     if !context.is_null() {
         Some(unsafe { &*context })
@@ -181,7 +181,7 @@ pub unsafe fn drop_context<U: ObjectContext>(fw_obj: WDFOBJECT) {
 }
 
 pub(crate) fn bug_check_if_ref_count_not_zero<T: RefCountedHandle, U: ObjectContext>(obj: WDFOBJECT) {
-    let handle = unsafe { T::from_raw(obj) };
+    let handle = unsafe { &*obj.cast::<T>() };
     let ref_count = handle.get_ref_count().load(Ordering::Acquire);
     if ref_count > 0 {
         bug_check(0xDEADDEAD, obj, Some(ref_count));

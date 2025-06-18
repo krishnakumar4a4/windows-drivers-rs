@@ -33,7 +33,7 @@ impl Timer {
         let mut timer: WDFTIMER = null_mut();
 
         let mut attributes = init_attributes();
-        attributes.ParentObject = config.parent.as_raw();
+        attributes.ParentObject = config.parent.as_ptr();
 
         let mut config: WDF_TIMER_CONFIG = config.into();
 
@@ -50,11 +50,10 @@ impl Timer {
         };
 
         if NT_SUCCESS(status) {
-            let mut timer = unsafe { Timer::from_raw(timer as *mut _) };
+            let timer = unsafe { Arc::from_raw(timer as *mut _) };
+            TimerContext::attach(&timer, context)?;
 
-            TimerContext::attach(&mut timer, context)?;
-
-            Ok(Arc::new(timer))
+            Ok(timer)
         } else {
             Err(status.into())
         }
@@ -71,16 +70,16 @@ impl Timer {
         let due_time = -1 * duration.as_nanos() as i64 / 100; // To ticks. -1 is for relative time
 
         // TODO: use something like duration instead of i64 for due_time
-        unsafe { call_unsafe_wdf_function_binding!(WdfTimerStart, self.0, due_time) != 0 }
+        unsafe { call_unsafe_wdf_function_binding!(WdfTimerStart, self.as_ptr() as *mut _, due_time) != 0 }
     }
 
     // TODO: Change to &mut self. See comment on start() method
     pub fn stop(&self, wait: bool) -> bool {
-        unsafe { call_unsafe_wdf_function_binding!(WdfTimerStop, self.0, wait as u8) != 0 }
+        unsafe { call_unsafe_wdf_function_binding!(WdfTimerStop, self.as_ptr() as *mut _, wait as u8) != 0 }
     }
 
     pub fn get_device(&self) -> &Device {
-        let parent = unsafe { call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.0) };
+        let parent = unsafe { call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr() as *mut _) };
 
         if parent.is_null() {
             panic!("Timer has no parent device");
@@ -99,7 +98,7 @@ unsafe impl Send for Timer {}
 unsafe impl Sync for Timer {}
 
 pub struct TimerConfig<'a, P: Handle> {
-    pub evt_timer_func: fn(&mut Timer),
+    pub evt_timer_func: fn(&Timer),
     pub period: u32,
     pub tolerable_delay: u32,
     pub use_high_resolution_timer: bool,
@@ -107,7 +106,7 @@ pub struct TimerConfig<'a, P: Handle> {
 }
 
 impl<'a, P: Handle> TimerConfig<'a, P> {
-    pub fn new_non_periodic(parent: &'a P, evt_timer_func: fn(&mut Timer)) -> Self {
+    pub fn new_non_periodic(parent: &'a P, evt_timer_func: fn(&Timer)) -> Self {
         Self {
             evt_timer_func,
             period: 0,
@@ -119,7 +118,7 @@ impl<'a, P: Handle> TimerConfig<'a, P> {
 
     pub fn new_periodic(
         parent: &'a P,
-        evt_timer_func: fn(&mut Timer),
+        evt_timer_func: fn(&Timer),
         period: u32,
         tolerable_delay: u32,
         use_high_resolution_timer: bool,
@@ -152,12 +151,12 @@ impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
 #[primary_object_context(Timer)]
 struct TimerContext {
     ref_count: AtomicUsize,
-    evt_timer_func: fn(&mut Timer),
+    evt_timer_func: fn(&Timer),
 }
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {
-    let mut timer = unsafe { Timer::from_raw(timer as WDFOBJECT) };
+    let timer = unsafe { &*timer.cast::<Timer>() };
     if let Some(timer_state) = TimerContext::get(&timer) {
-        (timer_state.evt_timer_func)(&mut timer);
+        (timer_state.evt_timer_func)(timer);
     }
 }

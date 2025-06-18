@@ -1,5 +1,6 @@
 use core::{
     cell::UnsafeCell,
+    marker::PhantomData,
     sync::atomic::{Ordering, fence},
     ops::{Deref, DerefMut},
 };
@@ -61,7 +62,7 @@ impl<T> SpinLock<T> {
         }
         SpinLockGuard {
             spin_lock: self,
-            _not_send: core::marker::PhantomData,
+            _not_send: PhantomData,
         }
     }
 }
@@ -85,7 +86,7 @@ pub struct SpinLockGuard<'a, T> {
     // This marker makes SpinLockGuard !Send.
     // !Send is needed to ensure that the same
     // thread that acquired the lock releases it
-    _not_send: core::marker::PhantomData<*const ()>,
+    _not_send: PhantomData<*const ()>,
 }
 
 impl<'a, T> Drop for SpinLockGuard<'a, T> {
@@ -113,12 +114,18 @@ impl<'a, T> core::ops::DerefMut for SpinLockGuard<'a, T> {
 }
 
 /// Arc for WDF object handles
-pub struct Arc<T: RefCountedHandle>(T);
+pub struct Arc<T: RefCountedHandle> {
+    ptr: WDFOBJECT,
+    _marker: core::marker::PhantomData<T>,
+}
 
 impl<T: RefCountedHandle> Arc<T> {
-    /// Creates a new `Arc` from a WDF object handle.
-    pub(crate) fn new(inner: T) -> Self {
-        let ref_count = inner.get_ref_count();
+    /// Creates a new `Arc` from a raw WDF object pointer
+    /// # Safety
+    /// `ptr` must be a valid WDF object pointer that implements `RefCountedHandle`.
+    pub(crate) unsafe fn from_raw(ptr: WDFOBJECT) -> Self {
+        let obj = &*ptr.cast::<T>();
+        let ref_count = obj.get_ref_count();
 
         // Relaxed ordering is fine here since we do not care if operations
         // on other variables including T (i.e. the data we are carrying)
@@ -130,23 +137,29 @@ impl<T: RefCountedHandle> Arc<T> {
         // if it gets too high because an overflow would lead to all kinds of unsafety.
         if ref_count.fetch_add(1, Ordering::Relaxed) > usize::MAX / 2 {
             let ref_count = ref_count.load(Ordering::Relaxed);
-            bug_check(0xDEADDEAD, inner.as_raw(), Some(ref_count));
+            bug_check(0xDEADDEAD, ptr, Some(ref_count));
         }
 
-        Self(inner)
+        Self { ptr, _marker: PhantomData }
+    }
+
+    /// Gets the underlying raw WDF object pointer.
+    fn as_ptr(&self) -> WDFOBJECT {
+        self.ptr
     }
 }
 
 impl<T: RefCountedHandle> Clone for Arc<T> {
     fn clone(&self) -> Self {
-        let inner = unsafe { T::from_raw(self.0.as_raw()) };
-         Self::new(inner)
+        unsafe { Self::from_raw(self.ptr) }
     }
 }
 
 impl<T: RefCountedHandle> Drop for Arc<T> {
     fn drop(&mut self) {
-        let ref_count = self.0.get_ref_count();
+        let obj = unsafe { &*self.as_ptr().cast::<T>() };
+        let ref_count = obj.get_ref_count();
+
         // We need to ensure here that:
         // 1. Access to T, the data we are carrying, is not reordered
         // AFTER the fetch_sub operation because that might lead to
@@ -167,19 +180,15 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
             // SAFETY: The object is guarateed to be valid here
             // because it is deleted only here and no place else
             unsafe {
-                call_unsafe_wdf_function_binding!(WdfObjectDelete, self.0.as_raw());
+                call_unsafe_wdf_function_binding!(WdfObjectDelete, self.ptr);
             }
         }
     }
 }
 
 impl<T: RefCountedHandle> Handle for Arc<T> {
-    unsafe fn from_raw(inner: WDFOBJECT) -> Self {
-        Self(T::from_raw(inner))
-    }
-
-    fn as_raw(&self) -> WDFOBJECT {
-        self.0.as_raw()
+    fn as_ptr(&self) -> WDFOBJECT {
+        self.as_ptr()
     }
 }
 
@@ -187,12 +196,24 @@ impl<T: RefCountedHandle> Deref for Arc<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        unsafe { &*self.ptr.cast::<Self::Target>() }
     }
 }
 
 impl <T: RefCountedHandle> DerefMut for Arc<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        unsafe { &mut *self.ptr.cast::<Self::Target>() }
     }
 }   
+
+// Safety: `Arc<T>` being `Sync` requires `T` to be `Sync`
+// because sharing it effectively shares `T` However it
+// also requires `T` to be `Send` because any thread that
+// has `Arc<T>` can call `clone` on it and then later
+// potentially drop `T` if it happens to be the last reference
+unsafe impl<T: RefCountedHandle + Sync + Send> Sync for Arc<T> {}
+
+
+// Safety: `Arc<T>` being `Send` requires `T` to be both `Send`
+// and `Sync` for the same reason as above.
+unsafe impl<T: RefCountedHandle + Sync + Send> Send for Arc<T> {}

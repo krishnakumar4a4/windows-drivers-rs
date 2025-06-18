@@ -2,7 +2,7 @@ use core::sync::atomic::AtomicUsize;
 use crate::api::{
     device::Device,
     error::NtError,
-    object::{impl_ref_counted_handle, wdf_struct_size, Handle},
+    object::{Handle, impl_ref_counted_handle, wdf_struct_size},
     request::Request,
     sync::Arc,
 };
@@ -28,10 +28,6 @@ unsafe impl Sync for IoQueue {}
 
 
 impl IoQueue {
-    pub(crate) unsafe fn new(inner: WDFQUEUE) -> Self {
-        Self::from_raw(inner as WDFOBJECT)
-    }
-
     pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Arc<Self>, NtError> {
         unsafe { Self::create_with_attributes(device, queue_config, WDF_NO_OBJECT_ATTRIBUTES) }
     }
@@ -43,7 +39,7 @@ impl IoQueue {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoQueueCreate,
-                device.as_raw() as *mut _,
+                device.as_ptr() as *mut _,
                 &mut config as *mut _,
                 attributes,
                 &mut queue,
@@ -59,21 +55,20 @@ impl IoQueue {
                 evt_io_device_control: queue_config.evt_io_device_control,
             };
 
-            let mut queue = unsafe { IoQueue::new(queue) };
+            let queue = unsafe { Arc::from_raw(queue as *mut _) };
+            IoQueueContext::attach(&queue, ctxt)?;
 
-            IoQueueContext::attach(&mut queue, ctxt)?;
-
-            Ok(Arc::new(queue))
+            Ok(queue)
         } else {
             Err(status.into())
         }
     }
 
-    pub fn get_device(&self) -> Device {
+    pub fn get_device(&self) -> &Device {
         unsafe {
             let device =
-                call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_raw() as *mut _);
-            Device::from_raw(device as *mut _)
+                call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr() as *mut _);
+            &*(device as *mut _)
         }
     }
 }
@@ -113,10 +108,10 @@ pub struct IoQueueConfig {
     pub power_managed: TriState,
     pub allow_zero_length_requests: bool,
     pub default_queue: bool,
-    pub evt_io_default: Option<fn(&mut IoQueue, Request)>,
-    pub evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
-    pub evt_io_write: Option<fn(&mut IoQueue, Request, usize)>,
-    pub evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
+    pub evt_io_default: Option<fn(&IoQueue, Request)>,
+    pub evt_io_read: Option<fn(&IoQueue, Request, usize)>,
+    pub evt_io_write: Option<fn(&IoQueue, Request, usize)>,
+    pub evt_io_device_control: Option<fn(&IoQueue, Request, usize, usize, u32)>,
 }
 
 impl Default for IoQueueConfig {
@@ -178,21 +173,21 @@ fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
 #[primary_object_context(IoQueue)]
 struct IoQueueContext {
     ref_count: AtomicUsize,
-    evt_io_default: Option<fn(&mut IoQueue, Request)>,
-    evt_io_read: Option<fn(&mut IoQueue, Request, usize)>,
-    evt_io_write: Option<fn(&mut IoQueue, Request, usize)>,
-    evt_io_device_control: Option<fn(&mut IoQueue, Request, usize, usize, u32)>,
+    evt_io_default: Option<fn(&IoQueue, Request)>,
+    evt_io_read: Option<fn(&IoQueue, Request, usize)>,
+    evt_io_write: Option<fn(&IoQueue, Request, usize)>,
+    evt_io_device_control: Option<fn(&IoQueue, Request, usize, usize, u32)>,
 }
 
 macro_rules! unsafe_request_handler {
     ($handler_name:ident $(, $arg_name:ident: $arg_type:ty)*) => {
         paste::paste! {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
-                let mut queue = unsafe { IoQueue::from_raw(queue as *mut _) };
-                let request = unsafe { Request::from_raw(request as *mut _) };
+                let queue = unsafe { &*queue.cast::<IoQueue>() };
+                let request = unsafe { Request::from_raw(request as WDFREQUEST) };
                 if let Some(handlers) = IoQueueContext::get(&queue) {
                     if let Some(handler) = handlers.$handler_name {
-                        handler(&mut queue, request $(, $arg_name)*);
+                        handler(queue, request $(, $arg_name)*);
                         return;
                     }
                 }

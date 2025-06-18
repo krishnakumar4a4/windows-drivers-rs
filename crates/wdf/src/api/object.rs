@@ -2,8 +2,7 @@ use core::sync::atomic::AtomicUsize;
 use wdk_sys::{WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_OBJECT_ATTRIBUTES};
 
 pub trait Handle {
-    unsafe fn from_raw(inner: WDFOBJECT) -> Self;
-    fn as_raw(&self) -> WDFOBJECT;
+    fn as_ptr(&self) -> WDFOBJECT;
 }
 
 pub trait RefCountedHandle: Handle {
@@ -13,16 +12,14 @@ pub trait RefCountedHandle: Handle {
 macro_rules! impl_ref_counted_handle {
     ($obj:ident, $raw_ptr:ty, $primary_context:ty) => {
         #[derive(Debug)]
-        #[repr(transparent)]
-        pub struct $obj(pub $raw_ptr);
+        #[repr(C)]
+        pub struct $obj {
+            _private: [u8; 0], // Prevents instantiation of the struct from driver code
+        }
 
         impl crate::api::object::Handle for $obj {
-            unsafe fn from_raw(inner: WDFOBJECT) -> Self {
-                Self(inner as $raw_ptr)
-            }
-
-            fn as_raw(&self) -> WDFOBJECT {
-                self.0 as WDFOBJECT
+            fn as_ptr(&self) -> WDFOBJECT {
+                self as *const _ as WDFOBJECT
             }
         }
 

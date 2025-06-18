@@ -261,7 +261,7 @@ fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, pa
         }
 
         impl #struct_name {
-            fn attach(fw_obj: &mut #fw_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
+            fn attach(fw_obj: &#fw_obj_type_name, context: #struct_name) -> #wdf_crate_path::NtResult<()> where Self: Sync {
                 unsafe {
                     #wdf_crate_path::attach_context(fw_obj, context, #cleanup_callback_name, #attach_param_destroy_callback_name)
                 }

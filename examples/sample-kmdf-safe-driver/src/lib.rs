@@ -81,19 +81,19 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     queue_config.default_queue = true;
     queue_config.evt_io_write = Some(evt_io_write);
 
-    let mut queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
+    let queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
 
     // Create timer
     let timer_config = TimerConfig::new_non_periodic(&queue, evt_timer);
 
-    let mut timer = Timer::create(&timer_config)?;
+    let timer = Timer::create(&timer_config)?;
 
     // Attach context to the timer
     let timer_context = TimerContext {
         queue: queue.clone()
     };
 
-    TimerContext::attach(&mut timer, timer_context)?;
+    TimerContext::attach(&timer, timer_context)?;
 
     // Attach context to the queue
     let queue_context = QueueContext {
@@ -101,7 +101,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
         timer
     };
 
-    QueueContext::attach(&mut queue, queue_context)?;
+    QueueContext::attach(&queue, queue_context)?;
 
     // Create device interface
     let _ = device.create_interface(
@@ -114,7 +114,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
 }
 
 /// Callback that is called when a write request is received
-fn evt_io_write(queue: &mut IoQueue, request: Request, _length: usize) {
+fn evt_io_write(queue: &IoQueue, request: Request, _length: usize) {
     println!("evt_io_write called");
 
     if let Some(context) = QueueContext::get(&queue) {
@@ -160,7 +160,7 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 /// Callback that is called when the timer fires.
 /// It fetches the request stored in the context
 /// and completes it
-fn evt_timer(timer: &mut Timer) {
+fn evt_timer(timer: &Timer) {
     println!("evt_timer called");
 
     let queue = &TimerContext::get(timer)
