@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use alloc::{format, string::String};
+use alloc::string::String;
 
 use core::{
     cell::UnsafeCell,
@@ -9,6 +9,7 @@ use core::{
     ops::{Deref, DerefMut},
 };
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFSPINLOCK};
+use wdk::println;
 use crate::api::{
     error::NtResult,
     object::{Handle, RefCountedHandle},
@@ -164,6 +165,8 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
         let obj = unsafe { &*self.as_ptr().cast::<T>() };
         let ref_count = obj.get_ref_count();
 
+        println!("Drop {}. Ref count before decrement: {}", Self::type_name(), ref_count.load(Ordering::Relaxed));
+
         // We need to ensure here that:
         // 1. Access to T, the data we are carrying, is not reordered
         // AFTER the fetch_sub operation because that might lead to
@@ -181,6 +184,9 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
         // Acquire inside the if block.
         if ref_count.fetch_sub(1, Ordering::Release) == 1 {
             fence(Ordering::Acquire);
+
+            println!("Dropped {}. Ref count reached 0", Self::type_name());
+
             // SAFETY: The object is guarateed to be valid here
             // because it is deleted only here and no place else
             unsafe {

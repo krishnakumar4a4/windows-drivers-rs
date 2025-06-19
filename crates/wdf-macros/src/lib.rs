@@ -276,6 +276,7 @@ fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, pa
 
         #[allow(non_snake_case)]
         extern "C" fn #cleanup_callback_name(fw_obj: #wdf_crate_path::WDFOBJECT) {
+            #wdf_crate_path::println!("Cleanup callback called for {} addr {:#x}", stringify!(#struct_name), fw_obj as usize);
             unsafe {
                 #wdf_crate_path::drop_context::<#struct_name>(fw_obj);
             }
