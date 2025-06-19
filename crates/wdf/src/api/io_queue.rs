@@ -55,8 +55,9 @@ impl IoQueue {
                 evt_io_device_control: queue_config.evt_io_device_control,
             };
 
+            IoQueueContext::attach(unsafe { &*(queue as *mut _) }, ctxt)?;
+
             let queue = unsafe { Arc::from_raw(queue as *mut _) };
-            IoQueueContext::attach(&queue, ctxt)?;
 
             Ok(queue)
         } else {

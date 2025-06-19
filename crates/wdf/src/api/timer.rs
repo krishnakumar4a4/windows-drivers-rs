@@ -50,8 +50,8 @@ impl Timer {
         };
 
         if NT_SUCCESS(status) {
+            TimerContext::attach(unsafe { &*(timer as *mut _) }, context)?;
             let timer = unsafe { Arc::from_raw(timer as *mut _) };
-            TimerContext::attach(&timer, context)?;
 
             Ok(timer)
         } else {
