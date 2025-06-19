@@ -180,8 +180,8 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
         // only when the ref count drops to zero. Therefore we do
         // not need Acquire every time fetch_sub is called. It is needed
         // only when the ref count has become zero. Hence, here we use
-        // only Release in fetch_sub and have a separate fench with
-        // Acquire inside the if block.
+        // only Release in fetch_sub and have a separate Acquire fence
+        // inside the if block.
         if ref_count.fetch_sub(1, Ordering::Release) == 1 {
             fence(Ordering::Acquire);
 
