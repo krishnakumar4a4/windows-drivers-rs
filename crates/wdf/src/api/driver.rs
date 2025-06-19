@@ -141,10 +141,11 @@ extern "C" fn evt_driver_device_add(
 }
 
 extern "C" fn driver_unload(driver: *mut DRIVER_OBJECT) {
-    // println!("Goodbye World!");
-    // println!("Driver Exit Complete!");
+    println!("Driver unload called");
 
     clean_up_tracing(driver);
+
+    println!("Driver unloaded");
 }
 
 /// Calls the safe driver entry function
