@@ -1,3 +1,7 @@
+extern crate alloc;
+
+use alloc::{format, string::String};
+
 use core::{
     cell::UnsafeCell,
     marker::PhantomData,
@@ -189,6 +193,11 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
 impl<T: RefCountedHandle> Handle for Arc<T> {
     fn as_ptr(&self) -> WDFOBJECT {
         self.as_ptr()
+    }
+
+    fn type_name() -> String {
+        let type_name = T::type_name();
+        alloc::format!("Arc<{}>", type_name)
     }
 }
 

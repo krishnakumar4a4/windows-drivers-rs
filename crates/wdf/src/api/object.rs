@@ -1,8 +1,12 @@
+extern crate alloc;
+
+use alloc::string::String;
 use core::sync::atomic::AtomicUsize;
 use wdk_sys::{WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_OBJECT_ATTRIBUTES};
 
 pub trait Handle {
     fn as_ptr(&self) -> WDFOBJECT;
+    fn type_name() -> String;
 }
 
 pub trait RefCountedHandle: Handle {
@@ -11,6 +15,8 @@ pub trait RefCountedHandle: Handle {
 
 macro_rules! impl_ref_counted_handle {
     ($obj:ident, $raw_ptr:ty, $primary_context:ty) => {
+        extern crate alloc;
+
         #[derive(Debug)]
         #[repr(C)]
         pub struct $obj {
@@ -20,6 +26,14 @@ macro_rules! impl_ref_counted_handle {
         impl crate::api::object::Handle for $obj {
             fn as_ptr(&self) -> WDFOBJECT {
                 self as *const _ as WDFOBJECT
+            }
+
+            fn type_name() -> alloc::string::String {
+                let name = paste::paste! {
+                    stringify!($obj)
+                };
+
+                alloc::string::String::from(name)
             }
         }
 

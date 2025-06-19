@@ -1,3 +1,6 @@
+extern crate alloc;
+
+use alloc::string::String;
 use super::{error::NtStatus, io_queue::IoQueue, NtResult};
 use crate::api::object::Handle;
 use wdf_macros::object_context;
@@ -64,6 +67,10 @@ impl Handle for Request {
     fn as_ptr(&self) -> WDFOBJECT {
         self.0 as *mut _
     }
+
+    fn type_name() -> String {
+        String::from("Request")
+    }
 }
 
 /// SAFETY: This is safe because all the WDF functions
@@ -105,6 +112,10 @@ impl CancellableMarkedRequest {
 impl Handle for CancellableMarkedRequest {
     fn as_ptr(&self) -> WDFOBJECT {
         self.0.as_ptr()
+    }
+
+    fn type_name() -> String {
+        String::from("CancellableMarkedRequest")
     }
 }
 
