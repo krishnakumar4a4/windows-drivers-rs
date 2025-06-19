@@ -16,7 +16,7 @@ use wdk_sys::{
 impl_ref_counted_handle!(
     IoQueue,
     WDFQUEUE,
-    IoQueueContext
+    PrimaryIoQueueContext
 );
 
 /// SAFETY: This is safe because all the WDF functions
@@ -47,7 +47,7 @@ impl IoQueue {
         };
 
         if NT_SUCCESS(status) {
-            let ctxt = IoQueueContext {
+            let ctxt = PrimaryIoQueueContext {
                 ref_count: AtomicUsize::new(0),
                 evt_io_default: queue_config.evt_io_default,
                 evt_io_read: queue_config.evt_io_read,
@@ -55,7 +55,7 @@ impl IoQueue {
                 evt_io_device_control: queue_config.evt_io_device_control,
             };
 
-            IoQueueContext::attach(unsafe { &*(queue as *mut _) }, ctxt)?;
+            PrimaryIoQueueContext::attach(unsafe { &*(queue as *mut _) }, ctxt)?;
 
             let queue = unsafe { Arc::from_raw(queue as *mut _) };
 
@@ -172,7 +172,7 @@ fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
 }
 
 #[primary_object_context(IoQueue)]
-struct IoQueueContext {
+struct PrimaryIoQueueContext {
     ref_count: AtomicUsize,
     evt_io_default: Option<fn(&IoQueue, Request)>,
     evt_io_read: Option<fn(&IoQueue, Request, usize)>,
@@ -186,7 +186,7 @@ macro_rules! unsafe_request_handler {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
                 let queue = unsafe { &*queue.cast::<IoQueue>() };
                 let request = unsafe { Request::from_raw(request as WDFREQUEST) };
-                if let Some(handlers) = IoQueueContext::get(&queue) {
+                if let Some(handlers) = PrimaryIoQueueContext::get(&queue) {
                     if let Some(handler) = handlers.$handler_name {
                         handler(queue, request $(, $arg_name)*);
                         return;

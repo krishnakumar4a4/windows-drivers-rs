@@ -14,7 +14,7 @@ use wdk_sys::{
 impl_ref_counted_handle!(
     Device,
     WDFDEVICE,
-    DeviceContext
+    PrimaryDeviceContext
 );
 
 impl Device {
@@ -33,7 +33,7 @@ impl Device {
 
         if NT_SUCCESS(status) {
             let device = unsafe { &*(device as *mut _) };
-            DeviceContext::attach(device, DeviceContext { ref_count: AtomicUsize::new(0) })?;
+            PrimaryDeviceContext::attach(device, PrimaryDeviceContext { ref_count: AtomicUsize::new(0) })?;
             Ok(device)
         } else {
             Err(status.into())
@@ -78,6 +78,6 @@ impl DeviceInit {
 }
 
 #[primary_object_context(Device)]
-struct DeviceContext {
+struct PrimaryDeviceContext {
     ref_count: AtomicUsize,
 }

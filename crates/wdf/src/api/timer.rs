@@ -20,12 +20,12 @@ use wdk_sys::{
 impl_ref_counted_handle!(
     Timer,
     WDFTIMER,
-    TimerContext
+    PrimaryTimerContext
 );
 
 impl Timer {
     pub fn create<'a, P: Handle>(config: &TimerConfig<'a, P>) -> NtResult<Arc<Self>> {
-        let context = TimerContext {
+        let context = PrimaryTimerContext {
             ref_count: AtomicUsize::new(0),
             evt_timer_func: config.evt_timer_func,
         };
@@ -50,7 +50,7 @@ impl Timer {
         };
 
         if NT_SUCCESS(status) {
-            TimerContext::attach(unsafe { &*(timer as *mut _) }, context)?;
+            PrimaryTimerContext::attach(unsafe { &*(timer as *mut _) }, context)?;
             let timer = unsafe { Arc::from_raw(timer as *mut _) };
 
             Ok(timer)
@@ -149,14 +149,14 @@ impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
 }
 
 #[primary_object_context(Timer)]
-struct TimerContext {
+struct PrimaryTimerContext {
     ref_count: AtomicUsize,
     evt_timer_func: fn(&Timer),
 }
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {
     let timer = unsafe { &*timer.cast::<Timer>() };
-    if let Some(timer_state) = TimerContext::get(&timer) {
+    if let Some(timer_state) = PrimaryTimerContext::get(&timer) {
         (timer_state.evt_timer_func)(timer);
     }
 }
