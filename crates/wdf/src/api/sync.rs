@@ -165,7 +165,7 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
         let obj = unsafe { &*self.as_ptr().cast::<T>() };
         let ref_count = obj.get_ref_count();
 
-        println!("Drop {}. Ref count before decrement: {}", Self::type_name(), ref_count.load(Ordering::Relaxed));
+        println!("Drop {}: Ref count {}", Self::type_name(), ref_count.load(Ordering::Relaxed));
 
         // We need to ensure here that:
         // 1. Access to T, the data we are carrying, is not reordered
@@ -185,7 +185,7 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
         if ref_count.fetch_sub(1, Ordering::Release) == 1 {
             fence(Ordering::Acquire);
 
-            println!("Dropped {}. Ref count reached 0", Self::type_name());
+            println!("Drop {}: Ref count 0. Deleting obj", Self::type_name());
 
             // SAFETY: The object is guarateed to be valid here
             // because it is deleted only here and no place else
