@@ -132,14 +132,14 @@ impl<T: RefCountedHandle> Arc<T> {
         let obj = &*ptr.cast::<T>();
         let ref_count = obj.get_ref_count();
 
-        // Relaxed ordering is fine here since we do not care if operations
-        // on other variables including T (i.e. the data we are carrying)
+        // Relaxed ordering is fine here since we do not care if
+        // operations on ptr (i.e. the WDF pointer we are carrying)
         // get reordered with respect to fetch_add. 
-        // After all it is totally okay to access T after the ref count has 
-        // been incremented because the object is guaranteed to be alive
-        // thanks to this very increment.
-        // We also prevent the ref count from overflowing here by bugchecking
-        // if it gets too high because an overflow would lead to all kinds of unsafety.
+        // It is totally okay to for an access to ptr to occur after
+        // the fetch_add call because the object is guaranteed to be
+        // alive thanks to this very ref count increment.
+        // Here we also prevent the ref count from overflowing by bugchecking
+        // early because an overflow would lead to all kinds of unsafety.
         if ref_count.fetch_add(1, Ordering::Relaxed) > usize::MAX / 2 {
             let ref_count = ref_count.load(Ordering::Relaxed);
             bug_check(0xDEADDEAD, ptr, Some(ref_count));
@@ -167,21 +167,16 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
 
         println!("Drop {}: Ref count {}", Self::type_name(), ref_count.load(Ordering::Relaxed));
 
-        // We need to ensure here that:
-        // 1. Access to T, the data we are carrying, is not reordered
-        // AFTER the fetch_sub operation because that might lead to
-        // a use-after-free in case the data has already been freed.
-        // 2. The call to WdfObjectDelete is not reordered BEFORE
-        // fetch_sub because it is wrong to delete T before the ref count
-        // has dropped to zero.
-
-        // We could have achieved both of those by using the AcqRel
-        // ordering.  However, the call to WdfObjectDelete is made
-        // only when the ref count drops to zero. Therefore we do
-        // not need Acquire every time fetch_sub is called. It is needed
-        // only when the ref count has become zero. Hence, here we use
-        // only Release in fetch_sub and have a separate Acquire fence
-        // inside the if block.
+        // We need to ensure here that if we are the thread doing
+        // the final delete (i.e calling WdfObjectDelete) then
+        // all other threads are done accessing ptr or we will get
+        // a use-after-free. Hence we must form a happens-before
+        // relationship with all the other threads calling drop.
+        // We could have achieved that by using the AcqRel ordering
+        // in fetch_sub. But WdfObjectDelete is called only when the
+        // ref count reaches zero. Therefore as an optimization we
+        // use only the Release ordering in fetch_sub and have a
+        // separate Acquire fence inside the if block.
         if ref_count.fetch_sub(1, Ordering::Release) == 1 {
             fence(Ordering::Acquire);
 
