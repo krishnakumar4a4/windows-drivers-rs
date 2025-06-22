@@ -210,12 +210,6 @@ impl<T: RefCountedHandle> Deref for Arc<T> {
     }
 }
 
-impl <T: RefCountedHandle> DerefMut for Arc<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *self.ptr.cast::<Self::Target>() }
-    }
-}   
-
 // Safety: `Arc<T>` being `Sync` requires `T` to be `Sync`
 // because sharing it effectively shares `T` However it
 // also requires `T` to be `Send` because any thread that
