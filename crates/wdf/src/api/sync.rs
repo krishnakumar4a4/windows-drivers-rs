@@ -205,6 +205,7 @@ impl<T: RefCountedHandle> Handle for Arc<T> {
 impl<T: RefCountedHandle> Deref for Arc<T> {
     type Target = T;
 
+    #[inline(always)]
     fn deref(&self) -> &Self::Target {
         unsafe { &*self.ptr.cast::<Self::Target>() }
     }
