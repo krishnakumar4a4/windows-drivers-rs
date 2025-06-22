@@ -6,7 +6,7 @@ use core::{
     cell::UnsafeCell,
     marker::PhantomData,
     sync::atomic::{Ordering, fence},
-    ops::{Deref, DerefMut},
+    ops::Deref,
 };
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFSPINLOCK};
 use wdk::println;
