@@ -109,12 +109,14 @@ impl<'a, T> Drop for SpinLockGuard<'a, T> {
 impl<'a, T> core::ops::Deref for SpinLockGuard<'a, T> {
     type Target = T;
 
+    #[inline(always)]
     fn deref(&self) -> &Self::Target {
         unsafe { &*self.spin_lock.data.get() }
     }
 }
 
 impl<'a, T> core::ops::DerefMut for SpinLockGuard<'a, T> {
+    #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.spin_lock.data.get() }
     }
