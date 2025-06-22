@@ -121,7 +121,7 @@ impl<'a, T> core::ops::DerefMut for SpinLockGuard<'a, T> {
 /// Arc for WDF object handles
 pub struct Arc<T: RefCountedHandle> {
     ptr: WDFOBJECT,
-    _marker: core::marker::PhantomData<T>,
+    _marker: PhantomData<T>,
 }
 
 impl<T: RefCountedHandle> Arc<T> {
