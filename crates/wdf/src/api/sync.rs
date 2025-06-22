@@ -4,9 +4,11 @@ use alloc::string::String;
 
 use core::{
     cell::UnsafeCell,
+    ffi::c_void,
     marker::PhantomData,
     sync::atomic::{Ordering, fence},
     ops::Deref,
+    ptr::NonNull,
 };
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFSPINLOCK};
 use wdk::println;
@@ -120,7 +122,10 @@ impl<'a, T> core::ops::DerefMut for SpinLockGuard<'a, T> {
 
 /// Arc for WDF object handles
 pub struct Arc<T: RefCountedHandle> {
-    ptr: WDFOBJECT,
+    // NonNull enables certain compiler optimizations
+    // such as making Option<Arc<T>> have the same size
+    // as *mut c_void
+    ptr: NonNull<c_void>,
     _marker: PhantomData<T>,
 }
 
@@ -145,18 +150,17 @@ impl<T: RefCountedHandle> Arc<T> {
             bug_check(0xDEADDEAD, ptr, Some(ref_count));
         }
 
-        Self { ptr, _marker: PhantomData }
-    }
+        // SAFETY: the incoming `ptr` is required to be non-null
+        // by the safety contract of `from_raw`
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
 
-    /// Gets the underlying raw WDF object pointer.
-    fn as_ptr(&self) -> WDFOBJECT {
-        self.ptr
+        Self { ptr, _marker: PhantomData }
     }
 }
 
 impl<T: RefCountedHandle> Clone for Arc<T> {
     fn clone(&self) -> Self {
-        unsafe { Self::from_raw(self.ptr) }
+        unsafe { Self::from_raw(self.as_ptr()) }
     }
 }
 
@@ -185,15 +189,16 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
             // SAFETY: The object is guarateed to be valid here
             // because it is deleted only here and no place else
             unsafe {
-                call_unsafe_wdf_function_binding!(WdfObjectDelete, self.ptr);
+                call_unsafe_wdf_function_binding!(WdfObjectDelete, self.as_ptr());
             }
         }
     }
 }
 
 impl<T: RefCountedHandle> Handle for Arc<T> {
+    #[inline(always)]
     fn as_ptr(&self) -> WDFOBJECT {
-        self.as_ptr()
+        self.ptr.as_ptr()
     }
 
     fn type_name() -> String {
@@ -207,7 +212,7 @@ impl<T: RefCountedHandle> Deref for Arc<T> {
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
-        unsafe { &*self.ptr.cast::<Self::Target>() }
+        unsafe { &*self.as_ptr().cast::<Self::Target>() }
     }
 }
 
