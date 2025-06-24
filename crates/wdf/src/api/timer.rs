@@ -8,7 +8,7 @@ use crate::api::{
 use core::{mem::MaybeUninit, ptr::null_mut, time::Duration};
 use wdf_macros::primary_object_context;
 use wdk_sys::{
-    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFTIMER, WDF_TIMER_CONFIG,
+    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_TIMER_CONFIG,
 };
 
 // TODO: Make timer more ergonomic and safer. It's
@@ -19,7 +19,6 @@ use wdk_sys::{
 
 impl_ref_counted_handle!(
     Timer,
-    WDFTIMER,
     PrimaryTimerContext
 );
 

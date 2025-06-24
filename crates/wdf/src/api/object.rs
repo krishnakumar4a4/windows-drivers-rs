@@ -14,7 +14,7 @@ pub trait RefCountedHandle: Handle {
 }
 
 macro_rules! impl_ref_counted_handle {
-    ($obj:ident, $raw_ptr:ty, $primary_context:ty) => {
+    ($obj:ident, $primary_context:ty) => {
         extern crate alloc;
 
         #[derive(Debug)]
@@ -24,8 +24,8 @@ macro_rules! impl_ref_counted_handle {
         }
 
         impl crate::api::object::Handle for $obj {
-            fn as_ptr(&self) -> WDFOBJECT {
-                self as *const _ as WDFOBJECT
+            fn as_ptr(&self) -> wdk_sys::WDFOBJECT {
+                self as *const _ as wdk_sys::WDFOBJECT
             }
 
             fn type_name() -> alloc::string::String {

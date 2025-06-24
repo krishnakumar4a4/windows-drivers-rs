@@ -8,14 +8,13 @@ use crate::api::{
 };
 use wdf_macros::primary_object_context;
 use wdk_sys::{
-    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFQUEUE, WDFREQUEST,
+    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFQUEUE, WDFREQUEST,
     WDF_IO_QUEUE_CONFIG, WDF_IO_QUEUE_DISPATCH_TYPE, _WDF_IO_QUEUE_DISPATCH_TYPE,
     WDF_OBJECT_ATTRIBUTES, WDF_NO_OBJECT_ATTRIBUTES
 };
 
 impl_ref_counted_handle!(
     IoQueue,
-    WDFQUEUE,
     PrimaryIoQueueContext
 );
 

@@ -7,13 +7,12 @@ use crate::api::{
 };
 use wdf_macros::primary_object_context;
 use wdk_sys::{
-    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFDEVICE, WDFDEVICE_INIT, WDFOBJECT, WDF_NO_HANDLE,
+    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFDEVICE, WDFDEVICE_INIT, WDF_NO_HANDLE,
     WDF_NO_OBJECT_ATTRIBUTES,
 };
 
 impl_ref_counted_handle!(
     Device,
-    WDFDEVICE,
     PrimaryDeviceContext
 );
 
