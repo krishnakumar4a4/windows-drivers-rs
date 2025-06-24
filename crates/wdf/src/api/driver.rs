@@ -61,7 +61,7 @@ pub struct Driver {
 
 impl Driver {
     // TODO: 
-    fn retrieve_version_string(&self) -> NtResult<String> {
+    pub fn retrieve_version_string(&self) -> NtResult<String> {
         let string = FwString::create()?;
 
         let status = unsafe {
