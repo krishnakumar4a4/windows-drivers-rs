@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::string::String;
 
 use crate::api::guid::Guid;
-use crate::api::string::{FwString, to_rust_str, to_unicode_string, to_utf16_buf};
+use crate::api::string::{to_rust_str, to_unicode_string, to_utf16_buf, WString};
 use crate::api::error::NtResult;
 use crate::api::*;
 // use wdk::println;
@@ -62,7 +62,7 @@ pub struct Driver {
 impl Driver {
     // TODO: 
     pub fn retrieve_version_string(&self) -> NtResult<String> {
-        let string = FwString::create()?;
+        let string = WString::create()?;
 
         let status = unsafe {
             call_unsafe_wdf_function_binding!(WdfDriverRetrieveVersionString,

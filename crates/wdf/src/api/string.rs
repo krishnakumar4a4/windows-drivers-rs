@@ -7,9 +7,9 @@ use crate::api::{
     object::Handle,
 };
 
-pub(crate) struct FwString(WDFSTRING);
+pub(crate) struct WString(WDFSTRING);
 
-impl Handle for FwString {
+impl Handle for WString {
     #[inline(always)]
     fn as_ptr(&self) -> WDFOBJECT {
         self.0 as WDFOBJECT
@@ -20,7 +20,7 @@ impl Handle for FwString {
     }
 }
 
-impl FwString {
+impl WString {
     pub fn create() -> NtResult<Self> {
         let mut raw_string: WDFSTRING = core::ptr::null_mut();
         let status = unsafe {
@@ -48,7 +48,7 @@ impl FwString {
 }
 
 
-impl Drop for FwString {
+impl Drop for WString {
     fn drop(&mut self) {
         // SAFETY: The contract of the FwString type constructor
         // requires that the underlying pointer is a valid WDFOBJECT.
