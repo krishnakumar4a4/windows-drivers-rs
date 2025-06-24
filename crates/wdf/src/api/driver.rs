@@ -1,5 +1,10 @@
+extern crate alloc;
+
+use alloc::string::String;
+
 use crate::api::guid::Guid;
-use crate::api::string::{to_rust_str, to_unicode_string, to_utf16_buf};
+use crate::api::string::{FwString, to_rust_str, to_unicode_string, to_utf16_buf};
+use crate::api::error::NtResult;
 use crate::api::*;
 // use wdk::println;
 
@@ -12,11 +17,8 @@ pub use wdk_sys::{
 use wdk_sys::{
     call_unsafe_wdf_function_binding, GUID, LONG, LPCGUID, LPCSTR, LPGUID, PDRIVER_OBJECT,
     PREGHANDLE, PULONG, PUNICODE_STRING, PVOID, REGHANDLE, TRACEHANDLE, UCHAR, ULONG, ULONG64,
-    UNICODE_STRING, USHORT, WDFDEVICE_INIT, WDFDRIVER, WDF_DRIVER_CONFIG, WDF_NO_HANDLE,
-    WDF_NO_OBJECT_ATTRIBUTES,
+    UNICODE_STRING, USHORT, WDFDEVICE_INIT, WDFDRIVER, WDF_DRIVER_CONFIG, WDF_NO_OBJECT_ATTRIBUTES
 };
-
-extern crate alloc;
 
 use core::{mem, ptr};
 
@@ -25,6 +27,8 @@ static mut EVT_DEVICE_ADD: Option<fn(_: &mut DeviceInit) -> Result<(), NtError>>
 static mut CONTROL_GUID: Option<Guid> = None;
 
 static mut TRACING_CONFIG: Option<TracingConfig> = None;
+
+static mut WDF_DRIVER: WDFDRIVER = core::ptr::null_mut();
 
 const WPP_FLAG_LEN: UCHAR = 1;
 
@@ -56,6 +60,27 @@ pub struct Driver {
 }
 
 impl Driver {
+    // TODO: 
+    fn retrieve_version_string(&self) -> NtResult<String> {
+        let string = FwString::create()?;
+
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(WdfDriverRetrieveVersionString,
+                WDF_DRIVER,
+                string.as_ptr() as *mut _,
+            )
+        };
+
+        if !NT_SUCCESS(status) {
+            return Err(status.into());
+        }
+
+        let mut unicode_string = UNICODE_STRING::default();
+        unsafe { call_unsafe_wdf_function_binding!(WdfStringGetUnicodeString, string.as_ptr() as *mut _, &mut unicode_string); }
+
+        Ok(to_rust_str(unicode_string))
+    }
+
     /// Registers a callback for the `EvtDeviceAdd` event
     pub fn on_evt_device_add(&self, callback: fn(&mut DeviceInit) -> Result<(), NtError>) {
         unsafe {
@@ -163,8 +188,6 @@ pub fn call_safe_driver_entry(
         ..WDF_DRIVER_CONFIG::default()
     };
 
-    let driver_handle_output = WDF_NO_HANDLE.cast::<WDFDRIVER>();
-
     let nt_status = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfDriverCreate,
@@ -172,7 +195,7 @@ pub fn call_safe_driver_entry(
             registry_path,
             WDF_NO_OBJECT_ATTRIBUTES,
             &mut driver_config,
-            driver_handle_output
+            &raw mut WDF_DRIVER,
         )
     };
 
