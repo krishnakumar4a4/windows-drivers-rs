@@ -54,7 +54,12 @@ struct TimerContext {
 /// to call this driver
 #[driver_entry]
 fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), NtError> {
-    println!("Safe Rust driver entry called. Registry path: {registry_path}");
+    if cfg!(debug_assertions) {
+        let driver_version = driver.retrieve_version_string()?;
+        println!("Echo Sample {driver_version}");
+    }
+
+    println!("Registry path: {registry_path}");
 
     // Set up the device add callback
     driver.on_evt_device_add(evt_device_add);
