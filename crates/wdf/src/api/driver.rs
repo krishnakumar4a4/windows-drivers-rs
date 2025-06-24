@@ -75,10 +75,7 @@ impl Driver {
             return Err(status.into());
         }
 
-        let mut unicode_string = UNICODE_STRING::default();
-        unsafe { call_unsafe_wdf_function_binding!(WdfStringGetUnicodeString, string.as_ptr() as *mut _, &mut unicode_string); }
-
-        Ok(to_rust_str(unicode_string))
+        Ok(string.to_rust_string())
     }
 
     /// Registers a callback for the `EvtDeviceAdd` event
