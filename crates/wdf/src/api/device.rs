@@ -173,4 +173,3 @@ macro_rules! unsafe_pnp_power_callback {
 unsafe_pnp_power_callback!(evt_device_self_managed_io_init);
 unsafe_pnp_power_callback!(evt_device_self_managed_io_suspend);
 unsafe_pnp_power_callback!(evt_device_self_managed_io_restart);
-
