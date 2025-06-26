@@ -71,6 +71,24 @@ impl IoQueue {
             &*(device as *mut _)
         }
     }
+
+    pub fn start(&self) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfIoQueueStart,
+                self.as_ptr() as *mut _,
+            );
+        }
+    }
+
+    pub fn stop_synchronously(&self) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfIoQueueStopSynchronously,
+                self.as_ptr() as *mut _,
+            );
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
