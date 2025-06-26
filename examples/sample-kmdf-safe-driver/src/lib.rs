@@ -21,7 +21,8 @@
 use wdf::{
     Arc, driver_entry, object_context, println, trace, CancellableMarkedRequest, Request,
     RequestCancellationToken, Device, DeviceInit, Driver, Guid, IoQueue,
-    IoQueueConfig, NtError, NtStatus, SpinLock, Timer, TimerConfig
+    IoQueueConfig, NtError, NtResult, NtStatus, PnpPowerEventCallbacks, SpinLock, Timer,
+    TimerConfig
 };
 
 use core::time::Duration;
@@ -78,7 +79,12 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     println!("evt_device_add called");
 
     // Create device
-    let device = Device::create(device_init)?;
+    let mut pnp_power_callbacks = PnpPowerEventCallbacks::default();
+    pnp_power_callbacks.evt_device_self_managed_io_init = Some(evt_device_self_managed_io_init);
+    pnp_power_callbacks.evt_device_self_managed_io_suspend = Some(evt_device_self_managed_io_suspend);
+    pnp_power_callbacks.evt_device_self_managed_io_restart = Some(evt_device_self_managed_io_restart);
+
+    let device = Device::create(device_init, Some(pnp_power_callbacks))?;
 
     // Create queue
     let mut queue_config = IoQueueConfig::default();
@@ -183,4 +189,19 @@ fn evt_timer(timer: &Timer) {
     }
 
     timer.stop(false);
+}
+
+fn evt_device_self_managed_io_init(device: &Device) -> NtResult<()>{
+    println!("Self-managed I/O initialized for device: {:?}", device);
+    Ok(())
+}
+
+fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
+    println!("Self-managed I/O suspended for device: {:?}", device);
+    Ok(())
+}
+
+fn evt_device_self_managed_io_restart(device: &Device) -> NtResult<()> {
+    println!("Self-managed I/O restarted for device: {:?}", device);
+    Ok(())
 }

@@ -1,14 +1,18 @@
-use core::sync::atomic::AtomicUsize;
+use core::{
+    sync::atomic::AtomicUsize,
+    default::Default,
+};
 use crate::api::{
     error::NtResult,
     guid::Guid,
-    object::{Handle, impl_ref_counted_handle},
+    object::{Handle, impl_ref_counted_handle, wdf_struct_size},
     string::{to_unicode_string, to_utf16_buf},
 };
 use wdf_macros::primary_object_context;
 use wdk_sys::{
-    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFDEVICE, WDFDEVICE_INIT, WDF_NO_HANDLE,
-    WDF_NO_OBJECT_ATTRIBUTES,
+    call_unsafe_wdf_function_binding, NTSTATUS, NT_SUCCESS, WDFDEVICE,
+    WDFDEVICE_INIT, WDF_NO_HANDLE, WDF_NO_OBJECT_ATTRIBUTES,
+    WDF_PNPPOWER_EVENT_CALLBACKS
 };
 
 impl_ref_counted_handle!(
@@ -17,7 +21,18 @@ impl_ref_counted_handle!(
 );
 
 impl Device {
-    pub fn create(device_init: &mut DeviceInit) -> NtResult<&Self> {
+    pub fn create(device_init: &mut DeviceInit, pnp_power_callbacks: Option<PnpPowerEventCallbacks>) -> NtResult<&Self> {
+        if let Some(ref pnp_power_callbacks) = pnp_power_callbacks {
+            let mut pnp_power_callbacks = to_unsafe_pnp_power_callbacks(pnp_power_callbacks);
+
+            unsafe {
+                call_unsafe_wdf_function_binding!(WdfDeviceInitSetPnpPowerEventCallbacks,
+                    device_init.as_ptr_mut(),
+                    &mut pnp_power_callbacks
+                );
+            }
+        }
+
         let mut device: WDFDEVICE = WDF_NO_HANDLE.cast();
         let mut device_init_ptr: *mut WDFDEVICE_INIT = device_init.as_ptr_mut();
 
@@ -32,7 +47,7 @@ impl Device {
 
         if NT_SUCCESS(status) {
             let device = unsafe { &*(device as *mut _) };
-            PrimaryDeviceContext::attach(device, PrimaryDeviceContext { ref_count: AtomicUsize::new(0) })?;
+            PrimaryDeviceContext::attach(device, PrimaryDeviceContext { ref_count: AtomicUsize::new(0), pnp_power_callbacks })?;
             Ok(device)
         } else {
             Err(status.into())
@@ -79,4 +94,83 @@ impl DeviceInit {
 #[primary_object_context(Device)]
 struct PrimaryDeviceContext {
     ref_count: AtomicUsize,
+    pnp_power_callbacks: Option<PnpPowerEventCallbacks>,
 }
+
+pub struct PnpPowerEventCallbacks {
+    // PFN_WDF_DEVICE_D0_ENTRY                 EvtDeviceD0Entry;
+    // PFN_WDF_DEVICE_D0_ENTRY_POST_INTERRUPTS_ENABLED EvtDeviceD0EntryPostInterruptsEnabled;
+    // PFN_WDF_DEVICE_D0_EXIT                  EvtDeviceD0Exit;
+    // PFN_WDF_DEVICE_D0_EXIT_PRE_INTERRUPTS_DISABLED EvtDeviceD0ExitPreInterruptsDisabled;
+    // PFN_WDF_DEVICE_PREPARE_HARDWARE         EvtDevicePrepareHardware;
+    // PFN_WDF_DEVICE_RELEASE_HARDWARE         EvtDeviceReleaseHardware;
+    // PFN_WDF_DEVICE_SELF_MANAGED_IO_CLEANUP  EvtDeviceSelfManagedIoCleanup;
+    // PFN_WDF_DEVICE_SELF_MANAGED_IO_FLUSH    EvtDeviceSelfManagedIoFlush;
+    pub evt_device_self_managed_io_init: Option<fn(&Device) -> NtResult<()>>,
+    pub evt_device_self_managed_io_suspend: Option<fn(&Device) -> NtResult<()>>, 
+    pub evt_device_self_managed_io_restart: Option<fn(&Device) -> NtResult<()>>,
+    // PFN_WDF_DEVICE_SURPRISE_REMOVAL         EvtDeviceSurpriseRemoval;
+    // PFN_WDF_DEVICE_QUERY_REMOVE             EvtDeviceQueryRemove;
+    // PFN_WDF_DEVICE_QUERY_STOP               EvtDeviceQueryStop;
+    // PFN_WDF_DEVICE_USAGE_NOTIFICATION       EvtDeviceUsageNotification;
+    // PFN_WDF_DEVICE_RELATIONS_QUERY          EvtDeviceRelationsQuery;
+    // PFN_WDF_DEVICE_USAGE_NOTIFICATION_EX    EvtDeviceUsageNotificationEx;
+}
+
+impl Default for PnpPowerEventCallbacks {
+    fn default() -> Self {
+        Self {
+            evt_device_self_managed_io_init: None,
+            evt_device_self_managed_io_suspend: None,
+            evt_device_self_managed_io_restart: None,
+        }
+    }
+}
+
+fn to_unsafe_pnp_power_callbacks(pnp_power_callbacks: &PnpPowerEventCallbacks) -> WDF_PNPPOWER_EVENT_CALLBACKS {
+    let mut unsafe_callbacks = WDF_PNPPOWER_EVENT_CALLBACKS::default();
+    unsafe_callbacks.Size = wdf_struct_size!(WDF_PNPPOWER_EVENT_CALLBACKS);
+
+
+    if pnp_power_callbacks.evt_device_self_managed_io_init.is_some() {
+        unsafe_callbacks.EvtDeviceSelfManagedIoInit = Some(__evt_device_self_managed_io_init);
+    }
+
+    if pnp_power_callbacks.evt_device_self_managed_io_suspend.is_some() {
+        unsafe_callbacks.EvtDeviceSelfManagedIoSuspend = Some(__evt_device_self_managed_io_suspend);
+    }
+
+    if pnp_power_callbacks.evt_device_self_managed_io_restart.is_some() {
+        unsafe_callbacks.EvtDeviceSelfManagedIoRestart = Some(__evt_device_self_managed_io_restart);
+    }
+
+    unsafe_callbacks
+}
+
+
+macro_rules! unsafe_pnp_power_callback {
+    ($callback_name:ident) => {
+        paste::paste! {
+            pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE) -> NTSTATUS {
+                let device = unsafe { &*(device as *mut Device) };
+                if let Some(ctxt) = PrimaryDeviceContext::get(&device) {
+                    if let Some(callbacks) = &ctxt.pnp_power_callbacks {
+                        if let Some(callback) = callbacks.$callback_name {
+                            return match callback(device) {
+                                Ok(_) => 0,
+                                Err(err) => err.nt_status(),
+                            };
+                        }
+                    }
+                }
+
+                panic!("User did not provide callback {} but we subscribed to it", stringify!($callback_name));
+            }
+        }
+    };
+}
+
+unsafe_pnp_power_callback!(evt_device_self_managed_io_init);
+unsafe_pnp_power_callback!(evt_device_self_managed_io_suspend);
+unsafe_pnp_power_callback!(evt_device_self_managed_io_restart);
+
