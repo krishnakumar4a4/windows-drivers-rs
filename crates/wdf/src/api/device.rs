@@ -5,6 +5,7 @@ use core::{
 use crate::api::{
     error::NtResult,
     guid::Guid,
+    io_queue::IoQueue,
     object::{Handle, impl_ref_counted_handle, wdf_struct_size},
     string::{to_unicode_string, to_utf16_buf},
 };
@@ -75,6 +76,21 @@ impl Device {
             Ok(())
         } else {
             Err(status.into())
+        }
+    }
+
+    pub fn get_default_queue(&self) -> Option<&IoQueue> {
+        let queue = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceGetDefaultQueue,
+                self.as_ptr() as *mut _,
+            )
+        };
+
+        if !queue.is_null() {
+            Some(unsafe { &*(queue as *mut IoQueue) })
+        } else {
+            None
         }
     }
 }
