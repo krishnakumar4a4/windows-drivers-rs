@@ -17,7 +17,6 @@ macro_rules! impl_ref_counted_handle {
     ($obj:ident, $primary_context:ty) => {
         extern crate alloc;
 
-        #[derive(Debug)]
         #[repr(C)]
         pub struct $obj {
             _private: [u8; 0], // Prevents instantiation of the struct from driver code
@@ -34,6 +33,12 @@ macro_rules! impl_ref_counted_handle {
                 };
 
                 alloc::string::String::from(name)
+            }
+        }
+
+        impl core::fmt::Debug for $obj {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                write!(f, "{}({:#x})", stringify!($obj), self as *const _ as usize)
             }
         }
 
