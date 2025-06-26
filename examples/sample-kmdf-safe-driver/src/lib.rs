@@ -80,9 +80,9 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
 
     // Create device
     let mut pnp_power_callbacks = PnpPowerEventCallbacks::default();
-    pnp_power_callbacks.evt_device_self_managed_io_init = Some(evt_device_self_managed_io_init);
+    pnp_power_callbacks.evt_device_self_managed_io_init = Some(evt_device_self_managed_io_start);
     pnp_power_callbacks.evt_device_self_managed_io_suspend = Some(evt_device_self_managed_io_suspend);
-    pnp_power_callbacks.evt_device_self_managed_io_restart = Some(evt_device_self_managed_io_restart);
+    pnp_power_callbacks.evt_device_self_managed_io_restart = Some(evt_device_self_managed_io_start);
 
     let device = Device::create(device_init, Some(pnp_power_callbacks))?;
 
@@ -95,7 +95,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     let queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
 
     // Create timer
-    let timer_config = TimerConfig::new_non_periodic(&queue, evt_timer);
+    let timer_config = TimerConfig::new_periodic(&queue, evt_timer, 10_000, 0, false);
 
     let timer = Timer::create(&timer_config)?;
 
@@ -124,6 +124,40 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     Ok(())
 }
 
+/// Callback for starting self-managed I/O
+fn evt_device_self_managed_io_start(device: &Device) -> NtResult<()>{
+    println!("Self-managed I/O start called: {:?}", device);
+
+    let queue = device.get_default_queue().
+        expect("Failed to get default queue");
+
+    queue.start();
+
+    let context = QueueContext::get(&queue)
+        .expect("Failed to get queue context"); 
+
+    let _ = context.timer.start(&Duration::from_millis(100));
+
+    Ok(())
+}
+
+/// Callback for stopping self-managed I/O
+fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
+    println!("Self-managed I/O suspend called: {:?}", device);
+
+    let queue = device.get_default_queue().
+        expect("Failed to get default queue");
+
+    queue.stop_synchronously();
+
+    let context = QueueContext::get(&queue)
+        .expect("Failed to get queue context"); 
+
+    context.timer.stop(false);
+
+    Ok(())
+}
+
 /// Callback that is called when a write request is received
 fn evt_io_write(queue: &IoQueue, request: Request, _length: usize) {
     println!("evt_io_write called");
@@ -134,7 +168,6 @@ fn evt_io_write(queue: &IoQueue, request: Request, _length: usize) {
         match request.mark_cancellable(evt_request_cancel) {
             Ok(cancellable_req) => {
                 *context.request.lock() = Some(cancellable_req);
-                let _ = context.timer.start(&Duration::from_secs(5));
 
                 println!("Request marked as cancellable");
             }
@@ -185,23 +218,6 @@ fn evt_timer(timer: &Timer) {
         req.complete(NtStatus::Success);
         println!("Request completed");
     } else {
-        println!("Request already cancelled or completed");
+        println!("No request pending");
     }
-
-    timer.stop(false);
-}
-
-fn evt_device_self_managed_io_init(device: &Device) -> NtResult<()>{
-    println!("Self-managed I/O initialized for device: {:?}", device);
-    Ok(())
-}
-
-fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
-    println!("Self-managed I/O suspended for device: {:?}", device);
-    Ok(())
-}
-
-fn evt_device_self_managed_io_restart(device: &Device) -> NtResult<()> {
-    println!("Self-managed I/O restarted for device: {:?}", device);
-    Ok(())
 }
