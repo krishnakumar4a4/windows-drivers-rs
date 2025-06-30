@@ -13,8 +13,8 @@ pub trait RefCountedHandle: Handle {
     fn get_ref_count(&self) -> &AtomicUsize;
 }
 
-macro_rules! impl_ref_counted_handle {
-    ($obj:ident, $primary_context:ty) => {
+macro_rules! impl_handle {
+    ($obj:ident) => {
         extern crate alloc;
 
         #[repr(C)]
@@ -41,6 +41,12 @@ macro_rules! impl_ref_counted_handle {
                 write!(f, "{}({:#x})", stringify!($obj), self as *const _ as usize)
             }
         }
+    }
+}
+
+macro_rules! impl_ref_counted_handle {
+    ($obj:ident, $primary_context:ty) => {
+        crate::api::object::impl_handle!($obj);
 
         impl crate::api::object::RefCountedHandle for $obj {
             fn get_ref_count(&self) -> &core::sync::atomic::AtomicUsize {
@@ -68,6 +74,7 @@ macro_rules! wdf_struct_size {
     }};
 }
 
+pub(crate) use impl_handle;
 pub(crate) use impl_ref_counted_handle;
 pub(crate) use wdf_struct_size;
 
