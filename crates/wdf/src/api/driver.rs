@@ -2,9 +2,12 @@ extern crate alloc;
 
 use alloc::string::String;
 
-use crate::api::guid::Guid;
-use crate::api::string::{to_rust_str, to_unicode_string, to_utf16_buf, WString};
-use crate::api::error::NtResult;
+use crate::api:: {
+    error::NtResult,
+    guid::Guid,
+    object::wdf_struct_size,
+    string::{to_rust_str, to_unicode_string, to_utf16_buf, WString}};
+
 use crate::api::*;
 // use wdk::println;
 
@@ -17,7 +20,8 @@ pub use wdk_sys::{
 use wdk_sys::{
     call_unsafe_wdf_function_binding, GUID, LONG, LPCGUID, LPCSTR, LPGUID, PDRIVER_OBJECT,
     PREGHANDLE, PULONG, PUNICODE_STRING, PVOID, REGHANDLE, TRACEHANDLE, UCHAR, ULONG, ULONG64,
-    UNICODE_STRING, USHORT, WDFDEVICE_INIT, WDFDRIVER, WDF_DRIVER_CONFIG, WDF_NO_OBJECT_ATTRIBUTES
+    UNICODE_STRING, USHORT, WDFDEVICE_INIT, WDFDRIVER, WDF_DRIVER_CONFIG, WDF_NO_OBJECT_ATTRIBUTES,
+    WDF_DRIVER_VERSION_AVAILABLE_PARAMS
 };
 
 use core::{mem, ptr};
@@ -76,6 +80,23 @@ impl Driver {
         }
 
         Ok(string.to_rust_string())
+    }
+
+    pub fn is_version_available(&self, major_vesion: u32, minor_version: u32) -> bool {
+        let mut params = WDF_DRIVER_VERSION_AVAILABLE_PARAMS {
+            Size: wdf_struct_size!(WDF_DRIVER_VERSION_AVAILABLE_PARAMS),
+            MajorVersion: major_vesion,
+            MinorVersion: minor_version,
+        };
+
+        let res = unsafe {
+            call_unsafe_wdf_function_binding!(WdfDriverIsVersionAvailable,
+                WDF_DRIVER,
+                &mut params as *mut _,
+            )
+        };
+
+        res != 0
     }
 
     /// Registers a callback for the `EvtDeviceAdd` event
