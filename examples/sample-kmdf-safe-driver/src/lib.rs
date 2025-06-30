@@ -48,18 +48,30 @@ struct TimerContext {
     queue: Arc<IoQueue>
 }
 
-/// The entry point for the driver
+/// The entry point for the driver. It initializes the driver and is the first
+/// routine called by the system after the driver is loaded. `driver_entry`
+/// specifies the other entry points in the function driver, such as
+/// `evt_device_add` and `driver_unload`.
 /// 
 /// The #[driver_entry] attribute is used to mark the entry point.
 /// It is a proc macro that generates the shim code which enables WDF
 /// to call this driver
+///
+/// # Arguments
+/// 
+/// * `driver` - Represents the instance of the function driver that is loaded
+/// into memory. `driver` object is allocated by the system before the
+/// driver is loaded, and it is released by the system after the system unloads
+/// the function driver from memory.
+/// 
+/// * `registry_path` - Represents the driver specific path in the Registry.
+/// The function driver can use the path to store driver related data between
+/// reboots. The path does not store hardware instance specific data.
 #[driver_entry]
-fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), NtError> {
+fn driver_entry(driver: &mut Driver, _registry_path: &str) -> Result<(), NtError> {
     if cfg!(debug_assertions) {
         print_driver_version(driver)?;
     }
-
-    println!("Registry path: {registry_path}");
 
     // Set up the device add callback
     driver.on_evt_device_add(evt_device_add);
@@ -73,11 +85,31 @@ fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), NtError>
     Ok(())
 }
 
-/// Callback that is called when a device is added
+/// `evt_device_add` is called by the framework in response to AddDevice
+/// call from the PnP manager. We create and initialize a device object to
+/// represent a new instance of the device.
+///
+/// # Arguments
+///
+/// * `device_init` - Reference to a framework-allocated `DeviceInit` structure.
 fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
-    println!("evt_device_add called");
+    println!("Enter evt_device_add");
 
-    // Create device
+    device_create(device_init)
+}
+
+
+/// Worker routine called to create a device and its software resources.
+///
+/// # Arguments:
+///
+/// * `device_init` - Pointer to an opaque init structure. Memory for
+/// this structure will be freed by the framework when the
+/// WdfDeviceCreate succeeds. So don't access the structure after
+/// that point.
+fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
+    // Register pnp/power callbacks so that we can start and stop the
+    // timer as the device gets started and stopped.
     let mut pnp_power_callbacks = PnpPowerEventCallbacks::default();
     pnp_power_callbacks.evt_device_self_managed_io_init = Some(evt_device_self_managed_io_start);
     pnp_power_callbacks.evt_device_self_managed_io_suspend = Some(evt_device_self_managed_io_suspend);
@@ -85,42 +117,14 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
 
     let device = Device::create(device_init, Some(pnp_power_callbacks))?;
 
-    // Create queue
-    let mut queue_config = IoQueueConfig::default();
-
-    queue_config.default_queue = true;
-    queue_config.evt_io_write = Some(evt_io_write);
-
-    let queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
-
-    // Create timer
-    let timer_config = TimerConfig::new_periodic(&queue, evt_timer, 10_000, 0, false);
-
-    let timer = Timer::create(&timer_config)?;
-
-    // Attach context to the timer
-    let timer_context = TimerContext {
-        queue: queue.clone()
-    };
-
-    TimerContext::attach(&timer, timer_context)?;
-
-    // Attach context to the queue
-    let queue_context = QueueContext {
-        request: SpinLock::create(None)?,
-        timer
-    };
-
-    QueueContext::attach(&queue, queue_context)?;
-
-    // Create device interface
+    // Create a device interface so that application can find and talk
+    // to us.
     let _ = device.create_interface(
         &Guid::parse("2aa02ab1-c26e-431b-8efe-85ee8de102e4").expect("GUID is valid"),
         None
     )?; 
 
-    trace("Trace: Safe Rust device add complete");
-    Ok(())
+    queue_initialize(&device)
 }
 
 /// Callback for starting self-managed I/O
@@ -154,6 +158,48 @@ fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
 
     context.timer.stop(false);
 
+    Ok(())
+}
+
+/// The I/O dispatch callbacks for the frameworks device object
+/// are configured in this function.
+/// 
+/// A single default I/O Queue is configured for serial request
+/// processing, and queue context is set up. The lifetime ofthe
+/// context is tied to the lifetime of the I/O Queue object.
+/// 
+/// # Arguments
+/// 
+/// * `device`` - Handle to a framework device object.
+fn queue_initialize(device: &Device) -> NtResult<()> {
+    // Create queue
+    let mut queue_config = IoQueueConfig::default();
+
+    queue_config.default_queue = true;
+    queue_config.evt_io_write = Some(evt_io_write);
+
+    let queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
+
+    // Create timer
+    let timer_config = TimerConfig::new_periodic(&queue, evt_timer, 9_000, 0, false);
+
+    let timer = Timer::create(&timer_config)?;
+
+    // Attach context to the timer
+    let timer_context = TimerContext {
+        queue: queue.clone()
+    };
+
+    TimerContext::attach(&timer, timer_context)?;
+
+    // Attach context to the queue
+    let queue_context = QueueContext {
+        request: SpinLock::create(None)?,
+        timer
+    };
+
+    QueueContext::attach(&queue, queue_context)?;
+    
     Ok(())
 }
 
