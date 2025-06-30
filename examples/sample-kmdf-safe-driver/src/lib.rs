@@ -56,8 +56,7 @@ struct TimerContext {
 #[driver_entry]
 fn driver_entry(driver: &mut Driver, registry_path: &str) -> Result<(), NtError> {
     if cfg!(debug_assertions) {
-        let driver_version = driver.retrieve_version_string()?;
-        println!("Echo Sample {driver_version}");
+        print_driver_version(driver)?;
     }
 
     println!("Registry path: {registry_path}");
@@ -220,4 +219,20 @@ fn evt_timer(timer: &Timer) {
     } else {
         println!("No request pending");
     }
+}
+
+/// This routine shows how to retrieve framework version string and
+/// also how to find out to which version of framework library the
+/// client driver is bound to.
+fn print_driver_version(driver: &Driver) -> NtResult<()> {
+    let driver_version = driver.retrieve_version_string()?;
+    println!("Echo Sample {driver_version}");
+
+    if driver.is_version_available(1, 0) {
+        println!("Yes, framework version is 1.0");
+    } else {
+        println!("No, framework verison is not 1.0");
+    }
+
+    Ok(())
 }
