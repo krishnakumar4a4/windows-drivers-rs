@@ -6,7 +6,7 @@ use crate::api::{
     request::Request,
     sync::Arc,
 };
-use wdf_macros::primary_object_context;
+use wdf_macros::inner_object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, WDFQUEUE, WDFREQUEST,
     WDF_IO_QUEUE_CONFIG, WDF_IO_QUEUE_DISPATCH_TYPE, _WDF_IO_QUEUE_DISPATCH_TYPE,
@@ -15,7 +15,7 @@ use wdk_sys::{
 
 impl_ref_counted_handle!(
     IoQueue,
-    PrimaryIoQueueContext
+    InnerIoQueueContext
 );
 
 /// SAFETY: This is safe because all the WDF functions
@@ -46,7 +46,7 @@ impl IoQueue {
         };
 
         if NT_SUCCESS(status) {
-            let ctxt = PrimaryIoQueueContext {
+            let ctxt = InnerIoQueueContext {
                 ref_count: AtomicUsize::new(0),
                 evt_io_default: queue_config.evt_io_default,
                 evt_io_read: queue_config.evt_io_read,
@@ -54,7 +54,7 @@ impl IoQueue {
                 evt_io_device_control: queue_config.evt_io_device_control,
             };
 
-            PrimaryIoQueueContext::attach(unsafe { &*(queue as *mut _) }, ctxt)?;
+            InnerIoQueueContext::attach(unsafe { &*(queue as *mut _) }, ctxt)?;
 
             let queue = unsafe { Arc::from_raw(queue as *mut _) };
 
@@ -188,8 +188,8 @@ fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
     config
 }
 
-#[primary_object_context(IoQueue)]
-struct PrimaryIoQueueContext {
+#[inner_object_context(IoQueue)]
+struct InnerIoQueueContext {
     ref_count: AtomicUsize,
     evt_io_default: Option<fn(&IoQueue, Request)>,
     evt_io_read: Option<fn(&IoQueue, Request, usize)>,
@@ -203,7 +203,7 @@ macro_rules! unsafe_request_handler {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
                 let queue = unsafe { &*queue.cast::<IoQueue>() };
                 let request = unsafe { Request::from_raw(request as WDFREQUEST) };
-                if let Some(handlers) = PrimaryIoQueueContext::get(&queue) {
+                if let Some(handlers) = InnerIoQueueContext::get(&queue) {
                     if let Some(handler) = handlers.$handler_name {
                         handler(queue, request $(, $arg_name)*);
                         return;

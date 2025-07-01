@@ -9,7 +9,7 @@ use crate::api::{
     object::{Handle, impl_ref_counted_handle, wdf_struct_size},
     string::{to_unicode_string, to_utf16_buf},
 };
-use wdf_macros::primary_object_context;
+use wdf_macros::inner_object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NTSTATUS, NT_SUCCESS, WDFDEVICE,
     WDFDEVICE_INIT, WDF_NO_HANDLE, WDF_NO_OBJECT_ATTRIBUTES,
@@ -18,7 +18,7 @@ use wdk_sys::{
 
 impl_ref_counted_handle!(
     Device,
-    PrimaryDeviceContext
+    InnerDeviceContext
 );
 
 impl Device {
@@ -48,7 +48,7 @@ impl Device {
 
         if NT_SUCCESS(status) {
             let device = unsafe { &*(device as *mut _) };
-            PrimaryDeviceContext::attach(device, PrimaryDeviceContext { ref_count: AtomicUsize::new(0), pnp_power_callbacks })?;
+            InnerDeviceContext::attach(device, InnerDeviceContext { ref_count: AtomicUsize::new(0), pnp_power_callbacks })?;
             Ok(device)
         } else {
             Err(status.into())
@@ -107,8 +107,8 @@ impl DeviceInit {
     }
 }
 
-#[primary_object_context(Device)]
-struct PrimaryDeviceContext {
+#[inner_object_context(Device)]
+struct InnerDeviceContext {
     ref_count: AtomicUsize,
     pnp_power_callbacks: Option<PnpPowerEventCallbacks>,
 }
@@ -169,7 +169,7 @@ macro_rules! unsafe_pnp_power_callback {
         paste::paste! {
             pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE) -> NTSTATUS {
                 let device = unsafe { &*(device as *mut Device) };
-                if let Some(ctxt) = PrimaryDeviceContext::get(&device) {
+                if let Some(ctxt) = InnerDeviceContext::get(&device) {
                     if let Some(callbacks) = &ctxt.pnp_power_callbacks {
                         if let Some(callback) = callbacks.$callback_name {
                             return match callback(device) {

@@ -6,7 +6,7 @@ use crate::api::{
     sync::Arc
 };
 use core::{mem::MaybeUninit, ptr::null_mut, time::Duration};
-use wdf_macros::primary_object_context;
+use wdf_macros::inner_object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_TIMER_CONFIG,
 };
@@ -19,12 +19,12 @@ use wdk_sys::{
 
 impl_ref_counted_handle!(
     Timer,
-    PrimaryTimerContext
+    InnerTimerContext
 );
 
 impl Timer {
     pub fn create<'a, P: Handle>(config: &TimerConfig<'a, P>) -> NtResult<Arc<Self>> {
-        let context = PrimaryTimerContext {
+        let context = InnerTimerContext {
             ref_count: AtomicUsize::new(0),
             evt_timer_func: config.evt_timer_func,
         };
@@ -49,7 +49,7 @@ impl Timer {
         };
 
         if NT_SUCCESS(status) {
-            PrimaryTimerContext::attach(unsafe { &*(timer as *mut _) }, context)?;
+            InnerTimerContext::attach(unsafe { &*(timer as *mut _) }, context)?;
             let timer = unsafe { Arc::from_raw(timer as *mut _) };
 
             Ok(timer)
@@ -147,15 +147,15 @@ impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
     }
 }
 
-#[primary_object_context(Timer)]
-struct PrimaryTimerContext {
+#[inner_object_context(Timer)]
+struct InnerTimerContext {
     ref_count: AtomicUsize,
     evt_timer_func: fn(&Timer),
 }
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {
     let timer = unsafe { &*timer.cast::<Timer>() };
-    if let Some(timer_state) = PrimaryTimerContext::get(&timer) {
+    if let Some(timer_state) = InnerTimerContext::get(&timer) {
         (timer_state.evt_timer_func)(timer);
     }
 }

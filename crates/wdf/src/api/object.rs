@@ -45,13 +45,13 @@ macro_rules! impl_handle {
 }
 
 macro_rules! impl_ref_counted_handle {
-    ($obj:ident, $primary_context:ty) => {
+    ($obj:ident, $inner_context:ty) => {
         crate::api::object::impl_handle!($obj);
 
         impl crate::api::object::RefCountedHandle for $obj {
             fn get_ref_count(&self) -> &core::sync::atomic::AtomicUsize {
-                let primary_context = <$primary_context>::get(self).expect("Failed to get primary context");
-                &primary_context.ref_count
+                let inner_context = <$inner_context>::get(self).expect("Failed to get inner context");
+                &inner_context.ref_count
             }
         }
     }

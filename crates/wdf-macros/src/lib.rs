@@ -161,13 +161,13 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
     object_context_impl("object_context", attr, item, false)
 }
 
-/// The attribute used to mark a struct as a "primary" framework object context
-/// A primary object context is the one that we attach to a framework object in order
+/// The attribute used to mark a struct as an "inner" framework object context
+/// An inner object context is the one that we attach to a framework object in order
 /// to store the object's internal Rust specific state. It is not a context the user can access
 #[doc(hidden)]
 #[proc_macro_attribute]
-pub fn primary_object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
-    object_context_impl("primary_object_context", attr, item, true)
+pub fn inner_object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
+    object_context_impl("inner_object_context", attr, item, true)
 }
 
 fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, parent_is_ref_counted: bool) -> TokenStream {
