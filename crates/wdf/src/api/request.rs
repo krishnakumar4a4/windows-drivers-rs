@@ -1,10 +1,9 @@
 extern crate alloc;
 
 use alloc::string::String;
-use super::{error::NtStatus, io_queue::IoQueue, NtResult};
-use crate::api::object::Handle;
+use crate::api::{error::NtStatus, io_queue::IoQueue, memory::Memory, object::Handle, NtResult};
 use wdf_macros::object_context;
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFREQUEST};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFMEMORY, WDFREQUEST, NT_SUCCESS};
 
 #[derive(Debug)]
 #[repr(transparent)]
@@ -61,6 +60,42 @@ impl Request {
             &*queue.cast::<IoQueue>()
         }
     }
+
+    pub fn retrieve_input_memory(&self) -> NtResult<&Memory> {
+        let mut raw_memory: WDFMEMORY = core::ptr::null_mut();
+
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestRetrieveInputMemory,
+                self.as_ptr() as *mut _,
+                &mut raw_memory
+            )
+        };
+
+        if NT_SUCCESS(status) {
+            Ok(unsafe { &*(raw_memory as *const Memory) })
+        } else {
+            Err(status.into())
+        }
+    }
+
+    pub fn retrieve_output_memory(&mut self) -> NtResult<&mut Memory> {
+        let mut raw_memory: WDFMEMORY = core::ptr::null_mut();
+
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestRetrieveOutputMemory,
+                self.as_ptr() as *mut _,
+                &mut raw_memory
+            )
+        };
+
+        if NT_SUCCESS(status) {
+            Ok(unsafe { &mut *(raw_memory as *mut Memory) })
+        } else {
+            Err(status.into())
+        }
+    }
 }
 
 impl Handle for Request {
@@ -77,6 +112,9 @@ impl Handle for Request {
 /// that operate on WDFREQUEST do so in a thread-safe manner.
 /// As a result, all the Rust methods on this struct are
 /// also thread-safe.
+/// Note that `Request` is not `Sync` because it can be
+/// it carries subsidiary data like memory buffers which
+/// are not safe to access from multiple threads simultaneously.
 unsafe impl Send for Request {}
 
 #[object_context(Request)]
