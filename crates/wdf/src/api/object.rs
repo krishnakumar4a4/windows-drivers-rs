@@ -20,6 +20,7 @@ macro_rules! impl_handle {
         #[repr(C)]
         pub struct $obj {
             _private: [u8; 0], // Prevents instantiation of the struct from driver code
+            _no_send_sync: core::marker::PhantomData<*const ()>, // Prevents Send and Sync traits from being implemented automatically
         }
 
         impl crate::api::object::Handle for $obj {
