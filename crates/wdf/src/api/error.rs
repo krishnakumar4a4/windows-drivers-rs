@@ -37,6 +37,10 @@ impl NtStatus {
     pub fn cancelled() -> Self {
         Self::Error(NtError(0xC0000120_u32 as NTSTATUS))
     }
+
+    pub fn buffer_overflow() -> Self {
+        Self::Error(NtError(0x80000005_u32 as NTSTATUS))
+    }
 }
 
 impl From<NTSTATUS> for NtStatus {
