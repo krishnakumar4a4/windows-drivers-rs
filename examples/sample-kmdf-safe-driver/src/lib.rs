@@ -110,7 +110,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
 
 /// Worker routine called to create a device and its software resources.
 ///
-/// # Arguments:
+/// # Arguments
 ///
 /// * `device_init` - Pointer to an opaque init structure. Memory for
 /// this structure will be freed by the framework when the
