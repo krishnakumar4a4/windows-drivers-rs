@@ -39,6 +39,16 @@ impl Request {
         };
     }
 
+    pub fn set_information(&self, information: usize) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestSetInformation,
+                self.as_ptr() as *mut _,
+                information as core::ffi::c_ulonglong
+            )
+        };
+    }
+
     pub fn mark_cancellable(
         mut self,
         cancel_fn: fn(&RequestCancellationToken),
