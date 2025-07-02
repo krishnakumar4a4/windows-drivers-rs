@@ -28,6 +28,17 @@ impl Request {
         };
     }
 
+    pub fn complete_with_information(self, status: NtStatus, information: usize) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestCompleteWithInformation,
+                self.as_ptr() as *mut _,
+                status.nt_status(),
+                information as core::ffi::c_ulonglong
+            )
+        };
+    }
+
     pub fn mark_cancellable(
         mut self,
         cancel_fn: fn(&RequestCancellationToken),
@@ -144,6 +155,15 @@ impl CancellableMarkedRequest {
         };
 
         self.0.complete(status);
+    }
+
+    pub fn complete_with_information(self, status: NtStatus, information: usize) {
+        // Ignoring the return value for the same reason as in `complete`
+        let _ = unsafe {
+            call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr() as *mut _)
+        };
+
+        self.0.complete_with_information(status, information);
     }
 }
 
