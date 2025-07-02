@@ -186,6 +186,7 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
 
     queue_config.default_queue = true;
     queue_config.evt_io_write = Some(evt_io_write);
+    queue_config.evt_io_write = Some(evt_io_read);
 
     let queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
 
@@ -214,9 +215,8 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
 }
 
 /// This callback is invoked when the framework receives IRP_MJ_WRITE request.
-/// It copies the data from the request into a buffer stored in the queue
-/// context. The actual completion of the request is defered to the
-/// periodic timer.
+/// It copies the data from the request into a buffer stored in the queue context.
+/// The actual completion of the request is deferred to the periodic timer.
 /// 
 /// # Arguments
 /// 
@@ -262,6 +262,83 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
     };
 
     *context.buffer.lock() = Some(buffer);
+
+    request.set_information(length);
+
+    let request = match request.mark_cancellable(evt_request_cancel) {
+        Ok(request) => request,
+        Err((e, request)) => {
+            println!("evt_io_write failed to mark request cancellable: {e:?}");
+            request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
+            return;
+        }
+    };
+
+    *context.request.lock() = Some(request);
+}
+
+/// This callback is invoked when the framework receives IRP_MJ_READ request.
+/// It copies the data from the queue context buffer to the request buffer.
+/// If the driver hasn't received any write request earlier, it returns 0.
+/// The actual completion of the request is deferred to the periodic timer.
+///
+/// # Arguments
+/// 
+/// * `queue` - Handle to the framework queue object that is associated with the
+///             I/O request.
+/// * `Request` - Handle to a framework request object.
+/// 
+/// * `Length`  - number of bytes to be read.
+///             The default property of the queue is to not dispatch
+///             zero lenght read & write requests to the driver and
+///             complete is with status success. So we will never get
+///             a zero length request.
+fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
+    println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
+
+    let Some(context) = QueueContext::get(&queue) else {
+        println!("evt_io_write failed to get queue context");
+        request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
+        return;
+    };
+
+    let memory = match request.retrieve_output_memory() {
+        Ok(memory) => memory,
+        Err(e) => {
+            println!("evt_io_read could not get request memory buffer {e:?}");
+            request.complete(e.into());
+            return;
+        }
+    };
+
+
+    // Nested scope to limit the lifetime of the lock
+    let length = {
+        // TODO: this lock is problematic because we call out into
+        // the framework while holding it. Doing so is generally
+        // considered a recipe for deadlocks although copy_from_buffer
+        // specifically won't cause any. Still this is a bad pattern
+        // in general and we have to find a way to avoid it.
+        let buffer = context.buffer.lock(); 
+        let Some(buffer) = buffer.as_ref() else {
+            println!("evt_io_read called but no request buffer is set");
+            request.complete_with_information(NtStatus::Success, 0);
+            return;
+        };
+
+        let mut length = length;
+        if buffer.len() < length {
+            length = buffer.len();
+        }
+
+        if let Err(e) = memory.copy_from_buffer(0, buffer) {
+            println!("evt_io_read failed to copy buffer: {e:?}");
+            request.complete(e.into());
+            return;
+        }
+
+        length
+    };
 
     request.set_information(length);
 
