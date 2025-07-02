@@ -51,3 +51,9 @@ impl From<NTSTATUS> for NtStatus {
         }
     }
 }
+
+impl From<NtError> for NtStatus {
+    fn from(err: NtError) -> Self {
+        Self::Error(err)
+    }
+}
