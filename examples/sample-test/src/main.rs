@@ -1,15 +1,15 @@
 extern crate windows;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStrExt;
-use std::ptr::null_mut;
 use windows::{
-    core::{GUID, PCWSTR},
+    core::{GUID, PCWSTR, BOOL},
     Win32::{
+        // Foundation::*,
         Devices::DeviceAndDriverInstallation::{
             CM_Get_Device_Interface_ListW, CM_Get_Device_Interface_List_SizeW,
             CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CONFIGRET,
         },
-        Foundation::{CloseHandle, ERROR_SUCCESS, ERROR_IO_PENDING, ERROR_IO_INCOMPLETE, ERROR_OPERATION_ABORTED, GetLastError, HANDLE, BOOL},
+        Foundation::{CloseHandle, ERROR_SUCCESS, ERROR_IO_PENDING, ERROR_IO_INCOMPLETE, ERROR_OPERATION_ABORTED, GetLastError, HANDLE},
         Storage::FileSystem::{
             CreateFileW, WriteFile, FILE_GENERIC_WRITE, FILE_SHARE_MODE,
             FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
@@ -83,7 +83,7 @@ fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
         CM_Get_Device_Interface_List_SizeW(
             &mut device_interface_list_length,
             interface_guid,
-            core::ptr::null(),
+            PCWSTR(core::ptr::null()),
             CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
         )
     };
@@ -106,7 +106,7 @@ fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
     let cr = unsafe {
         CM_Get_Device_Interface_ListW(
             interface_guid,
-            core::ptr::null(),
+            PCWSTR(core::ptr::null()),// as PCWSTR,
             &mut device_interface_list,
             CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
         )
@@ -149,9 +149,9 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
     let handle = match unsafe {
         CreateFileW(
             PCWSTR(device_path_wide.as_ptr()),
-            FILE_GENERIC_WRITE,
+            FILE_GENERIC_WRITE.0,
             FILE_SHARE_MODE(0),
-            null_mut(),
+            None,
             OPEN_EXISTING,
             FILE_FLAG_OVERLAPPED,
             None,
@@ -176,14 +176,13 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
     let result = unsafe {
         WriteFile(
             handle,
-            data.as_ptr() as *const _,
-            data.len() as u32,
-            null_mut(), // Bytes written will be retrieved via GetOverlappedResult
-            &mut overlapped,
+            Some(data),
+            None, // Bytes written will be retrieved via GetOverlappedResult
+            Some(&mut overlapped),
         )
     };
 
-    if !result.as_bool() {
+    if result.is_err() {
         let error_code = unsafe { GetLastError() };
         if error_code.0 != ERROR_IO_PENDING.0 {
             unsafe { CloseHandle(handle) };
@@ -207,13 +206,13 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
             )
         };
 
-        if overlapped_result.as_bool() {
+        if overlapped_result.is_ok() {
             break Ok(())
         } else {
             let error_code = unsafe { GetLastError() };
             if error_code.0 == ERROR_IO_INCOMPLETE.0  {
                 if CANCEL_REQUESTED.load(Ordering::SeqCst) {
-                    unsafe { CancelIoEx(handle, &overlapped) };
+                    unsafe { CancelIoEx(handle, Some(&overlapped)) };
                     CANCEL_REQUESTED.store(false, Ordering::SeqCst);
                 } else {
                     std::thread::sleep(std::time::Duration::from_millis(100));
