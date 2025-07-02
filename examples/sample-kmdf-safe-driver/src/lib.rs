@@ -107,7 +107,6 @@ fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
     device_create(device_init)
 }
 
-
 /// Worker routine called to create a device and its software resources.
 ///
 /// # Arguments
@@ -136,40 +135,6 @@ fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
     queue_initialize(&device)
 }
 
-/// Callback for starting self-managed I/O
-fn evt_device_self_managed_io_start(device: &Device) -> NtResult<()>{
-    println!("Self-managed I/O start called: {:?}", device);
-
-    let queue = device.get_default_queue().
-        expect("Failed to get default queue");
-
-    queue.start();
-
-    let context = QueueContext::get(&queue)
-        .expect("Failed to get queue context"); 
-
-    let _ = context.timer.start(&Duration::from_millis(100));
-
-    Ok(())
-}
-
-/// Callback for stopping self-managed I/O
-fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
-    println!("Self-managed I/O suspend called: {:?}", device);
-
-    let queue = device.get_default_queue().
-        expect("Failed to get default queue");
-
-    queue.stop_synchronously();
-
-    let context = QueueContext::get(&queue)
-        .expect("Failed to get queue context"); 
-
-    context.timer.stop(false);
-
-    Ok(())
-}
-
 /// The I/O dispatch callbacks for the frameworks device object
 /// are configured in this function.
 /// 
@@ -185,8 +150,8 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
     let mut queue_config = IoQueueConfig::default();
 
     queue_config.default_queue = true;
-    queue_config.evt_io_write = Some(evt_io_write);
     queue_config.evt_io_write = Some(evt_io_read);
+    queue_config.evt_io_write = Some(evt_io_write);
 
     let queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
 
@@ -212,6 +177,127 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
     QueueContext::attach(&queue, queue_context)?;
     
     Ok(())
+}
+
+// This callback is called by the Framework when the device is started
+// or restarted after a suspend operation.
+///
+/// # Arguments
+///
+/// * `device` - Handle to the device
+fn evt_device_self_managed_io_start(device: &Device) -> NtResult<()>{
+    println!("Self-managed I/O start called: {:?}", device);
+
+    let queue = device.get_default_queue().
+        expect("Failed to get default queue");
+
+    queue.start();
+
+    let context = QueueContext::get(&queue)
+        .expect("Failed to get queue context"); 
+
+    let _ = context.timer.start(&Duration::from_millis(100));
+
+    Ok(())
+}
+
+/// This callback is called by the Framework when the device is stopped
+/// for resource rebalance or suspended when the system is entering
+/// Sx state.
+/// 
+/// # Arguments
+/// 
+/// * `device` - Handle to the device
+fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
+    println!("Self-managed I/O suspend called: {:?}", device);
+
+    let queue = device.get_default_queue().
+        expect("Failed to get default queue");
+
+    queue.stop_synchronously();
+
+    let context = QueueContext::get(&queue)
+        .expect("Failed to get queue context"); 
+
+    context.timer.stop(false);
+
+    Ok(())
+}
+
+/// This callback is invoked when the framework receives IRP_MJ_READ request.
+/// It copies the data from the queue context buffer to the request buffer.
+/// If the driver hasn't received any write request earlier, it returns 0.
+/// The actual completion of the request is deferred to the periodic timer.
+///
+/// # Arguments
+/// 
+/// * `queue` - Handle to the framework queue object that is associated with the
+///             I/O request.
+/// * `Request` - Handle to a framework request object.
+/// 
+/// * `Length`  - number of bytes to be read.
+///             The default property of the queue is to not dispatch
+///             zero lenght read & write requests to the driver and
+///             complete is with status success. So we will never get
+///             a zero length request.
+fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
+    println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
+
+    let Some(context) = QueueContext::get(&queue) else {
+        println!("evt_io_write failed to get queue context");
+        request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
+        return;
+    };
+
+    let memory = match request.retrieve_output_memory() {
+        Ok(memory) => memory,
+        Err(e) => {
+            println!("evt_io_read could not get request memory buffer {e:?}");
+            request.complete(e.into());
+            return;
+        }
+    };
+
+    // Nested scope to limit the lifetime of the lock
+    let length = {
+        // TODO: this lock is problematic because we call out into
+        // the framework while holding it. Doing so is generally
+        // considered a recipe for deadlocks although copy_from_buffer
+        // specifically won't cause any. Still this is a bad pattern
+        // in general and we have to find a way to avoid it.
+        let buffer = context.buffer.lock(); 
+        let Some(buffer) = buffer.as_ref() else {
+            println!("evt_io_read called but no request buffer is set");
+            request.complete_with_information(NtStatus::Success, 0);
+            return;
+        };
+
+        let mut length = length;
+        if buffer.len() < length {
+            length = buffer.len();
+        }
+
+        if let Err(e) = memory.copy_from_buffer(0, buffer) {
+            println!("evt_io_read failed to copy buffer: {e:?}");
+            request.complete(e.into());
+            return;
+        }
+
+        length
+    };
+
+    request.set_information(length);
+
+    let request = match request.mark_cancellable(evt_request_cancel) {
+        Ok(request) => request,
+        Err((e, request)) => {
+            println!("evt_io_write failed to mark request cancellable: {e:?}");
+            request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
+            return;
+        }
+    };
+
+    *context.request.lock() = Some(request);
 }
 
 /// This callback is invoked when the framework receives IRP_MJ_WRITE request.
@@ -277,86 +363,13 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
     *context.request.lock() = Some(request);
 }
 
-/// This callback is invoked when the framework receives IRP_MJ_READ request.
-/// It copies the data from the queue context buffer to the request buffer.
-/// If the driver hasn't received any write request earlier, it returns 0.
-/// The actual completion of the request is deferred to the periodic timer.
-///
-/// # Arguments
-/// 
-/// * `queue` - Handle to the framework queue object that is associated with the
-///             I/O request.
-/// * `Request` - Handle to a framework request object.
-/// 
-/// * `Length`  - number of bytes to be read.
-///             The default property of the queue is to not dispatch
-///             zero lenght read & write requests to the driver and
-///             complete is with status success. So we will never get
-///             a zero length request.
-fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
-    println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
-
-    let Some(context) = QueueContext::get(&queue) else {
-        println!("evt_io_write failed to get queue context");
-        request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
-        return;
-    };
-
-    let memory = match request.retrieve_output_memory() {
-        Ok(memory) => memory,
-        Err(e) => {
-            println!("evt_io_read could not get request memory buffer {e:?}");
-            request.complete(e.into());
-            return;
-        }
-    };
-
-
-    // Nested scope to limit the lifetime of the lock
-    let length = {
-        // TODO: this lock is problematic because we call out into
-        // the framework while holding it. Doing so is generally
-        // considered a recipe for deadlocks although copy_from_buffer
-        // specifically won't cause any. Still this is a bad pattern
-        // in general and we have to find a way to avoid it.
-        let buffer = context.buffer.lock(); 
-        let Some(buffer) = buffer.as_ref() else {
-            println!("evt_io_read called but no request buffer is set");
-            request.complete_with_information(NtStatus::Success, 0);
-            return;
-        };
-
-        let mut length = length;
-        if buffer.len() < length {
-            length = buffer.len();
-        }
-
-        if let Err(e) = memory.copy_from_buffer(0, buffer) {
-            println!("evt_io_read failed to copy buffer: {e:?}");
-            request.complete(e.into());
-            return;
-        }
-
-        length
-    };
-
-    request.set_information(length);
-
-    let request = match request.mark_cancellable(evt_request_cancel) {
-        Ok(request) => request,
-        Err((e, request)) => {
-            println!("evt_io_write failed to mark request cancellable: {e:?}");
-            request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
-            return;
-        }
-    };
-
-    *context.request.lock() = Some(request);
-}
-
 /// Callback that is called when the request is cancelled.
 /// It cancels the request identified by the `token` parameter
 /// if it is found in the context.
+///
+/// # Arguments
+/// 
+/// `token` - The cancellation token that identifies the request to be cancelled
 fn evt_request_cancel(token: &RequestCancellationToken) {
     println!("evt_request_cancel called");
 
@@ -378,6 +391,10 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 /// Callback that is called when the timer fires.
 /// It fetches the request stored in the context
 /// and completes it
+///
+/// # Arguments
+/// 
+/// * `timer` - Handle of the timer that fired
 fn evt_timer(timer: &Timer) {
     println!("evt_timer called");
 
@@ -399,6 +416,10 @@ fn evt_timer(timer: &Timer) {
 /// This routine shows how to retrieve framework version string and
 /// also how to find out to which version of framework library the
 /// client driver is bound to.
+///
+/// # Arguments
+/// 
+/// * `driver` - The driver handle
 fn print_driver_version(driver: &Driver) -> NtResult<()> {
     let driver_version = driver.retrieve_version_string()?;
     println!("Echo Sample {driver_version}");
