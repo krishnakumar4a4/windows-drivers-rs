@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use alloc::string::String;
-use crate::api::{error::NtStatus, io_queue::IoQueue, memory::Memory, object::Handle, NtResult};
+use crate::api::{error::NtStatus, io_queue::IoQueue, memory::Memory, object::Handle, error::{NtError, NtResult}};
 use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFMEMORY, WDFREQUEST, NT_SUCCESS};
 
@@ -42,17 +42,17 @@ impl Request {
     pub fn mark_cancellable(
         mut self,
         cancel_fn: fn(&RequestCancellationToken),
-    ) -> NtResult<CancellableMarkedRequest> {
+    ) -> Result<CancellableMarkedRequest, (NtError, Request)> {
         // TODO: check for the race where another thread
         // could call this method method and thay might
         // attach the context before us.
-        RequestContext::attach(
-            &mut self,
-            RequestContext {
-                evt_request_cancel: cancel_fn,
-            },
-        )?;
+        if let Err(e) = RequestContext::attach( &mut self, RequestContext { evt_request_cancel: cancel_fn, },) {
+            return Err((e, self));
+        }
 
+        // TODO: we are ignoring the status returned by this function
+        // because we feel we are fine for all the reasons it can fail
+        // However, this needs to be looked into carefully.
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestMarkCancelable,
