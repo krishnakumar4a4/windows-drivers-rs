@@ -27,6 +27,12 @@ use wdf::{
 
 use core::time::Duration;
 
+extern crate alloc;
+use alloc::vec::Vec;
+use alloc::vec;
+
+const MAX_WRITE_LENGTH: usize = 1024*40;
+
 /// Context object to be attached to a queue
 #[object_context(IoQueue)]
 struct QueueContext {
@@ -38,8 +44,11 @@ struct QueueContext {
     // the lock).
     request: SpinLock<Option<CancellableMarkedRequest>>,
 
+    // Buffer where data from incoming write request is stored
+    buffer: SpinLock<Option<Vec<u8>>>,
+
     // The timer that is used to complete the request
-    timer: Arc<Timer>
+    timer: Arc<Timer>,
 }
 
 /// Context object to be attached to a timer
@@ -195,7 +204,8 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
     // Attach context to the queue
     let queue_context = QueueContext {
         request: SpinLock::create(None)?,
-        timer
+        buffer: SpinLock::create(None)?,
+        timer,
     };
 
     QueueContext::attach(&queue, queue_context)?;
@@ -203,26 +213,68 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
     Ok(())
 }
 
-/// Callback that is called when a write request is received
-fn evt_io_write(queue: &IoQueue, request: Request, _length: usize) {
-    println!("evt_io_write called");
+/// This callback is invoked when the framework receives IRP_MJ_WRITE request.
+/// It copies the data from the request into a buffer stored in the queue
+/// context. The actual completion of the request is defered to the
+/// periodic timer.
+/// 
+/// # Arguments
+/// 
+/// * `queue` - Handle to the framework queue object that is associated with the
+///             I/O request.
+/// * `Request` - Handle to a framework request object.
+/// 
+/// * `Length`  - number of bytes to be read.
+///             The default property of the queue is to not dispatch
+///             zero lenght read & write requests to the driver and
+///             complete is with status success. So we will never get
+///             a zero length request.
+fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
+    println!("evt_io_write called. Queue {queue:?}, Request {request:?} Length {length}");
 
-    if let Some(context) = QueueContext::get(&queue) {
-        println!("Request processing started");
-
-        match request.mark_cancellable(evt_request_cancel) {
-            Ok(cancellable_req) => {
-                *context.request.lock() = Some(cancellable_req);
-
-                println!("Request marked as cancellable");
-            }
-            Err(e) => {
-                println!("Failed to mark request as cancellable: {e:?}");
-            }
-        }
-    } else {
-        println!("Failed to get queue context");
+    if length > MAX_WRITE_LENGTH {
+        println!("evt_io_write buffer length too big {length}. Max is {MAX_WRITE_LENGTH}");
+        request.complete_with_information(NtStatus::buffer_overflow(), 0);
+        return;
     }
+
+    let memory = match request.retrieve_input_memory() {
+        Ok(memory) => memory,
+        Err(e) => {
+            println!("evt_io_write could not get request memory buffer {e:?}");
+            request.complete(e.into());
+            return;
+        }
+    };
+
+    let mut buffer = vec![0_u8; length];
+
+    if let Err(e) = memory.copy_to_buffer(0, &mut buffer) {
+        println!("evt_io_write failed to copy buffer: {e:?}");
+        request.complete(e.into());
+        return;
+    }
+
+    let Some(context) = QueueContext::get(&queue) else {
+        println!("evt_io_write failed to get queue context");
+        request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
+        return;
+    };
+
+    *context.buffer.lock() = Some(buffer);
+
+    request.set_information(length);
+
+    let request = match request.mark_cancellable(evt_request_cancel) {
+        Ok(request) => request,
+        Err((e, request)) => {
+            println!("evt_io_write failed to mark request cancellable: {e:?}");
+            request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
+            return;
+        }
+    };
+
+    *context.request.lock() = Some(request);
 }
 
 /// Callback that is called when the request is cancelled.
