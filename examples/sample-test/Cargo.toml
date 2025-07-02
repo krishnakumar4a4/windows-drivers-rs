@@ -10,5 +10,6 @@ categories = ["hardware-support"]
 publish = false
 
 [dependencies]
+anyhow = "1.0.98"
 uuid = "1.16.0"
 windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Security", "Win32_System_Console", "Win32_System_IO", "Win32_System_Memory", "Win32_Storage_FileSystem"] }

@@ -20,11 +20,12 @@ use windows::{
 };
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
+use anyhow::Context;
 
 static CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <interface_guid>", args[0]);
@@ -33,14 +34,14 @@ fn main() {
 
     let Some(interface_guid) = parse_guid(&args[1]) else {
         eprintln!("Failed to parse GUID");
-        return;
+        return Ok(());
     };
 
     let device_path = match get_device_path(&interface_guid) {
         Ok(path) => path,
         Err(e) => {
             eprintln!("Error: {}", e);
-            return;
+            return Ok(());
         }
     };
 
@@ -48,7 +49,8 @@ fn main() {
 
     // Set the Ctrl+C handler
     unsafe {
-        SetConsoleCtrlHandler(Some(ctrlc_handler), true);
+        SetConsoleCtrlHandler(Some(ctrlc_handler), true)
+            .context("Failed to set Ctrl+C handler")?;
     }
 
     // Send a write request to the device
@@ -63,6 +65,8 @@ fn main() {
             eprintln!("Error sending write request: {}", e);
         }
     }
+
+    Ok(())
 }
 
 unsafe extern "system" fn ctrlc_handler(ctrl_type: u32) -> BOOL {
@@ -185,7 +189,10 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
     if result.is_err() {
         let error_code = unsafe { GetLastError() };
         if error_code.0 != ERROR_IO_PENDING.0 {
-            unsafe { CloseHandle(handle) };
+            unsafe {
+                CloseHandle(handle)
+                    .map_err(|e| RequestError::IoError(format!("Failed to close handle: {e}")))?
+            };
             return Err(RequestError::IoError(format!(
                 "Failed to write to the device. Error code: {}",
                 error_code.0
@@ -212,13 +219,19 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
             let error_code = unsafe { GetLastError() };
             if error_code.0 == ERROR_IO_INCOMPLETE.0  {
                 if CANCEL_REQUESTED.load(Ordering::SeqCst) {
-                    unsafe { CancelIoEx(handle, Some(&overlapped)) };
+                    unsafe {
+                        CancelIoEx(handle, Some(&overlapped))
+                            .map_err(|e| RequestError::IoError(format!("Failed to cancel I/O: {e}")))?
+                    };
                     CANCEL_REQUESTED.store(false, Ordering::SeqCst);
                 } else {
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
             } else if error_code.0 == ERROR_OPERATION_ABORTED.0 {
-                unsafe { CloseHandle(handle) };
+                unsafe {
+                    CloseHandle(handle)
+                        .map_err(|e| RequestError::IoError(format!("Failed to close handle: {e}")))?
+                };
                 break Err(RequestError::Cancelled);
             } else {
                 break Err(RequestError::IoError(format!(
@@ -229,7 +242,10 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
         };
     };
 
-    unsafe { CloseHandle(handle) };
+    unsafe {
+        CloseHandle(handle)
+            .map_err(|e| RequestError::IoError(format!("Failed to close handle: {e}")))?
+    };
 
     res
 }
