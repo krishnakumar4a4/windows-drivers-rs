@@ -11,7 +11,7 @@ use windows::{
         },
         Foundation::{CloseHandle, ERROR_SUCCESS, ERROR_IO_PENDING, ERROR_IO_INCOMPLETE, ERROR_OPERATION_ABORTED, GetLastError, HANDLE},
         Storage::FileSystem::{
-            CreateFileW, WriteFile, FILE_GENERIC_WRITE, FILE_SHARE_MODE,
+            CreateFileW, WriteFile, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_MODE,
             FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
         },
         System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED},
@@ -143,6 +143,19 @@ enum RequestError {
 }
 
 fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError> {
+    send_request(device_path, |handle: HANDLE, overlapped: *mut OVERLAPPED| {
+        unsafe {
+            WriteFile(
+                handle,
+                Some(data.as_bytes()),
+                None, // Bytes written will be retrieved via GetOverlappedResult
+                Some(overlapped),
+            )
+        }
+    })
+}
+
+fn send_request<F: Fn(HANDLE, *mut OVERLAPPED) -> windows::core::Result<()>>(device_path: &str, call_win32_api: F) -> Result<(), RequestError> {
     // Convert the device path to a wide string
     let device_path_wide: Vec<u16> = OsString::from(device_path)
         .encode_wide()
@@ -153,7 +166,7 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
     let handle = match unsafe {
         CreateFileW(
             PCWSTR(device_path_wide.as_ptr()),
-            FILE_GENERIC_WRITE.0,
+            (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
             FILE_SHARE_MODE(0),
             None,
             OPEN_EXISTING,
@@ -173,18 +186,8 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
 
     let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
 
-    // Data to write to the device
-    let data = data.as_bytes();
-
-    // Send the write request asynchronously
-    let result = unsafe {
-        WriteFile(
-            handle,
-            Some(data),
-            None, // Bytes written will be retrieved via GetOverlappedResult
-            Some(&mut overlapped),
-        )
-    };
+    // Call the actual Win32 API to send the request
+    let result = call_win32_api(handle, &mut overlapped);
 
     if result.is_err() {
         let error_code = unsafe { GetLastError() };
@@ -194,13 +197,13 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
                     .map_err(|e| RequestError::IoError(format!("Failed to close handle: {e}")))?
             };
             return Err(RequestError::IoError(format!(
-                "Failed to write to the device. Error code: {}",
+                "Failed to send request. Error code: {}",
                 error_code.0
             )));
         }
     }
 
-    println!("Write request sent, waiting for completion...");
+    println!("Request sent, waiting for completion...");
     // Wait for the asynchronous operation to complete in a loop
     let mut bytes_written = 0;
     let res = loop {
@@ -235,7 +238,7 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
                 break Err(RequestError::Cancelled);
             } else {
                 break Err(RequestError::IoError(format!(
-                    "Failed to write to the device. Error code: {}",
+                    "Failed to send request. Error code: {}",
                     error_code.0
                 )));
             }
