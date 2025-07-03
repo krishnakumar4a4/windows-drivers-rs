@@ -11,7 +11,7 @@ use windows::{
         },
         Foundation::{CloseHandle, ERROR_SUCCESS, ERROR_IO_PENDING, ERROR_IO_INCOMPLETE, ERROR_OPERATION_ABORTED, GetLastError, HANDLE},
         Storage::FileSystem::{
-            CreateFileW, WriteFile, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_MODE,
+            CreateFileW, ReadFile, WriteFile, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE,
             FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
         },
         System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED},
@@ -54,15 +54,33 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Send a write request to the device
-    match send_write_request(&device_path, "Hello, Device!") {
+    let write_data = "Hello, Device!";
+    match send_write_request(&device_path, &write_data) {
         Ok(()) => {
-            println!("Write request completed");
+            println!("Write request completed. Sent data: {}", write_data);
         }
         Err(RequestError::Cancelled) => {
             println!("Write request cancelled");
         },
         Err(RequestError::IoError(e)) => {
             eprintln!("Error sending write request: {}", e);
+        }
+    }
+
+    // Send a read request to the device
+    let read_length = write_data.bytes().len(); // Adjust the length as needed
+    match send_read_request(&device_path, read_length) {
+        Ok(read_data) => {
+            println!("Read request completed. Received data: {}", read_data);
+            if read_data != write_data {
+                eprintln!("Read data does not match written data. Expected: {}", write_data);
+            }
+        }
+        Err(RequestError::Cancelled) => {
+            println!("Read request cancelled");
+        },
+        Err(RequestError::IoError(e)) => {
+            eprintln!("Error sending read request: {}", e);
         }
     }
 
@@ -142,6 +160,36 @@ enum RequestError {
     Cancelled,
 }
 
+fn send_read_request(device_path: &str, expected_length: usize) -> Result<String, RequestError> {
+    let mut data = String::with_capacity(expected_length * 2);
+    let mut bytes_read = 0;
+    send_request(device_path, |handle: HANDLE, overlapped: *mut OVERLAPPED| {
+        unsafe {
+            ReadFile(
+                handle,
+                Some(data.as_bytes_mut()),
+                Some(&mut bytes_read), // Bytes written will be retrieved via GetOverlappedResult
+                Some(overlapped),
+            )
+        }
+    })?;
+
+    if bytes_read == 0 {
+        return Err(RequestError::IoError("No data read from device".to_string()));
+    }
+
+    if bytes_read != expected_length.try_into().unwrap() {
+        return Err(RequestError::IoError(format!(
+            "Expected {} bytes, but read {} bytes",
+            expected_length, bytes_read
+        )));
+    }
+
+    data.truncate(expected_length);
+
+    Ok(data)
+}
+
 fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError> {
     send_request(device_path, |handle: HANDLE, overlapped: *mut OVERLAPPED| {
         unsafe {
@@ -155,7 +203,7 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
     })
 }
 
-fn send_request<F: Fn(HANDLE, *mut OVERLAPPED) -> windows::core::Result<()>>(device_path: &str, call_win32_api: F) -> Result<(), RequestError> {
+fn send_request<F: FnMut(HANDLE, *mut OVERLAPPED) -> windows::core::Result<()>>(device_path: &str, mut call_win32_api: F) -> Result<(), RequestError> {
     // Convert the device path to a wide string
     let device_path_wide: Vec<u16> = OsString::from(device_path)
         .encode_wide()
@@ -167,7 +215,7 @@ fn send_request<F: Fn(HANDLE, *mut OVERLAPPED) -> windows::core::Result<()>>(dev
         CreateFileW(
             PCWSTR(device_path_wide.as_ptr()),
             (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
-            FILE_SHARE_MODE(0),
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
             None,
             OPEN_EXISTING,
             FILE_FLAG_OVERLAPPED,
@@ -238,7 +286,7 @@ fn send_request<F: Fn(HANDLE, *mut OVERLAPPED) -> windows::core::Result<()>>(dev
                 break Err(RequestError::Cancelled);
             } else {
                 break Err(RequestError::IoError(format!(
-                    "Failed to send request. Error code: {}",
+                    "Failed while waiting for request completion. Error code: {}",
                     error_code.0
                 )));
             }
