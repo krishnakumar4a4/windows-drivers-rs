@@ -20,7 +20,8 @@ use windows::{
 };
 use std::env;
 use std::sync::atomic::{AtomicBool, Ordering};
-use anyhow::Context;
+use anyhow::{anyhow, bail, Context};
+use thiserror::Error;
 
 static CANCEL_REQUESTED: AtomicBool = AtomicBool::new(false);
 
@@ -32,18 +33,11 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
-    let Some(interface_guid) = parse_guid(&args[1]) else {
-        eprintln!("Failed to parse GUID");
-        return Ok(());
-    };
+    let interface_guid = parse_guid(&args[1])
+        .ok_or(anyhow!("Failed to parse GUID"))?;
 
-    let device_path = match get_device_path(&interface_guid) {
-        Ok(path) => path,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            return Ok(());
-        }
-    };
+    let device_path = get_device_path(&interface_guid)
+        .context("Failed to get device path")?;
 
     println!("Device Path: {}", device_path);
 
@@ -53,37 +47,27 @@ fn main() -> anyhow::Result<()> {
             .context("Failed to set Ctrl+C handler")?;
     }
 
+    let handle = open_device(&device_path)
+        .context("Failed to open device")?;
+        
     // Send a write request to the device
     let write_data = "Hello, Device!";
-    match send_write_request(&device_path, &write_data) {
-        Ok(()) => {
-            println!("Write request completed. Sent data: {}", write_data);
-        }
-        Err(RequestError::Cancelled) => {
-            println!("Write request cancelled");
-        },
-        Err(RequestError::IoError(e)) => {
-            eprintln!("Error sending write request: {}", e);
-        }
-    }
+    send_write_request(handle, &write_data)
+        .context("Failed to send write request")?;
+
+    println!("Write request completed. Sent data: {}", write_data);
 
     // Send a read request to the device
     let read_length = write_data.bytes().len(); // Adjust the length as needed
-    match send_read_request(&device_path, read_length) {
-        Ok(read_data) => {
-            println!("Read request completed. Received data: {}", read_data);
-            if read_data != write_data {
-                eprintln!("Read data does not match written data. Expected: {}", write_data);
-            }
-        }
-        Err(RequestError::Cancelled) => {
-            println!("Read request cancelled");
-        },
-        Err(RequestError::IoError(e)) => {
-            eprintln!("Error sending read request: {}", e);
-        }
-    }
+    let read_data = send_read_request(handle, read_length)
+        .context("Failed to send read request")?;
 
+    println!("Read request completed. Received data: {}", read_data);
+
+    if read_data != write_data {
+        bail!("Read data does not match written data. Expected: {}", write_data);
+    }
+        
     Ok(())
 }
 
@@ -97,7 +81,7 @@ unsafe extern "system" fn ctrlc_handler(ctrl_type: u32) -> BOOL {
     false.into()
 }
 
-fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
+fn get_device_path(interface_guid: &GUID) -> anyhow::Result<String> {
     let mut device_interface_list_length: u32 = 0;
 
     // Get the size of the device interface list
@@ -111,14 +95,11 @@ fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
     };
 
     if cr != CONFIGRET(ERROR_SUCCESS.0) {
-        return Err(format!(
-            "Error retrieving device interface list size: 0x{:x}",
-            cr.0
-        ));
+        bail!("Error retrieving device interface list size: 0x{:x}", cr.0);
     }
 
     if device_interface_list_length <= 1 {
-        return Err("No active device interfaces found. Is the driver loaded?".to_string());
+        bail!("No active device interfaces found. Is the driver loaded?");
     }
 
     // Allocate memory for the device interface list
@@ -135,10 +116,7 @@ fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
     };
 
     if cr != CONFIGRET(ERROR_SUCCESS.0) {
-        return Err(format!(
-            "Error retrieving device interface list: 0x{:x}",
-            cr.0
-        ));
+        bail!("Error retrieving device interface list: 0x{:x}", cr.0);
     }
 
     // Copy the first device interface path to the output buffer
@@ -147,7 +125,7 @@ fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
         .next()
         .unwrap_or(&[]);
     if first_interface.is_empty() {
-        return Err("No valid device interfaces found.".to_string());
+        bail!("No valid device interfaces found.");
     }
 
     let device_path = String::from_utf16_lossy(first_interface);
@@ -155,19 +133,49 @@ fn get_device_path(interface_guid: &GUID) -> Result<String, String> {
     Ok(device_path)
 }
 
+fn open_device(device_path: &str) -> anyhow::Result<HANDLE> {
+    // Convert the device path to a wide string
+    let device_path_wide: Vec<u16> = OsString::from(device_path)
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+
+    // Open the device with FILE_FLAG_OVERLAPPED for asynchronous I/O
+    let handle = unsafe {
+        CreateFileW(
+            PCWSTR(device_path_wide.as_ptr()),
+            (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_OVERLAPPED,
+            None,
+        )
+    }?;
+
+    if handle == HANDLE::default() {
+        bail!("CreateFileW returned null handle");
+    }
+
+    Ok(handle)
+}
+
+#[derive(Error, Debug)]
 enum RequestError {
+    #[error("An I/O error occurred: {0}")]
     IoError(String),
+    #[error("Request was cancelled")]
     Cancelled,
 }
 
-fn send_read_request(device_path: &str, expected_length: usize) -> Result<String, RequestError> {
-    let mut data = String::with_capacity(expected_length * 2);
+fn send_read_request(handle: HANDLE, expected_length: usize) -> anyhow::Result<String, RequestError> {
+    let mut buffer = vec![0u8; expected_length];
     let mut bytes_read = 0;
-    send_request(device_path, |handle: HANDLE, overlapped: *mut OVERLAPPED| {
+    send_request(handle, |overlapped| {
         unsafe {
             ReadFile(
                 handle,
-                Some(data.as_bytes_mut()),
+                Some(buffer.as_mut_slice()),
                 Some(&mut bytes_read), // Bytes written will be retrieved via GetOverlappedResult
                 Some(overlapped),
             )
@@ -185,13 +193,15 @@ fn send_read_request(device_path: &str, expected_length: usize) -> Result<String
         )));
     }
 
-    data.truncate(expected_length);
+    buffer.truncate(bytes_read as usize);
+    let data = String::from_utf8(buffer)
+        .map_err(|e| RequestError::IoError(format!("Invalid UTF-8 data: {}", e)))?;
 
     Ok(data)
 }
 
-fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError> {
-    send_request(device_path, |handle: HANDLE, overlapped: *mut OVERLAPPED| {
+fn send_write_request(handle: HANDLE, data: &str) -> anyhow::Result<(), RequestError> {
+    send_request(handle, |overlapped| {
         unsafe {
             WriteFile(
                 handle,
@@ -203,39 +213,11 @@ fn send_write_request(device_path: &str, data: &str) -> Result<(), RequestError>
     })
 }
 
-fn send_request<F: FnMut(HANDLE, *mut OVERLAPPED) -> windows::core::Result<()>>(device_path: &str, mut call_win32_api: F) -> Result<(), RequestError> {
-    // Convert the device path to a wide string
-    let device_path_wide: Vec<u16> = OsString::from(device_path)
-        .encode_wide()
-        .chain(Some(0))
-        .collect();
-
-    // Open the device with FILE_FLAG_OVERLAPPED for asynchronous I/O
-    let handle = match unsafe {
-        CreateFileW(
-            PCWSTR(device_path_wide.as_ptr()),
-            (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            None,
-            OPEN_EXISTING,
-            FILE_FLAG_OVERLAPPED,
-            None,
-        )
-    } {
-        Ok(handle) => handle,
-        Err(e) => {
-            return Err(RequestError::IoError(format!("Failed to open device: {e}")));
-        }
-    };
-
-    if handle == HANDLE::default() {
-        return Err(RequestError::IoError("Failed to open device".to_string()));
-    }
-
+fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: HANDLE, mut call_win32_api: F) -> anyhow::Result<(), RequestError> {
     let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
 
     // Call the actual Win32 API to send the request
-    let result = call_win32_api(handle, &mut overlapped);
+    let result = call_win32_api(&mut overlapped);
 
     if result.is_err() {
         let error_code = unsafe { GetLastError() };
