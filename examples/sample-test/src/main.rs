@@ -52,14 +52,14 @@ fn main() -> anyhow::Result<()> {
         
     // Send a write request to the device
     let write_data = "Hello, Device!";
-    send_write_request(handle, &write_data)
+    send_write_request(&handle, &write_data)
         .context("Failed to send write request")?;
 
     println!("Write request completed. Sent data: {}", write_data);
 
     // Send a read request to the device
     let read_length = write_data.bytes().len(); // Adjust the length as needed
-    let read_data = send_read_request(handle, read_length)
+    let read_data = send_read_request(&handle, read_length)
         .context("Failed to send read request")?;
 
     println!("Read request completed. Received data: {}", read_data);
@@ -133,7 +133,7 @@ fn get_device_path(interface_guid: &GUID) -> anyhow::Result<String> {
     Ok(device_path)
 }
 
-fn open_device(device_path: &str) -> anyhow::Result<HANDLE> {
+fn open_device(device_path: &str) -> anyhow::Result<Handle> {
     // Convert the device path to a wide string
     let device_path_wide: Vec<u16> = OsString::from(device_path)
         .encode_wide()
@@ -157,7 +157,7 @@ fn open_device(device_path: &str) -> anyhow::Result<HANDLE> {
         bail!("CreateFileW returned null handle");
     }
 
-    Ok(handle)
+    Ok(Handle(handle))
 }
 
 #[derive(Error, Debug)]
@@ -168,13 +168,13 @@ enum RequestError {
     Cancelled,
 }
 
-fn send_read_request(handle: HANDLE, expected_length: usize) -> anyhow::Result<String, RequestError> {
+fn send_read_request(handle: &Handle, expected_length: usize) -> anyhow::Result<String, RequestError> {
     let mut buffer = vec![0u8; expected_length];
     let mut bytes_read = 0;
     send_request(handle, |overlapped| {
         unsafe {
             ReadFile(
-                handle,
+                handle.inner(),
                 Some(buffer.as_mut_slice()),
                 Some(&mut bytes_read), // Bytes written will be retrieved via GetOverlappedResult
                 Some(overlapped),
@@ -200,11 +200,11 @@ fn send_read_request(handle: HANDLE, expected_length: usize) -> anyhow::Result<S
     Ok(data)
 }
 
-fn send_write_request(handle: HANDLE, data: &str) -> anyhow::Result<(), RequestError> {
+fn send_write_request(handle: &Handle, data: &str) -> anyhow::Result<(), RequestError> {
     send_request(handle, |overlapped| {
         unsafe {
             WriteFile(
-                handle,
+                handle.inner(),
                 Some(data.as_bytes()),
                 None, // Bytes written will be retrieved via GetOverlappedResult
                 Some(overlapped),
@@ -213,7 +213,7 @@ fn send_write_request(handle: HANDLE, data: &str) -> anyhow::Result<(), RequestE
     })
 }
 
-fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: HANDLE, mut call_win32_api: F) -> anyhow::Result<(), RequestError> {
+fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: &Handle, mut call_win32_api: F) -> anyhow::Result<(), RequestError> {
     let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
 
     // Call the actual Win32 API to send the request
@@ -222,10 +222,6 @@ fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: 
     if result.is_err() {
         let error_code = unsafe { GetLastError() };
         if error_code.0 != ERROR_IO_PENDING.0 {
-            unsafe {
-                CloseHandle(handle)
-                    .map_err(|e| RequestError::IoError(format!("Failed to close handle: {e}")))?
-            };
             return Err(RequestError::IoError(format!(
                 "Failed to send request. Error code: {}",
                 error_code.0
@@ -236,10 +232,10 @@ fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: 
     println!("Request sent, waiting for completion...");
     // Wait for the asynchronous operation to complete in a loop
     let mut bytes_written = 0;
-    let res = loop {
+    loop {
         let overlapped_result = unsafe {
             GetOverlappedResult(
-                handle,
+                handle.inner(),
                 &mut overlapped,
                 &mut bytes_written,
                 false, // Non-blocking call
@@ -253,7 +249,7 @@ fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: 
             if error_code.0 == ERROR_IO_INCOMPLETE.0  {
                 if CANCEL_REQUESTED.load(Ordering::SeqCst) {
                     unsafe {
-                        CancelIoEx(handle, Some(&overlapped))
+                        CancelIoEx(handle.inner(), Some(&overlapped))
                             .map_err(|e| RequestError::IoError(format!("Failed to cancel I/O: {e}")))?
                     };
                     CANCEL_REQUESTED.store(false, Ordering::SeqCst);
@@ -261,10 +257,6 @@ fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: 
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 }
             } else if error_code.0 == ERROR_OPERATION_ABORTED.0 {
-                unsafe {
-                    CloseHandle(handle)
-                        .map_err(|e| RequestError::IoError(format!("Failed to close handle: {e}")))?
-                };
                 break Err(RequestError::Cancelled);
             } else {
                 break Err(RequestError::IoError(format!(
@@ -273,14 +265,7 @@ fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: 
                 )));
             }
         };
-    };
-
-    unsafe {
-        CloseHandle(handle)
-            .map_err(|e| RequestError::IoError(format!("Failed to close handle: {e}")))?
-    };
-
-    res
+    }
 }
 
 fn parse_guid(guid_str: &str) -> Option<GUID> {
@@ -301,4 +286,22 @@ fn parse_guid(guid_str: &str) -> Option<GUID> {
             fields.3[7],
         ],
        ))
+}
+
+struct Handle(HANDLE);
+
+impl Handle {
+    fn inner(&self) -> HANDLE {
+        self.0
+    }
+}
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        unsafe {
+            CloseHandle(self.0).unwrap_or_else(|e| {
+                panic!("Failed to close handle: {}", e);
+            });
+        }
+    }
 }
