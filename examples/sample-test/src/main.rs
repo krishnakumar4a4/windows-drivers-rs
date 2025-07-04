@@ -65,7 +65,7 @@ fn main() -> anyhow::Result<()> {
     println!("Read request completed. Received data: {}", read_data);
 
     if read_data != write_data {
-        bail!("Read data does not match written data. Expected: {}", write_data);
+        bail!("Read data does not match written data. Expected data: {}", write_data);
     }
         
     Ok(())
@@ -170,13 +170,12 @@ enum RequestError {
 
 fn send_read_request(handle: &Handle, expected_length: usize) -> anyhow::Result<String, RequestError> {
     let mut buffer = vec![0u8; expected_length];
-    let mut bytes_read = 0;
-    send_request(handle, |overlapped| {
+    let bytes_read = send_request(handle, |overlapped| {
         unsafe {
             ReadFile(
                 handle.inner(),
                 Some(buffer.as_mut_slice()),
-                Some(&mut bytes_read), // Bytes written will be retrieved via GetOverlappedResult
+                None,
                 Some(overlapped),
             )
         }
@@ -206,14 +205,16 @@ fn send_write_request(handle: &Handle, data: &str) -> anyhow::Result<(), Request
             WriteFile(
                 handle.inner(),
                 Some(data.as_bytes()),
-                None, // Bytes written will be retrieved via GetOverlappedResult
+                None,
                 Some(overlapped),
             )
         }
-    })
+    })?;
+
+    Ok(())
 }
 
-fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: &Handle, mut call_win32_api: F) -> anyhow::Result<(), RequestError> {
+fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: &Handle, mut call_win32_api: F) -> anyhow::Result<usize, RequestError> {
     let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
 
     // Call the actual Win32 API to send the request
@@ -231,19 +232,19 @@ fn send_request<F: FnMut(*mut OVERLAPPED) -> windows::core::Result<()>>(handle: 
 
     println!("Request sent, waiting for completion...");
     // Wait for the asynchronous operation to complete in a loop
-    let mut bytes_written = 0;
+    let mut bytes_transferred = 0;
     loop {
         let overlapped_result = unsafe {
             GetOverlappedResult(
                 handle.inner(),
                 &mut overlapped,
-                &mut bytes_written,
+                &mut bytes_transferred,
                 false, // Non-blocking call
             )
         };
 
         if overlapped_result.is_ok() {
-            break Ok(())
+            break Ok(bytes_transferred as usize);
         } else {
             let error_code = unsafe { GetLastError() };
             if error_code.0 == ERROR_IO_INCOMPLETE.0  {
