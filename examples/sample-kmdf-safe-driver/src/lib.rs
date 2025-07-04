@@ -150,7 +150,7 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
     let mut queue_config = IoQueueConfig::default();
 
     queue_config.default_queue = true;
-    queue_config.evt_io_write = Some(evt_io_read);
+    queue_config.evt_io_read = Some(evt_io_read);
     queue_config.evt_io_write = Some(evt_io_write);
 
     let queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
