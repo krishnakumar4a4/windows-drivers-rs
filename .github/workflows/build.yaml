@@ -15,9 +15,12 @@ env:
 jobs:
   build:
     name: Build
-    runs-on: windows-latest
     strategy:
       matrix:
+        runner:
+          - windows-latest
+          - windows-latest-arm64
+
         wdk:
           - Microsoft.WindowsWDK.10.0.22621 # NI WDK
 
@@ -38,6 +41,8 @@ jobs:
             arch: amd64
           - name: aarch64-pc-windows-msvc
             arch: arm64
+    
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout Repository

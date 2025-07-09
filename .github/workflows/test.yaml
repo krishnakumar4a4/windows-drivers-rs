@@ -10,9 +10,12 @@ name: Test
 jobs:
   test:
     name: Test
-    runs-on: windows-latest
     strategy:
       matrix:
+        runner:
+          - windows-latest
+          - windows-latest-arm64
+
         wdk:
           - Microsoft.WindowsWDK.10.0.22621 # NI WDK
 
@@ -28,9 +31,7 @@ jobs:
           - dev
           - release
 
-        target_triple:
-          - x86_64-pc-windows-msvc
-          # - aarch64-pc-windows-msvc FIXME: Add support for executing ARM64 tests. Maybe use target specific test runner in emulator: https://doc.rust-lang.org/cargo/reference/config.html#target
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout Repository
@@ -65,7 +66,6 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust_toolchain }}
-          targets: ${{ matrix.target_triple }}
 
       - name: Install Cargo Expand
         uses: taiki-e/install-action@v2
@@ -73,4 +73,4 @@ jobs:
           tool: cargo-expand@1.0.85
 
       - name: Run Cargo Test
-        run: cargo +${{ matrix.rust_toolchain }} test --locked --profile ${{ matrix.cargo_profile }} --target ${{ matrix.target_triple }} --all-features
+        run: cargo +${{ matrix.rust_toolchain }} test --locked --profile ${{ matrix.cargo_profile }} --all-features

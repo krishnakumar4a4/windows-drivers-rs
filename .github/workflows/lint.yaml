@@ -14,11 +14,14 @@ env:
 jobs:
   clippy:
     name: Clippy
-    runs-on: windows-latest
     permissions:
       checks: write
     strategy:
       matrix:
+        runner:
+          - windows-latest
+          - windows-latest-arm64
+
         wdk:
           - Microsoft.WindowsWDK.10.0.22621 # NI WDK
 
@@ -33,10 +36,8 @@ jobs:
         cargo_profile:
           - dev
           - release
-
-        target_triple:
-          - x86_64-pc-windows-msvc
-          - aarch64-pc-windows-msvc
+    
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout Repository
@@ -72,10 +73,9 @@ jobs:
         with:
           toolchain: ${{ matrix.rust_toolchain }}
           components: clippy
-          targets: ${{ matrix.target_triple }}
 
       - name: Run Cargo Clippy
-        run: cargo +${{ matrix.rust_toolchain }} clippy --locked --profile ${{ matrix.cargo_profile }} --target ${{ matrix.target_triple }} --all-targets --all-features
+        run: cargo +${{ matrix.rust_toolchain }} clippy --locked --profile ${{ matrix.cargo_profile }} --all-targets --all-features
 
   unused_deps:
     name: Detect Unused Cargo Dependencies
