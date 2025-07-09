@@ -59,8 +59,8 @@ struct TimerContext {
 
 /// The entry point for the driver. It initializes the driver and is the first
 /// routine called by the system after the driver is loaded. `driver_entry`
-/// specifies the other entry points in the function driver, such as
-/// `evt_device_add` and `driver_unload`.
+/// specifies the other entry points in the function driver such as
+/// `evt_device_add`.
 /// 
 /// The #[driver_entry] attribute is used to mark the entry point.
 /// It is a proc macro that generates the shim code which enables WDF
@@ -125,7 +125,7 @@ fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
 
     let device = Device::create(device_init, Some(pnp_power_callbacks))?;
 
-    // Create a device interface so that application can find and talk
+    // Create a device interface so that applications can find us and talk
     // to us.
     let _ = device.create_interface(
         &Guid::parse("2aa02ab1-c26e-431b-8efe-85ee8de102e4").expect("GUID is valid"),
@@ -139,7 +139,7 @@ fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
 /// are configured in this function.
 /// 
 /// A single default I/O Queue is configured for serial request
-/// processing, and queue context is set up. The lifetime ofthe
+/// processing, and queue context is set up. The lifetime of the
 /// context is tied to the lifetime of the I/O Queue object.
 /// 
 /// # Arguments
