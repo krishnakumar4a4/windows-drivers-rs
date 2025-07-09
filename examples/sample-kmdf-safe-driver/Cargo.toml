@@ -21,7 +21,7 @@ crate-type = ["cdylib"]
 test = false
 
 [build-dependencies]
-wdk-build = { path = "../../crates/wdk-build", version = "0.3.0" }
+wdk-build = { path = "../../crates/wdk-build", version = "0.4.0" }
 
 [dependencies]
 wdf = { path = "../../crates/wdf", version = "0.3.0" }
