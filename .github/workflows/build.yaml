@@ -101,12 +101,29 @@ jobs:
             Install-WinGetPackage -Id ${{ matrix.wdk }} -Source winget -MatchOption Equals -Mode Silent -Force
           }
           
+      - name: Install MSYS2 for ARM64 debugging
+        if: ${{ runner.arch == 'ARM64' }}
+        run: |
+          Write-Host "Installing MSYS2 via winget for ARM64 runner..."
+          try {
+            winget install --id MSYS2.MSYS2 --source winget --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
+            
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "MSYS2 installed successfully via winget"
+              # Add to PATH
+              $env:PATH = "C:\msys64\usr\bin;$env:PATH"
+            } else {
+              Write-Host "Failed to install MSYS2 via winget (exit code: $LASTEXITCODE)"
+            }
+          } catch {
+            Write-Host "Failed to install MSYS2 via winget: $($_.Exception.Message)"
+          }
+
       - name: Setup tmate session
         if: ${{ failure() }}
         uses: mxschmitt/action-tmate@v3
         with:
           limit-access-to-actor: true
-          msys2-location: ${{ steps.setup-msys2.outputs.msys2-location }}
 
       - name: Install Rust Toolchain (${{ matrix.rust_toolchain }})
         uses: dtolnay/rust-toolchain@master
