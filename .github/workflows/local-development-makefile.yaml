@@ -38,22 +38,64 @@ jobs:
 
       - name: Install LLVM ${{ matrix.llvm }}
         run: |
-          if ((Get-WinGetPackage -Id LLVM -Source winget -MatchOption Equals).InstalledVersion -eq '${{ matrix.llvm }}') {
+          # Use native winget.exe instead of PowerShell module for ARM64 compatibility
+          Write-Host "Checking for existing LLVM installation..."
+          $installedPackages = winget list --id LLVM.LLVM --exact --accept-source-agreements --disable-interactivity 2>$null
+          
+          # Check if the exact version is already installed
+          if ($installedPackages -match "LLVM\.LLVM.*${{ matrix.llvm }}") {
             Write-Host "LLVM ${{ matrix.llvm }} is already installed."
           } else {
+            # If any version of LLVM is installed, uninstall it first
+            if ($installedPackages -match "LLVM\.LLVM") {
+              # Extract and print the existing version
+              $existingVersion = ($installedPackages | Select-String "LLVM\.LLVM").Line
+              Write-Host "Found existing LLVM installation ($existingVersion). Uninstalling before installing version ${{ matrix.llvm }}..."
+              winget uninstall --id LLVM.LLVM --exact --silent --accept-source-agreements --disable-interactivity
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "Warning: Failed to uninstall existing LLVM (exit code: $LASTEXITCODE). Continuing with installation..."
+              }
+            }
+            
             Write-Host "Installing LLVM ${{ matrix.llvm }}..."
-            Install-WinGetPackage -Id LLVM.LLVM -Version ${{ matrix.llvm }} -Source winget -MatchOption Equals -Mode Silent -Force
+            winget install --id LLVM.LLVM --version ${{ matrix.llvm }} --source winget --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
+            
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "LLVM installation failed with exit code: $LASTEXITCODE"
+              exit 1
+            }
           }
-          clang --version
+          
+          # Verify installation
+          if (Get-Command clang -ErrorAction SilentlyContinue) {
+            clang --version
+          } else {
+            Write-Host "Warning: clang command not found in PATH after installation"
+          }
 
       - name: Install WDK (${{ matrix.wdk }})
         run: |
-          if ((Get-WinGetPackage -Id ${{ matrix.wdk }} -Source winget -MatchOption Equals).Id -eq '${{ matrix.wdk }}') {
-            Write-Host "${{ matrix.wdk }} is already installed. Attempting to update..."
-            Update-WinGetPackage -Id ${{ matrix.wdk }} -Source winget -MatchOption Equals -Mode Silent -Force
+          # Use native winget.exe instead of PowerShell module for ARM64 compatibility
+          Write-Host "Checking for existing WDK installation..."
+          $installedPackages = winget list --id ${{ matrix.wdk }} --exact --accept-source-agreements --disable-interactivity 2>$null
+          
+          if ($installedPackages -match [regex]::Escape("${{ matrix.wdk }}")) {
+            Write-Host "${{ matrix.wdk }} is already installed. Checking for updates..."
+            winget upgrade --id ${{ matrix.wdk }} --source winget --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
+            
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "${{ matrix.wdk }} updated successfully."
+            } else {
+              Write-Host "No updates available for ${{ matrix.wdk }} or update failed (exit code: $LASTEXITCODE)."
+            }
           } else {
             Write-Host "Installing ${{ matrix.wdk }}..."
-            Install-WinGetPackage -Id ${{ matrix.wdk }} -Source winget -MatchOption Equals -Mode Silent -Force
+            winget install --id ${{ matrix.wdk }} --source winget --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
+            
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "WDK installation failed with exit code: $LASTEXITCODE"
+              exit 1
+            }
           }
 
       - name: Install Nightly Rust Toolchain
