@@ -56,11 +56,24 @@ jobs:
       - name: Install LLVM ${{ matrix.llvm }}
         run: |
           # Use native winget.exe instead of PowerShell module for ARM64 compatibility
-          $installedPackages = winget list --id LLVM.LLVM --exact --accept-source-agreements --disable-interactivity
+          Write-Host "Checking for existing LLVM installation..."
+          $installedPackages = winget list --id LLVM.LLVM --exact --accept-source-agreements --disable-interactivity 2>$null
           
+          # Check if the exact version is already installed
           if ($installedPackages -match "LLVM\.LLVM.*${{ matrix.llvm }}") {
             Write-Host "LLVM ${{ matrix.llvm }} is already installed."
           } else {
+            # If any version of LLVM is installed, uninstall it first
+            if ($installedPackages -match "LLVM\.LLVM") {
+              # Extract and print the existing version
+              $existingVersion = ($installedPackages | Select-String "LLVM\.LLVM").Line
+              Write-Host "Found existing LLVM installation ($existingVersion). Uninstalling before installing version ${{ matrix.llvm }}..."
+              winget uninstall --id LLVM.LLVM --exact --silent --accept-source-agreements --disable-interactivity
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "Warning: Failed to uninstall existing LLVM (exit code: $LASTEXITCODE). Continuing with installation..."
+              }
+            }
+            
             Write-Host "Installing LLVM ${{ matrix.llvm }}..."
             winget install --id LLVM.LLVM --version ${{ matrix.llvm }} --source winget --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
             
