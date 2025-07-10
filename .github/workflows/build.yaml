@@ -93,13 +93,27 @@ jobs:
 
       - name: Install WDK (${{ matrix.wdk }})
         run: |
-          if ((Get-WinGetPackage -Id ${{ matrix.wdk }} -Source winget -MatchOption Equals).Id -eq '${{ matrix.wdk }}') {
-            Write-Host "${{ matrix.wdk }} is already installed. Attempting to update..."
-            Update-WinGetPackage -Id ${{ matrix.wdk }} -Source winget -MatchOption Equals -Mode Silent -Force
+          # Use native winget.exe instead of PowerShell module for ARM64 compatibility
+          Write-Host "Checking for existing WDK installation..."
+          $installedPackages = winget list --id ${{ matrix.wdk }} --exact --accept-source-agreements --disable-interactivity 2>$null
+          
+          if ($installedPackages -match "${{ matrix.wdk }}") {
+            Write-Host "${{ matrix.wdk }} is already installed."
           } else {
             Write-Host "Installing ${{ matrix.wdk }}..."
-            Install-WinGetPackage -Id ${{ matrix.wdk }} -Source winget -MatchOption Equals -Mode Silent -Force
+            winget install --id ${{ matrix.wdk }} --source winget --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
+            
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "WDK installation failed with exit code: $LASTEXITCODE"
+              exit 1
+            }
           }
+
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
 
       - name: Install Rust Toolchain (${{ matrix.rust_toolchain }})
         uses: dtolnay/rust-toolchain@master
