@@ -44,7 +44,7 @@ jobs:
           winget list --id LLVM.LLVM --exact --accept-source-agreements --disable-interactivity
           
           Write-Host "Force Installing LLVM ${{ matrix.llvm }}..."
-          winget install --id LLVM.LLVM --version ${{ matrix.llvm }} --source winget --force --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity 2>$null
+          winget install --id LLVM.LLVM --version ${{ matrix.llvm }} --source winget --force --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
           
           if ($LASTEXITCODE -ne 0) {
             Write-Error "LLVM ${{ matrix.llvm }} force installation failed with exit code: $LASTEXITCODE"
@@ -62,12 +62,6 @@ jobs:
           if ($installedPackages -match [regex]::Escape("${{ matrix.wdk }}")) {
             Write-Host "${{ matrix.wdk }} is already installed. Checking for updates..."
             winget upgrade --id ${{ matrix.wdk }} --source winget --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
-            
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "${{ matrix.wdk }} updated successfully."
-            } else {
-              Write-Host "No updates available for ${{ matrix.wdk }} or update failed (exit code: $LASTEXITCODE)."
-            }
           } else {
             Write-Host "Installing ${{ matrix.wdk }}..."
             winget install --id ${{ matrix.wdk }} --source winget --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
