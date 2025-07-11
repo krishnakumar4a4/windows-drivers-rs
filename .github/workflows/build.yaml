@@ -16,6 +16,7 @@ jobs:
   build:
     name: Build
     strategy:
+      fail-fast: false
       matrix:
         runner:
           - windows-latest

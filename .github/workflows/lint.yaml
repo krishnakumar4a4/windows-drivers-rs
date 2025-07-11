@@ -17,6 +17,7 @@ jobs:
     permissions:
       checks: write
     strategy:
+      fail-fast: false
       matrix:
         runner:
           - windows-latest

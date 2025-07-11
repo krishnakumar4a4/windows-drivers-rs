@@ -14,6 +14,7 @@ jobs:
   build:
     name: Test WDR's local cargo-make Makefile
     strategy:
+      fail-fast: false
       matrix:
         runner:
           - windows-latest
