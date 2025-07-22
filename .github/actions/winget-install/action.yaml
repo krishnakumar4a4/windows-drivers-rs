@@ -20,6 +20,8 @@ runs:
         # $ReleaseInfo = Invoke-RestMethod -Headers $AuthenticatedHeaders 'https://api.github.com/repos/microsoft/winget-cli/releases/164835566'
         # winget-cli release v1.11.400
         $ReleaseInfo = Invoke-RestMethod -Headers $AuthenticatedHeaders 'https://api.github.com/repos/microsoft/winget-cli/releases/226250169'
+        # winget-cli release v1.10.390
+        $ReleaseInfo = Invoke-RestMethod -Headers $AuthenticatedHeaders 'https://api.github.com/repos/microsoft/winget-cli/releases/210203928'
         $WingetDownloadUri = $ReleaseInfo.assets.browser_download_url | Where-Object { $_.EndsWith('.msixbundle') }
         $WingetLicenseDownloadUri = $ReleaseInfo.assets.browser_download_url | Where-Object { $_.EndsWith('License1.xml') }
         $WingetDependenciesZipUri = $ReleaseInfo.assets.browser_download_url | Where-Object { $_.EndsWith('DesktopAppInstaller_Dependencies.zip') }
