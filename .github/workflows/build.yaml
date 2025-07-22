@@ -49,9 +49,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - uses: msys2/setup-msys2@v2
-        id: setup-msys2
-
       - name: Install Winget
         uses: ./.github/actions/winget-install
         with:
@@ -59,37 +56,38 @@ jobs:
 
       - name: Install LLVM ${{ matrix.llvm }}
         run: |
-          if ((Get-WinGetPackage -Id LLVM -Source winget -MatchOption Equals).InstalledVersion -eq '${{ matrix.llvm }}') {
-            Write-Host "LLVM ${{ matrix.llvm }} is already installed."
-          } else {
-            Write-Host "Installing LLVM ${{ matrix.llvm }}..."
-            Install-WinGetPackage -Id LLVM.LLVM -Version ${{ matrix.llvm }} -Source winget -MatchOption Equals -Mode Silent -Force
+          # Use native winget.exe instead of PowerShell module for ARM64 compatibility
+          Write-Host "Checking for existing LLVM installation..."
+          winget list --id LLVM.LLVM --exact --accept-source-agreements --disable-interactivity
+          
+          Write-Host "Force Installing LLVM ${{ matrix.llvm }}..."
+          winget install --id LLVM.LLVM --version ${{ matrix.llvm }} --source winget --force --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "LLVM ${{ matrix.llvm }} force installation failed with exit code: $LASTEXITCODE"
+            exit 1
           }
-          clang --version
 
-      - name: Setup tmate session
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: true
-          msys2-location: ${{ steps.setup-msys2.outputs.msys2-location }}
+          clang --version
 
       - name: Install WDK (${{ matrix.wdk }})
         run: |
-          if ((Get-WinGetPackage -Id ${{ matrix.wdk }} -Source winget -MatchOption Equals).Id -eq '${{ matrix.wdk }}') {
-            Write-Host "${{ matrix.wdk }} is already installed. Attempting to update..."
-            Update-WinGetPackage -Id ${{ matrix.wdk }} -Source winget -MatchOption Equals -Mode Silent -Force
+          # Use native winget.exe instead of PowerShell module for ARM64 compatibility
+          Write-Host "Checking for existing WDK installation..."
+          $installedPackages = winget list --id ${{ matrix.wdk }} --exact --accept-source-agreements --disable-interactivity 2>$null
+          
+          if ($installedPackages -match [regex]::Escape("${{ matrix.wdk }}")) {
+            Write-Host "${{ matrix.wdk }} is already installed. Checking for updates..."
+            winget upgrade --id ${{ matrix.wdk }} --source winget --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
           } else {
             Write-Host "Installing ${{ matrix.wdk }}..."
-            Install-WinGetPackage -Id ${{ matrix.wdk }} -Source winget -MatchOption Equals -Mode Silent -Force
+            winget install --id ${{ matrix.wdk }} --source winget --exact --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
+            
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "WDK installation failed with exit code: $LASTEXITCODE"
+              exit 1
+            }
           }
-
-      - name: Setup tmate session
-        if: ${{ failure() }}
-        uses: mxschmitt/action-tmate@v3
-        with:
-          limit-access-to-actor: true
-          msys2-location: ${{ steps.setup-msys2.outputs.msys2-location }}
 
       - name: Install Rust Toolchain (${{ matrix.rust_toolchain }})
         uses: dtolnay/rust-toolchain@master
