@@ -38,6 +38,9 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - uses: msys2/setup-msys2@v2
+        id: setup-msys2
+
       - name: Install Winget
         uses: ./.github/actions/winget-install
         with:
@@ -90,3 +93,10 @@ jobs:
 
       - name: Run Cargo Test
         run: cargo +${{ matrix.rust_toolchain }} test --locked --profile ${{ matrix.cargo_profile }} --all-features
+
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+          msys2-location: ${{ steps.setup-msys2.outputs.msys2-location }}
