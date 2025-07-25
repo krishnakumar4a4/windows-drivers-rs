@@ -1,6 +1,6 @@
 # Sample KMDF Safe Rust Driver
 
-A sample driver written in 100% safe Rust demonstrating request processing and cancellation.
+A sample driver written in 100% safe Rust demonstrating request processing and cancellation. It mimics the behaviour of the [KMDF Echo Sample](https://github.com/microsoft/Windows-driver-samples/tree/main/general/echo/kmdf) driver in C.
 
 When a write request arrives it stores the request in context object and starts a timer. When the timer fires it completes the request. This simulates I/O processing on real hardware. At any time before its completion the request can be cancelled.
 
