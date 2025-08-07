@@ -116,7 +116,7 @@ impl Driver {
     }
 }
 
-fn cleanup_tracing() {
+fn clean_up_tracing() {
     if let Some(trace_writer) = TRACE_WRITER.get() {
         trace_writer.stop();
     }
@@ -175,7 +175,7 @@ pub fn call_safe_driver_entry(
     match safe_entry(&mut safe_driver, &reg_path) {
         Ok(_) => NtStatus::Success.into(),
         Err(e) => {
-            cleanup_tracing();
+            clean_up_tracing();
             e.nt_status()
         }
     }
@@ -200,7 +200,7 @@ extern "C" fn evt_driver_device_add(
 extern "C" fn driver_unload(_driver: *mut DRIVER_OBJECT) {
     println!("Driver unload");
 
-    cleanup_tracing();
+    clean_up_tracing();
 
     println!("Driver unload done");
 }
