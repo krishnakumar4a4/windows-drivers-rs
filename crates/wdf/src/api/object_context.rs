@@ -2,11 +2,19 @@
 // License: MIT OR Apache-2.0
 
 use core::sync::atomic::Ordering;
-use crate::api::{init_attributes, Handle, RefCountedHandle, NtResult};
+
 use wdk_sys::{
-    call_unsafe_wdf_function_binding, NT_SUCCESS, PCWDF_OBJECT_CONTEXT_TYPE_INFO, WDFOBJECT, WDF_OBJECT_CONTEXT_TYPE_INFO,
-    WDF_OBJECT_ATTRIBUTES, STATUS_INVALID_PARAMETER, ntddk::KeBugCheckEx,
+    call_unsafe_wdf_function_binding,
+    ntddk::KeBugCheckEx,
+    NT_SUCCESS,
+    PCWDF_OBJECT_CONTEXT_TYPE_INFO,
+    STATUS_INVALID_PARAMETER,
+    WDFOBJECT,
+    WDF_OBJECT_ATTRIBUTES,
+    WDF_OBJECT_CONTEXT_TYPE_INFO,
 };
+
+use crate::api::{init_attributes, Handle, NtResult, RefCountedHandle};
 
 #[doc(hidden)]
 #[repr(transparent)]
@@ -49,7 +57,7 @@ pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
     fw_obj: &T,
     context: U,
     cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
-    destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>
+    destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>,
 ) -> NtResult<()> {
     set_up_context::<T, U>(
         context,
@@ -71,7 +79,7 @@ pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
             Ok(wdf_context)
         },
         cleanup_callback,
-        destroy_callback
+        destroy_callback,
     )
 }
 
@@ -79,7 +87,7 @@ pub unsafe fn create_with_context<T: Handle, U: ObjectContext>(
     create: impl Fn(WDF_OBJECT_ATTRIBUTES) -> NtResult<T>,
     context: U,
     cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
-    destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>
+    destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>,
 ) -> NtResult<T> {
     let mut created_obj: Option<T> = None;
     set_up_context::<T, U>(
@@ -96,7 +104,7 @@ pub unsafe fn create_with_context<T: Handle, U: ObjectContext>(
             Ok(raw_context)
         },
         cleanup_callback,
-        destroy_callback
+        destroy_callback,
     )?;
 
     Ok(created_obj.unwrap()) // The object is guaranteed to be valid here
@@ -106,7 +114,7 @@ fn set_up_context<T: Handle, U: ObjectContext>(
     context: U,
     mut create_wdf_context: impl FnMut(WDF_OBJECT_ATTRIBUTES) -> NtResult<*mut U>,
     cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
-    destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>
+    destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>,
 ) -> NtResult<()> {
     // Make sure the aligntment requirement of the object struct
     // does not exceed the minimum possible alignment of allocations
@@ -180,7 +188,9 @@ pub unsafe fn drop_context<U: ObjectContext>(fw_obj: WDFOBJECT) {
     }
 }
 
-pub(crate) fn bug_check_if_ref_count_not_zero<T: RefCountedHandle, U: ObjectContext>(obj: WDFOBJECT) {
+pub(crate) fn bug_check_if_ref_count_not_zero<T: RefCountedHandle, U: ObjectContext>(
+    obj: WDFOBJECT,
+) {
     let handle = unsafe { &*obj.cast::<T>() };
     let ref_count = handle.get_ref_count().load(Ordering::Acquire);
     if ref_count > 0 {
@@ -188,19 +198,9 @@ pub(crate) fn bug_check_if_ref_count_not_zero<T: RefCountedHandle, U: ObjectCont
     }
 }
 
-pub(crate) fn bug_check(
-    code: u32,
-    obj: WDFOBJECT,
-    ref_count: Option<usize>,
-) {
+pub(crate) fn bug_check(code: u32, obj: WDFOBJECT, ref_count: Option<usize>) {
     let ref_count = ref_count.unwrap_or(0);
     unsafe {
-        KeBugCheckEx(
-            code,
-            obj as u64,
-            ref_count as u64,
-            0,
-            0,
-        );
+        KeBugCheckEx(code, obj as u64, ref_count as u64, 0, 0);
     }
 }

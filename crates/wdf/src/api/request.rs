@@ -1,9 +1,16 @@
 extern crate alloc;
 
 use alloc::string::String;
-use crate::api::{error::NtStatus, io_queue::IoQueue, memory::Memory, object::Handle, error::{NtError, NtResult}};
+
 use wdf_macros::object_context;
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFMEMORY, WDFREQUEST, NT_SUCCESS};
+use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY, WDFOBJECT, WDFREQUEST};
+
+use crate::api::{
+    error::{NtError, NtResult, NtStatus},
+    io_queue::IoQueue,
+    memory::Memory,
+    object::Handle,
+};
 
 #[derive(Debug)]
 #[repr(transparent)]
@@ -56,7 +63,12 @@ impl Request {
         // TODO: check for the race where another thread
         // could call this method method and thay might
         // attach the context before us.
-        if let Err(e) = RequestContext::attach( &mut self, RequestContext { evt_request_cancel: cancel_fn, },) {
+        if let Err(e) = RequestContext::attach(
+            &mut self,
+            RequestContext {
+                evt_request_cancel: cancel_fn,
+            },
+        ) {
             return Err((e, self));
         }
 

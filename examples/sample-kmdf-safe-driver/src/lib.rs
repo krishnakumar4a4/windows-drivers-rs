@@ -1,37 +1,53 @@
 //! A sample driver written in 100% safe Rust.
 //! Demonstrates request processing and cancellation.
-//! 
+//!
 //! When a write request arrives it stores the request
 //! in context object and starts a timer. When the timer
 //! fires it completes the request. This simulates I/O
 //! processing on real hardware. At any time before its
 //! completion the request can be cancelled. Cancellation is
 //! supported through the request cancellation callback.
-//! 
+//!
 //! This driver uses safe Rust abstractions provided by the
 //! `wdf` crate located at the path `../../crates/wdf` relative
 //! to this directory.
-//! 
+//!
 //! The design of everything over here and in the `wdf` crate is
 //! at a very early stage. Some parts may appear subotimal or even
 //! wrong. That is likely to change and improve over time.
 
 #![no_std]
 
-use wdf::{
-    Arc, driver_entry, object_context, println, trace, CancellableMarkedRequest, Request,
-    RequestCancellationToken, Device, DeviceInit, Driver, Guid, IoQueue,
-    IoQueueConfig, NtError, NtResult, NtStatus, PnpPowerEventCallbacks, SpinLock, Timer,
-    TimerConfig
-};
-
 use core::time::Duration;
 
-extern crate alloc;
-use alloc::vec::Vec;
-use alloc::vec;
+use wdf::{
+    driver_entry,
+    object_context,
+    println,
+    trace,
+    Arc,
+    CancellableMarkedRequest,
+    Device,
+    DeviceInit,
+    Driver,
+    Guid,
+    IoQueue,
+    IoQueueConfig,
+    NtError,
+    NtResult,
+    NtStatus,
+    PnpPowerEventCallbacks,
+    Request,
+    RequestCancellationToken,
+    SpinLock,
+    Timer,
+    TimerConfig,
+};
 
-const MAX_WRITE_LENGTH: usize = 1024*40;
+extern crate alloc;
+use alloc::{vec, vec::Vec};
+
+const MAX_WRITE_LENGTH: usize = 1024 * 40;
 
 /// Context object to be attached to a queue
 #[object_context(IoQueue)]
@@ -54,25 +70,25 @@ struct QueueContext {
 /// Context object to be attached to a timer
 #[object_context(Timer)]
 struct TimerContext {
-    queue: Arc<IoQueue>
+    queue: Arc<IoQueue>,
 }
 
 /// The entry point for the driver. It initializes the driver and is the first
 /// routine called by the system after the driver is loaded. `driver_entry`
 /// specifies the other entry points in the function driver such as
 /// `evt_device_add`.
-/// 
+///
 /// The #[driver_entry] attribute is used to mark the entry point.
 /// It is a proc macro that generates the shim code which enables WDF
 /// to call this driver
 ///
 /// # Arguments
-/// 
+///
 /// * `driver` - Represents the instance of the function driver that is loaded
 /// into memory. `driver` object is allocated by the system before the
 /// driver is loaded, and it is released by the system after the system unloads
 /// the function driver from memory.
-/// 
+///
 /// * `registry_path` - Represents the driver specific path in the Registry.
 /// The function driver can use the path to store driver related data between
 /// reboots. The path does not store hardware instance specific data.
@@ -83,11 +99,11 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> Result<(), NtError
     }
 
     // Set up the device add callback
-    driver.on_evt_device_add(evt_device_add);
+    driver.on_evt_device_add(evt_device_add)?;
 
     // Enable tracing
     let control_guid = Guid::parse("cb94defb-592a-4509-8f2e-54f204929669").expect("GUID is valid");
-    driver.enable_tracing(control_guid);
+    driver.enable_tracing(control_guid)?;
 
     trace("Trace: Safe Rust driver entry complete");
 
@@ -120,7 +136,8 @@ fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
     // timer as the device gets started and stopped.
     let mut pnp_power_callbacks = PnpPowerEventCallbacks::default();
     pnp_power_callbacks.evt_device_self_managed_io_init = Some(evt_device_self_managed_io_start);
-    pnp_power_callbacks.evt_device_self_managed_io_suspend = Some(evt_device_self_managed_io_suspend);
+    pnp_power_callbacks.evt_device_self_managed_io_suspend =
+        Some(evt_device_self_managed_io_suspend);
     pnp_power_callbacks.evt_device_self_managed_io_restart = Some(evt_device_self_managed_io_start);
 
     let device = Device::create(device_init, Some(pnp_power_callbacks))?;
@@ -129,21 +146,21 @@ fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
     // to us.
     let _ = device.create_interface(
         &Guid::parse("2aa02ab1-c26e-431b-8efe-85ee8de102e4").expect("GUID is valid"),
-        None
-    )?; 
+        None,
+    )?;
 
     queue_initialize(&device)
 }
 
 /// The I/O dispatch callbacks for the frameworks device object
 /// are configured in this function.
-/// 
+///
 /// A single default I/O Queue is configured for serial request
 /// processing, and queue context is set up. The lifetime of the
 /// context is tied to the lifetime of the I/O Queue object.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `device`` - Handle to a framework device object.
 fn queue_initialize(device: &Device) -> NtResult<()> {
     // Create queue
@@ -162,7 +179,7 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
 
     // Attach context to the timer
     let timer_context = TimerContext {
-        queue: queue.clone()
+        queue: queue.clone(),
     };
 
     TimerContext::attach(&timer, timer_context)?;
@@ -175,26 +192,25 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
     };
 
     QueueContext::attach(&queue, queue_context)?;
-    
+
     Ok(())
 }
 
 // This callback is called by the Framework when the device is started
 // or restarted after a suspend operation.
-///
 /// # Arguments
 ///
 /// * `device` - Handle to the device
-fn evt_device_self_managed_io_start(device: &Device) -> NtResult<()>{
+fn evt_device_self_managed_io_start(device: &Device) -> NtResult<()> {
     println!("Self-managed I/O start called: {:?}", device);
 
-    let queue = device.get_default_queue().
-        expect("Failed to get default queue");
+    let queue = device
+        .get_default_queue()
+        .expect("Failed to get default queue");
 
     queue.start();
 
-    let context = QueueContext::get(&queue)
-        .expect("Failed to get queue context"); 
+    let context = QueueContext::get(&queue).expect("Failed to get queue context");
 
     let _ = context.timer.start(&Duration::from_millis(100));
 
@@ -204,20 +220,20 @@ fn evt_device_self_managed_io_start(device: &Device) -> NtResult<()>{
 /// This callback is called by the Framework when the device is stopped
 /// for resource rebalance or suspended when the system is entering
 /// Sx state.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `device` - Handle to the device
 fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
     println!("Self-managed I/O suspend called: {:?}", device);
 
-    let queue = device.get_default_queue().
-        expect("Failed to get default queue");
+    let queue = device
+        .get_default_queue()
+        .expect("Failed to get default queue");
 
     queue.stop_synchronously();
 
-    let context = QueueContext::get(&queue)
-        .expect("Failed to get queue context"); 
+    let context = QueueContext::get(&queue).expect("Failed to get queue context");
 
     context.timer.stop(false);
 
@@ -230,16 +246,15 @@ fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
 /// The actual completion of the request is deferred to the periodic timer.
 ///
 /// # Arguments
-/// 
+///
 /// * `queue` - Handle to the framework queue object that is associated with the
-///             I/O request.
+///   I/O request.
 /// * `Request` - Handle to a framework request object.
-/// 
-/// * `Length`  - number of bytes to be read.
-///             The default property of the queue is to not dispatch
-///             zero lenght read & write requests to the driver and
-///             complete is with status success. So we will never get
-///             a zero length request.
+///
+/// * `Length`  - number of bytes to be read. The default property of the queue
+///   is to not dispatch zero lenght read & write requests to the driver and
+///   complete is with status success. So we will never get a zero length
+///   request.
 fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
 
@@ -265,7 +280,7 @@ fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
         // considered a recipe for deadlocks although copy_from_buffer
         // specifically won't cause any. Still this is a bad pattern
         // in general and we have to find a way to avoid it.
-        let buffer = context.buffer.lock(); 
+        let buffer = context.buffer.lock();
         let Some(buffer) = buffer.as_ref() else {
             println!("evt_io_read called but no request buffer is set");
             request.complete_with_information(NtStatus::Success, 0);
@@ -301,20 +316,20 @@ fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 }
 
 /// This callback is invoked when the framework receives IRP_MJ_WRITE request.
-/// It copies the data from the request into a buffer stored in the queue context.
-/// The actual completion of the request is deferred to the periodic timer.
-/// 
+/// It copies the data from the request into a buffer stored in the queue
+/// context. The actual completion of the request is deferred to the periodic
+/// timer.
+///
 /// # Arguments
-/// 
+///
 /// * `queue` - Handle to the framework queue object that is associated with the
-///             I/O request.
+///   I/O request.
 /// * `Request` - Handle to a framework request object.
-/// 
-/// * `Length`  - number of bytes to be read.
-///             The default property of the queue is to not dispatch
-///             zero lenght read & write requests to the driver and
-///             complete is with status success. So we will never get
-///             a zero length request.
+///
+/// * `Length`  - number of bytes to be read. The default property of the queue
+///   is to not dispatch zero lenght read & write requests to the driver and
+///   complete is with status success. So we will never get a zero length
+///   request.
 fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
     println!("evt_io_write called. Queue {queue:?}, Request {request:?} Length {length}");
 
@@ -368,7 +383,7 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
 /// if it is found in the context.
 ///
 /// # Arguments
-/// 
+///
 /// `token` - The cancellation token that identifies the request to be cancelled
 fn evt_request_cancel(token: &RequestCancellationToken) {
     println!("evt_request_cancel called");
@@ -393,7 +408,7 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 /// and completes it
 ///
 /// # Arguments
-/// 
+///
 /// * `timer` - Handle of the timer that fired
 fn evt_timer(timer: &Timer) {
     println!("evt_timer called");
@@ -402,8 +417,7 @@ fn evt_timer(timer: &Timer) {
         .expect("Failed to get timer context")
         .queue;
 
-    let req = QueueContext::get(queue)
-        .and_then(|context| context.request.lock().take());
+    let req = QueueContext::get(queue).and_then(|context| context.request.lock().take());
 
     if let Some(req) = req {
         req.complete(NtStatus::Success);
@@ -418,7 +432,7 @@ fn evt_timer(timer: &Timer) {
 /// client driver is bound to.
 ///
 /// # Arguments
-/// 
+///
 /// * `driver` - The driver handle
 fn print_driver_version(driver: &Driver) -> NtResult<()> {
     let driver_version = driver.retrieve_version_string()?;

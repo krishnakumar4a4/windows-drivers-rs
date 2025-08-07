@@ -57,3 +57,9 @@ impl From<NtError> for NtStatus {
         Self::Error(err)
     }
 }
+
+impl Into<NTSTATUS> for NtStatus {
+    fn into(self) -> NTSTATUS {
+        self.nt_status()
+    }
+}

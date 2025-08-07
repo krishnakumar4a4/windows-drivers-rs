@@ -1,14 +1,13 @@
-use core::sync::atomic::AtomicUsize;
+use core::{mem::MaybeUninit, ptr::null_mut, sync::atomic::AtomicUsize, time::Duration};
+
+use wdf_macros::internal_object_context;
+use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_TIMER_CONFIG};
+
 use crate::api::{
     device::Device,
     error::NtResult,
-    object::{wdf_struct_size, impl_ref_counted_handle, Handle, init_attributes},
-    sync::Arc
-};
-use core::{mem::MaybeUninit, ptr::null_mut, time::Duration};
-use wdf_macros::inner_object_context;
-use wdk_sys::{
-    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_TIMER_CONFIG,
+    object::{impl_ref_counted_handle, init_attributes, wdf_struct_size, Handle},
+    sync::Arc,
 };
 
 // TODO: Make timer more ergonomic and safer. It's
@@ -17,14 +16,11 @@ use wdk_sys::{
 // use_high_resolution_timer is set to true which would
 // crash the system.
 
-impl_ref_counted_handle!(
-    Timer,
-    InnerTimerContext
-);
+impl_ref_counted_handle!(Timer, TimerContext);
 
 impl Timer {
     pub fn create<'a, P: Handle>(config: &TimerConfig<'a, P>) -> NtResult<Arc<Self>> {
-        let context = InnerTimerContext {
+        let context = TimerContext {
             ref_count: AtomicUsize::new(0),
             evt_timer_func: config.evt_timer_func,
         };
@@ -49,7 +45,7 @@ impl Timer {
         };
 
         if NT_SUCCESS(status) {
-            InnerTimerContext::attach(unsafe { &*(timer as *mut _) }, context)?;
+            TimerContext::attach(unsafe { &*(timer as *mut _) }, context)?;
             let timer = unsafe { Arc::from_raw(timer as *mut _) };
 
             Ok(timer)
@@ -69,16 +65,23 @@ impl Timer {
         let due_time = -1 * duration.as_nanos() as i64 / 100; // To ticks. -1 is for relative time
 
         // TODO: use something like duration instead of i64 for due_time
-        unsafe { call_unsafe_wdf_function_binding!(WdfTimerStart, self.as_ptr() as *mut _, due_time) != 0 }
+        unsafe {
+            call_unsafe_wdf_function_binding!(WdfTimerStart, self.as_ptr() as *mut _, due_time) != 0
+        }
     }
 
     // TODO: Change to &mut self. See comment on start() method
     pub fn stop(&self, wait: bool) -> bool {
-        unsafe { call_unsafe_wdf_function_binding!(WdfTimerStop, self.as_ptr() as *mut _, wait as u8) != 0 }
+        unsafe {
+            call_unsafe_wdf_function_binding!(WdfTimerStop, self.as_ptr() as *mut _, wait as u8)
+                != 0
+        }
     }
 
     pub fn get_device(&self) -> &Device {
-        let parent = unsafe { call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr() as *mut _) };
+        let parent = unsafe {
+            call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr() as *mut _)
+        };
 
         if parent.is_null() {
             panic!("Timer has no parent device");
@@ -87,7 +90,6 @@ impl Timer {
         unsafe { &*parent.cast::<Device>() }
     }
 }
-
 
 /// SAFETY: This is safe because all the WDF functions
 /// that operate on WDFTIMER do so in a thread-safe manner.
@@ -147,15 +149,15 @@ impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
     }
 }
 
-#[inner_object_context(Timer)]
-struct InnerTimerContext {
+#[internal_object_context(Timer)]
+struct TimerContext {
     ref_count: AtomicUsize,
     evt_timer_func: fn(&Timer),
 }
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {
     let timer = unsafe { &*timer.cast::<Timer>() };
-    if let Some(timer_state) = InnerTimerContext::get(&timer) {
+    if let Some(timer_state) = TimerContext::get(&timer) {
         (timer_state.evt_timer_func)(timer);
     }
 }

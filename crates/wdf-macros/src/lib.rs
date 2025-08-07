@@ -161,16 +161,22 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
     object_context_impl("object_context", attr, item, false)
 }
 
-/// The attribute used to mark a struct as an "inner" framework object context
-/// An inner object context is the one that we attach to a framework object in order
-/// to store the object's internal Rust specific state. It is not a context the user can access
+/// The attribute used to mark a struct as an "internal" framework object
+/// context An internal object context is the one that we attach to a framework
+/// object in order to store the object's internal Rust specific state. It is
+/// not a context the user can access
 #[doc(hidden)]
 #[proc_macro_attribute]
-pub fn inner_object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
-    object_context_impl("inner_object_context", attr, item, true)
+pub fn internal_object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
+    object_context_impl("internal_object_context", attr, item, true)
 }
 
-fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, parent_is_ref_counted: bool) -> TokenStream {
+fn object_context_impl(
+    attr_name: &str,
+    attr: TokenStream,
+    item: TokenStream,
+    parent_is_ref_counted: bool,
+) -> TokenStream {
     let fw_obj_type_name = parse_macro_input!(attr as Ident);
     let context_struct = parse_macro_input!(item as ItemStruct);
 
@@ -178,10 +184,14 @@ fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, pa
     if !context_struct.generics.params.is_empty() {
         return Error::new_spanned(
             context_struct,
-            format!("The `{}` attribute cannot be applied to generic structs", attr_name),
-        ).to_compile_error().into();
+            format!(
+                "The `{}` attribute cannot be applied to generic structs",
+                attr_name
+            ),
+        )
+        .to_compile_error()
+        .into();
     }
-
 
     // Make sure the struct does not have any odd alignment requirements
     // that conflict with the alignment of the framework's allocations.
@@ -193,11 +203,15 @@ fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, pa
     // while attaching the context
     for attr in &context_struct.attrs {
         if attr.path().is_ident("repr") {
-           let res = attr.parse_nested_meta(|meta| {
+            let res = attr.parse_nested_meta(|meta| {
                 if !(meta.path.is_ident("Rust") || meta.path.is_ident("transparent")) {
                     Err(Error::new_spanned(
                         attr,
-                        format!("The `{}` attribute cannot be applied to structs with reprs other than `Rust` or `transparent`", attr_name)
+                        format!(
+                            "The `{}` attribute cannot be applied to structs with reprs other \
+                             than `Rust` or `transparent`",
+                            attr_name
+                        ),
                     ))
                 } else {
                     Ok(())
@@ -216,8 +230,6 @@ fn object_context_impl(attr_name: &str, attr: TokenStream, item: TokenStream, pa
     } else {
         quote!(::wdf) // Outside of `wdf`, use the global path
     };
-
-    
 
     let struct_name = &context_struct.ident;
     let static_name = Ident::new(

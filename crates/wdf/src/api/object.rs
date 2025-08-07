@@ -2,7 +2,8 @@ extern crate alloc;
 
 use alloc::string::String;
 use core::sync::atomic::AtomicUsize;
-use wdk_sys::{WDFOBJECT, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE, WDF_OBJECT_ATTRIBUTES};
+
+use wdk_sys::{WDFOBJECT, WDF_OBJECT_ATTRIBUTES, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE};
 
 pub trait Handle {
     fn as_ptr(&self) -> WDFOBJECT;
@@ -20,7 +21,9 @@ macro_rules! impl_handle {
         #[repr(C)]
         pub struct $obj {
             _private: [u8; 0], // Prevents instantiation of the struct from driver code
-            _no_send_sync: core::marker::PhantomData<*const ()>, // Prevents Send and Sync traits from being implemented automatically
+            _no_send_sync: core::marker::PhantomData<*const ()>, /* Prevents Send and Sync
+                                * traits from being
+                                * implemented automatically */
         }
 
         impl crate::api::object::Handle for $obj {
@@ -42,7 +45,7 @@ macro_rules! impl_handle {
                 write!(f, "{}({:#x})", stringify!($obj), self as *const _ as usize)
             }
         }
-    }
+    };
 }
 
 macro_rules! impl_ref_counted_handle {
@@ -51,11 +54,12 @@ macro_rules! impl_ref_counted_handle {
 
         impl crate::api::object::RefCountedHandle for $obj {
             fn get_ref_count(&self) -> &core::sync::atomic::AtomicUsize {
-                let inner_context = <$inner_context>::get(self).expect("Failed to get inner context");
+                let inner_context =
+                    <$inner_context>::get(self).expect("Failed to get inner context");
                 &inner_context.ref_count
             }
         }
-    }
+    };
 }
 
 macro_rules! wdf_struct_size {
@@ -84,7 +88,8 @@ pub fn init_attributes() -> WDF_OBJECT_ATTRIBUTES {
 
     attributes.Size = wdf_struct_size!(WDF_OBJECT_ATTRIBUTES);
     attributes.ExecutionLevel = _WDF_EXECUTION_LEVEL::WdfExecutionLevelInheritFromParent;
-    attributes.SynchronizationScope = _WDF_SYNCHRONIZATION_SCOPE::WdfSynchronizationScopeInheritFromParent;
+    attributes.SynchronizationScope =
+        _WDF_SYNCHRONIZATION_SCOPE::WdfSynchronizationScopeInheritFromParent;
 
     attributes
 }

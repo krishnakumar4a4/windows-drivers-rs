@@ -1,16 +1,14 @@
-use crate::api::{error::NtError, object::{Handle, impl_handle}};
-use wdk_sys::{
-    call_unsafe_wdf_function_binding, NT_SUCCESS,
+use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS};
+
+use crate::api::{
+    error::NtError,
+    object::{impl_handle, Handle},
 };
 
 impl_handle!(Memory);
 
 impl Memory {
-    pub fn copy_from_buffer(
-        &mut self,
-        offset: usize,
-        buffer: &[u8],
-    ) -> Result<(), NtError> {
+    pub fn copy_from_buffer(&mut self, offset: usize, buffer: &[u8]) -> Result<(), NtError> {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfMemoryCopyFromBuffer,
@@ -28,11 +26,7 @@ impl Memory {
         }
     }
 
-    pub fn copy_to_buffer(
-        &self,
-        offset: usize,
-        buffer: &mut [u8],
-    ) -> Result<(), NtError> {
+    pub fn copy_to_buffer(&self, offset: usize, buffer: &mut [u8]) -> Result<(), NtError> {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfMemoryCopyToBuffer,

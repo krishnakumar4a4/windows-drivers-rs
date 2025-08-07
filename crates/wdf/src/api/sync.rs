@@ -1,24 +1,24 @@
 extern crate alloc;
 
 use alloc::string::String;
-
 use core::{
     cell::UnsafeCell,
     ffi::c_void,
     marker::PhantomData,
-    sync::atomic::{Ordering, fence},
     ops::Deref,
     ptr::NonNull,
+    sync::atomic::{fence, AtomicUsize, Ordering},
 };
-use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFSPINLOCK};
+
 use wdk::println;
+use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFSPINLOCK};
+
+use super::init_attributes;
 use crate::api::{
     error::NtResult,
     object::{Handle, RefCountedHandle},
-    object_context::bug_check
+    object_context::bug_check,
 };
-
-use super::init_attributes;
 
 /// WDF Spin Lock
 pub struct SpinLock<T> {
@@ -60,7 +60,8 @@ impl<T> SpinLock<T> {
         }
     }
 
-    /// Acquire the spinlock and return a guard that will release the spinlock when dropped
+    /// Acquire the spinlock and return a guard that will release the spinlock
+    /// when dropped
     pub fn lock(&self) -> SpinLockGuard<T> {
         // SAFETY: `wdf_spin_lock` is a private member of `SpinLock`, originally created
         // by WDF, and this module guarantees that it is always in a valid state.
@@ -86,7 +87,8 @@ impl<T> Drop for SpinLock<T> {
 
 /// RAII guard for `SpinLock`.
 ///
-/// The lock is acquired when the guard is created and released when the guard is dropped.
+/// The lock is acquired when the guard is created and released when the guard
+/// is dropped.
 pub struct SpinLockGuard<'a, T> {
     spin_lock: &'a SpinLock<T>,
 
@@ -136,14 +138,15 @@ pub struct Arc<T: RefCountedHandle> {
 impl<T: RefCountedHandle> Arc<T> {
     /// Creates a new `Arc` from a raw WDF object pointer
     /// # Safety
-    /// `ptr` must be a valid WDF object pointer that implements `RefCountedHandle`.
+    /// `ptr` must be a valid WDF object pointer that implements
+    /// `RefCountedHandle`.
     pub(crate) unsafe fn from_raw(ptr: WDFOBJECT) -> Self {
         let obj = &*ptr.cast::<T>();
         let ref_count = obj.get_ref_count();
 
         // Relaxed ordering is fine here since we do not care if
         // operations on ptr (i.e. the WDF pointer we are carrying)
-        // get reordered with respect to fetch_add. 
+        // get reordered with respect to fetch_add.
         // It is totally okay to for an access to ptr to occur after
         // the fetch_add call because the object is guaranteed to be
         // alive thanks to this very ref count increment.
@@ -158,7 +161,10 @@ impl<T: RefCountedHandle> Arc<T> {
         // by the safety contract of `from_raw`
         let ptr = unsafe { NonNull::new_unchecked(ptr) };
 
-        Self { ptr, _marker: PhantomData }
+        Self {
+            ptr,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -173,7 +179,11 @@ impl<T: RefCountedHandle> Drop for Arc<T> {
         let obj = unsafe { &*self.as_ptr().cast::<T>() };
         let ref_count = obj.get_ref_count();
 
-        println!("Drop {}: Ref count {}", Self::type_name(), ref_count.load(Ordering::Relaxed));
+        println!(
+            "Drop {}: Ref count {}",
+            Self::type_name(),
+            ref_count.load(Ordering::Relaxed)
+        );
 
         // We need to ensure here that if we are the thread doing
         // the final delete (i.e calling WdfObjectDelete) then
@@ -221,13 +231,85 @@ impl<T: RefCountedHandle> Deref for Arc<T> {
 }
 
 // Safety: `Arc<T>` being `Sync` requires `T` to be `Sync`
-// because sharing it effectively shares `T` However it
+// because sharing it effectively shares `T`. However it
 // also requires `T` to be `Send` because any thread that
-// has `Arc<T>` can call `clone` on it and then later
-// potentially drop `T` if it happens to be the last reference
+// has `&Arc<T>` can call `clone` on it and get an `Arc<T>`.
+// Later that `Arc<T>` could drop `T` if it is the last
+// reference implying that `T` is effectively moved.
 unsafe impl<T: RefCountedHandle + Sync + Send> Sync for Arc<T> {}
-
 
 // Safety: `Arc<T>` being `Send` requires `T` to be both `Send`
 // and `Sync` for the same reason as above.
 unsafe impl<T: RefCountedHandle + Sync + Send> Send for Arc<T> {}
+
+/// Thread-safe implementation of `OnceCell`
+///
+/// Like `OnceCell` it allows initialization only
+/// once and getting access to `&T` after that.
+/// All operations, including initialization, are
+/// allowed from multiple threads.
+pub struct AtomicOnceCell<T> {
+    init_state: AtomicUsize,
+    inner: UnsafeCell<Option<T>>,
+}
+
+const UNINITIALIZED: usize = 0;
+const INITIALIZING: usize = 1;
+const INITIALIZED: usize = 2;
+
+impl<T> AtomicOnceCell<T> {
+    /// Creates a new `AtomicOnceCell` instance
+    pub const fn new() -> Self {
+        Self {
+            init_state: AtomicUsize::new(UNINITIALIZED),
+            inner: UnsafeCell::new(None),
+        }
+    }
+
+    /// Initializes the cell with the given value.
+    ///
+    /// # Panics
+    /// Panics if the cell is already initialized
+    /// or being initialized.
+    pub fn set(&self, value: T) {
+        if self
+            .init_state
+            .compare_exchange(
+                UNINITIALIZED,
+                INITIALIZING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            unsafe { (*self.inner.get()) = Some(value) };
+            self.init_state.store(INITIALIZED, Ordering::Release);
+        } else {
+            panic!("AtomicOnceCell already initialized or being initialized")
+        }
+    }
+
+    /// Returns a reference to the inner value if the cell
+    /// is initialized.
+    ///
+    /// # Returns
+    /// `Some(&T)` if the cell is initialized, `None` otherwise.
+    pub fn get(&self) -> Option<&T> {
+        if self.init_state.load(Ordering::Acquire) == INITIALIZED {
+            unsafe { (*self.inner.get()).as_ref() }
+        } else {
+            None
+        }
+    }
+}
+
+// Safety: `AtomicOnceCell` contains two pieces of data:
+// the initialization state and the inner value `T`.
+// The initialization state being atomic is automatically
+// `Sync`. Therefore `AtomicOnceCell` is `Sync` if and
+// only if `T` is `Sync`.
+unsafe impl<T> Sync for AtomicOnceCell<T> where T: Sync {}
+
+// Safety: For the same reason as above, `AtomicOnceCell<T>` is
+// `Send` if and only if `T` is `Send`.
+unsafe impl<T> Send for AtomicOnceCell<T> where T: Send {}

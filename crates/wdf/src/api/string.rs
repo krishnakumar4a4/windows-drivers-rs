@@ -1,11 +1,17 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, string::String, vec::Vec};
-use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, UNICODE_STRING, WDF_NO_OBJECT_ATTRIBUTES, WDFOBJECT, WDFSTRING};
-use crate::api::{
-    error::NtResult,
-    object::Handle,
+
+use wdk_sys::{
+    call_unsafe_wdf_function_binding,
+    NT_SUCCESS,
+    UNICODE_STRING,
+    WDFOBJECT,
+    WDFSTRING,
+    WDF_NO_OBJECT_ATTRIBUTES,
 };
+
+use crate::api::{error::NtResult, object::Handle};
 
 pub(crate) struct WString(WDFSTRING);
 
@@ -24,7 +30,12 @@ impl WString {
     pub fn create() -> NtResult<Self> {
         let mut raw_string: WDFSTRING = core::ptr::null_mut();
         let status = unsafe {
-            call_unsafe_wdf_function_binding!(WdfStringCreate, core::ptr::null_mut(), WDF_NO_OBJECT_ATTRIBUTES, &mut raw_string)
+            call_unsafe_wdf_function_binding!(
+                WdfStringCreate,
+                core::ptr::null_mut(),
+                WDF_NO_OBJECT_ATTRIBUTES,
+                &mut raw_string
+            )
         };
 
         if NT_SUCCESS(status) {
@@ -40,13 +51,16 @@ impl WString {
         // SAFETY: The contract of the FwString type constructor
         // requires that the underlying pointer is a valid WDFOBJECT.
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfStringGetUnicodeString, self.0, &mut unicode_string)
+            call_unsafe_wdf_function_binding!(
+                WdfStringGetUnicodeString,
+                self.0,
+                &mut unicode_string
+            )
         };
 
         to_rust_str(unicode_string)
     }
 }
-
 
 impl Drop for WString {
     fn drop(&mut self) {

@@ -1,22 +1,27 @@
 use core::sync::atomic::AtomicUsize;
+
+use wdf_macros::internal_object_context;
+use wdk_sys::{
+    call_unsafe_wdf_function_binding,
+    NT_SUCCESS,
+    WDFQUEUE,
+    WDFREQUEST,
+    WDF_IO_QUEUE_CONFIG,
+    WDF_IO_QUEUE_DISPATCH_TYPE,
+    WDF_NO_OBJECT_ATTRIBUTES,
+    WDF_OBJECT_ATTRIBUTES,
+    _WDF_IO_QUEUE_DISPATCH_TYPE,
+};
+
 use crate::api::{
     device::Device,
     error::NtError,
-    object::{Handle, impl_ref_counted_handle, wdf_struct_size},
+    object::{impl_ref_counted_handle, wdf_struct_size, Handle},
     request::Request,
     sync::Arc,
 };
-use wdf_macros::inner_object_context;
-use wdk_sys::{
-    call_unsafe_wdf_function_binding, NT_SUCCESS, WDFQUEUE, WDFREQUEST,
-    WDF_IO_QUEUE_CONFIG, WDF_IO_QUEUE_DISPATCH_TYPE, _WDF_IO_QUEUE_DISPATCH_TYPE,
-    WDF_OBJECT_ATTRIBUTES, WDF_NO_OBJECT_ATTRIBUTES
-};
 
-impl_ref_counted_handle!(
-    IoQueue,
-    InnerIoQueueContext
-);
+impl_ref_counted_handle!(IoQueue, IoQueueContext);
 
 /// SAFETY: This is safe because all the WDF functions
 /// that operate on WDFQUEUE do so in a thread-safe manner.
@@ -25,13 +30,16 @@ impl_ref_counted_handle!(
 unsafe impl Send for IoQueue {}
 unsafe impl Sync for IoQueue {}
 
-
 impl IoQueue {
     pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Arc<Self>, NtError> {
         unsafe { Self::create_with_attributes(device, queue_config, WDF_NO_OBJECT_ATTRIBUTES) }
     }
 
-    unsafe fn create_with_attributes(device: &Device, queue_config: &IoQueueConfig, attributes:*mut WDF_OBJECT_ATTRIBUTES) -> Result<Arc<Self>, NtError> {
+    unsafe fn create_with_attributes(
+        device: &Device,
+        queue_config: &IoQueueConfig,
+        attributes: *mut WDF_OBJECT_ATTRIBUTES,
+    ) -> Result<Arc<Self>, NtError> {
         let mut config = to_unsafe_config(&queue_config);
         let mut queue: WDFQUEUE = core::ptr::null_mut();
 
@@ -46,7 +54,7 @@ impl IoQueue {
         };
 
         if NT_SUCCESS(status) {
-            let ctxt = InnerIoQueueContext {
+            let ctxt = IoQueueContext {
                 ref_count: AtomicUsize::new(0),
                 evt_io_default: queue_config.evt_io_default,
                 evt_io_read: queue_config.evt_io_read,
@@ -54,7 +62,7 @@ impl IoQueue {
                 evt_io_device_control: queue_config.evt_io_device_control,
             };
 
-            InnerIoQueueContext::attach(unsafe { &*(queue as *mut _) }, ctxt)?;
+            IoQueueContext::attach(unsafe { &*(queue as *mut _) }, ctxt)?;
 
             let queue = unsafe { Arc::from_raw(queue as *mut _) };
 
@@ -74,19 +82,13 @@ impl IoQueue {
 
     pub fn start(&self) {
         unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfIoQueueStart,
-                self.as_ptr() as *mut _,
-            );
+            call_unsafe_wdf_function_binding!(WdfIoQueueStart, self.as_ptr() as *mut _,);
         }
     }
 
     pub fn stop_synchronously(&self) {
         unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfIoQueueStopSynchronously,
-                self.as_ptr() as *mut _,
-            );
+            call_unsafe_wdf_function_binding!(WdfIoQueueStopSynchronously, self.as_ptr() as *mut _,);
         }
     }
 }
@@ -188,8 +190,8 @@ fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
     config
 }
 
-#[inner_object_context(IoQueue)]
-struct InnerIoQueueContext {
+#[internal_object_context(IoQueue)]
+struct IoQueueContext {
     ref_count: AtomicUsize,
     evt_io_default: Option<fn(&IoQueue, Request)>,
     evt_io_read: Option<fn(&IoQueue, Request, usize)>,
@@ -203,7 +205,7 @@ macro_rules! unsafe_request_handler {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
                 let queue = unsafe { &*queue.cast::<IoQueue>() };
                 let request = unsafe { Request::from_raw(request as WDFREQUEST) };
-                if let Some(handlers) = InnerIoQueueContext::get(&queue) {
+                if let Some(handlers) = IoQueueContext::get(&queue) {
                     if let Some(handler) = handlers.$handler_name {
                         handler(queue, request $(, $arg_name)*);
                         return;

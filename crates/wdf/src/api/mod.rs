@@ -1,4 +1,4 @@
-// This module exits only to make it easy to 
+// This module exits only to make it easy to
 // apply cfg attributes for conditional compilation
 // in lib.rs. Without it the cfg attributes would
 // have to be applied to every mod and pub uses
@@ -16,6 +16,7 @@ mod request;
 mod string;
 mod sync;
 mod timer;
+mod tracing;
 
 pub use device::*;
 pub use driver::*;
