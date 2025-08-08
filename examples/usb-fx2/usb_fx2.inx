@@ -1,0 +1,62 @@
+;
+; usb_fx2.inf
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Sample
+ClassGuid   = {78A1C341-4539-11d3-B88D-00C04FAD5171}
+Provider    = %ManufacturerName%
+CatalogFile = usb_fx2.cat
+DriverVer   = ; TODO: set DriverVer in stampinf property pages
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+usb_fx2.sys  = 1,,
+
+;*****************************************
+; Install Section
+;*****************************************
+
+[Manufacturer]
+%ManufacturerName% = Standard,NT$ARCH$.10.0...16299 ; %13% support introduced in build 16299
+
+[Standard.NT$ARCH$.10.0...16299]
+%usb_fx2.DeviceDesc% = usb_fx2_Device, Root\usb_fx2 ; TODO: edit hw-id
+
+[usb_fx2_Device.NT]
+CopyFiles = File_Copy
+
+[File_Copy]
+usb_fx2.sys
+
+;-------------- Service installation
+[usb_fx2_Device.NT.Services]
+AddService = usb_fx2,%SPSVCINST_ASSOCSERVICE%, usb_fx2_Service_Inst
+
+; -------------- KMDF driver install sections
+[usb_fx2_Service_Inst]
+DisplayName    = %usb_fx2.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\usb_fx2.sys
+
+[usb_fx2_Device.NT.Wdf]
+KmdfService = usb_fx2, usb_fx2_wdfsect
+
+[usb_fx2_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName = "Contoso" ;TODO: Replace with your manufacturer name
+DiskName = "KMDF Installation Disk"
+usb_fx2.DeviceDesc = ""
+usb_fx2.SVCDESC = ""
