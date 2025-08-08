@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use alloc::string::String;
-use core::{mem, ptr};
+use core::{cell::UnsafeCell, mem, ptr};
 
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
@@ -30,14 +30,13 @@ use crate::api::{
     guid::Guid,
     object::wdf_struct_size,
     string::{to_rust_str, WString},
-    sync::AtomicOnceCell,
     tracing::TraceWriter,
     *,
 };
 
-static TRACE_WRITER: AtomicOnceCell<TraceWriter> = AtomicOnceCell::new();
-static EVT_DEVICE_ADD: AtomicOnceCell<fn(&mut DeviceInit) -> Result<(), NtError>> =
-    AtomicOnceCell::new();
+static TRACE_WRITER: UnsafeOnceCell<TraceWriter> = UnsafeOnceCell::new();
+static EVT_DEVICE_ADD: UnsafeOnceCell<fn(&mut DeviceInit) -> Result<(), NtError>> =
+    UnsafeOnceCell::new();
 
 /// Represents a driver
 pub struct Driver {
@@ -88,36 +87,166 @@ impl Driver {
         &mut self,
         callback: fn(&mut DeviceInit) -> Result<(), NtError>,
     ) -> NtResult<()> {
-        if EVT_DEVICE_ADD.get().is_some() {
-            return Err(NtError::from(1)); // TODO: Change this to a proper error
-                                          // code
+        // SAFETY: `on_evt_device_add` is called only from the user's
+        // driver entry function which is guaranteed to run before
+        // any other driver code. Therefore the `set()`
+        // call below cannot run concurrently with another `set()`
+        // or `get()` call which is the invariant we must uphold.
+        // In fact no other function even calls `EVT_DEVICE_ADD.set()`
+        // except this one which strengthens the safety guarantee further.
+        // 
+        // TODO: There is still one soundness hole however: what if
+        // the user's driver entry function spawns one or more threads
+        // that call `on_evt_device_add`? We must plug that hole
+        unsafe {
+            EVT_DEVICE_ADD.set(callback)?;
         }
-
-        EVT_DEVICE_ADD.set(callback);
 
         Ok(())
     }
 
     /// Enables tracing for the driver
     pub fn enable_tracing(&mut self, control_guid: Guid) -> NtResult<()> {
-        if TRACE_WRITER.get().is_some() {
-            return Err(NtError::from(1)); // TODO: Change this to a proper error
-                                          // code
+        // SAFETY: `enable_tracing` is called only from the user's
+        // driver entry function which is guaranteed to run before
+        // any other driver code. Therefore the `get()`
+        // call below cannot run concurrently with a`set()`
+        // call which is the invariant we must uphold.
+        // 
+        // TODO: There is still one soundness hole however: what if
+        // the user's driver entry function spawns one or more threads
+        // that call `enable-tracing`? We must plug that hole
+        unsafe {
+            // We want to make sure we init WPP ONLY if it hasn't 
+            // already been initialized. That's why we check first
+            // befor calling `set`
+            if TRACE_WRITER.get().is_some() {
+                return Err(NtError::from(1)); // TODO: Change this to a proper error
+                                            // code
+            }
         }
-
         let trace_writer =
             unsafe { TraceWriter::init(control_guid, self.wdm_driver, self.reg_path) };
 
         trace_writer.start();
 
-        TRACE_WRITER.set(trace_writer);
+        // SAFETY: `enable_tracing` is called only from the user's
+        // driver entry function which is guaranteed to run before
+        // any other driver code. Therefore the `set()` call below
+        // cannot run concurrently with another `set()` or `get()`
+        // call which is the invariant we must uphold.
+        // 
+        // TODO: this too suffers from the same soundness hole as
+        // above.
+        unsafe {
+            TRACE_WRITER.set(trace_writer).expect("trace writer should not be already set");
+        }
 
         Ok(())
     }
 }
 
+/// A container like [`core::cell::OnceCell`] that is 
+/// set once and read multiple times.
+/// 
+/// # Safety
+/// The reason this type has the prefix `Unsafe` in its name
+/// is because it is not thread safe. To use it safely
+/// the user must uphold the following invariants:
+/// - The [`set`] method must not be called concurrently
+///   with itself or the [`get`] method.
+/// - The `get` method must not be called concurrently
+///   with the `set` method.
+/// 
+/// The typical pattern is to call `set` first from
+/// a single thread and initialize the value, and then
+/// call `get` from multiple threads as needed.
+/// 
+/// `UnsafeOnceCell` implements `Sync` but only to allow it to
+/// be used in certain static variables in this module. In
+/// reality it is not `Sync` under all conditions. It is `Sync`
+/// only when the above-mentioned invariants are maintained.
+/// Therefore **do not use it in contexts which assume/require
+/// that it is always `Sync`**.
+/// 
+/// In general `UnsafeOnceCell` is NOT a general-purpose type.
+/// It is meant to be used only in the way it is used right
+/// now wherein instances of it are placed in static variables,
+/// the driver entry function -- and only the driver entry
+/// function -- calls `set` and other methods in this module
+/// call `get` only after driver entry is done. Therefore
+/// **please do not use it for any other purpose and be careful
+/// when changing its code or any of the code that uses it**.
+///
+/// We could have made this type thread-safe and avoid all of
+/// the above constraitns but that would have meant that every
+/// access to it requires an atomic operation which is bad for
+/// performance because values stored in it are meant to be
+/// accessed very frequently such as from tracing calls.
+struct UnsafeOnceCell<T> {
+    val: UnsafeCell<Option<T>>,
+}
+
+impl<T> UnsafeOnceCell<T> {
+    /// Creates a new `UnsafeOnceCell` instance
+    pub const fn new() -> Self {
+        Self {
+            val: UnsafeCell::new(None),
+        }
+    }
+
+    /// Returns a reference to the value.
+    /// 
+    /// # Safety
+    /// This method will causes data races if
+    /// called concurrently with the [`set`]
+    /// method. It is safe to be called
+    /// concurrently with itself however.
+    pub unsafe fn get(&self) -> Option<&T> {
+        // SAFETY: Safe because we assume that the call to this method
+        // is not concurrent with the `set` method. This is true
+        let val_ref = unsafe { &*self.val.get() };
+        val_ref.as_ref()
+    }
+
+    /// Sets the value if it has not been already set
+    /// 
+    /// # Returns
+    /// Returns `Ok(())` if the value was set successfully,
+    /// or an `Err(NtError)` if it was already set.
+    /// 
+    /// # Safety
+    /// This method will cause data races if called
+    /// concurrently with itself or the [`get`] method. 
+    pub unsafe fn set(&self, val: T) -> NtResult<()> {
+        // SAFETY: Safe because we assume that the call to this method
+        // is not concurrent with itself or the `get` method.
+        unsafe {
+            let val_ptr = self.val.get();
+            if (*val_ptr).is_some() {
+                return Err(NtError::from(1)); // TODO: Change this to a proper error
+            }
+            *val_ptr = Some(val);
+        };
+        Ok(())
+    }
+}
+
+/// This type is `Sync` if `T` is `Sync` AND if the 
+/// safety invariants stated on the `UnsafeOnceCell` type
+/// are upheld. Ideally we should not have implemented `Sync`
+/// for it, but we had to to make it usable in static variables
+unsafe impl<T> Sync for UnsafeOnceCell<T> where T: Sync {}
+
+
+
 fn clean_up_tracing() {
-    if let Some(trace_writer) = TRACE_WRITER.get() {
+    if let Some(trace_writer) = 
+    // SAFETY: This is safe because this call to `get`
+    // is not concurrent with any call to `set`. `set` is
+    // called only once in the beginning in the driver entry
+    // function
+    unsafe {TRACE_WRITER.get() } {
         trace_writer.stop();
     }
 }
@@ -186,7 +315,12 @@ extern "C" fn evt_driver_device_add(
     _driver: WDFDRIVER,
     device_init: *mut WDFDEVICE_INIT,
 ) -> NTSTATUS {
-    if let Some(cb) = EVT_DEVICE_ADD.get() {
+    if let Some(cb) = 
+    // SAFETY: This is safe because this call to `get`
+    // is not concurrent with any call to `set`. `set` is
+    // called only once in the beginning in the user's
+    // driver entry function
+    unsafe { EVT_DEVICE_ADD.get() } {
         let mut device_init = unsafe { DeviceInit::from(device_init) };
         match cb(&mut device_init) {
             Ok(_) => 0,
@@ -206,7 +340,13 @@ extern "C" fn driver_unload(_driver: *mut DRIVER_OBJECT) {
 }
 
 pub fn trace(message: &str) {
-    if let Some(trace_writer) = TRACE_WRITER.get() {
-        trace_writer.write(message);
+    // SAFETY: This is safe because this call to `get`
+    // is not concurrent with any call to `set`. `set` is
+    // called only once in the beginning in the user's
+    // driver entry function
+    unsafe {
+        if let Some(trace_writer) = TRACE_WRITER.get() {
+            trace_writer.write(message);
+        }
     }
 }
