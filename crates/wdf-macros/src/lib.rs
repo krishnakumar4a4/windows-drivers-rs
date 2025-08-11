@@ -5,7 +5,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Error, Ident, ItemFn, ItemImpl, ItemStruct};
+use syn::{meta::parser, parse_macro_input, Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit};
 
 /// A procedural macro that when placed on a safe Rust impl of a driver
 /// generates the relevant FFI wrappers
@@ -129,10 +129,49 @@ pub fn driver_impl(_args: TokenStream, input: TokenStream) -> TokenStream {
 
 /// A procedural macro used to mark the entry point of a WDF driver
 #[proc_macro_attribute]
-pub fn driver_entry(_args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
     let input_clone = input.clone();
     let item_fn = parse_macro_input!(input_clone as ItemFn);
     let safe_driver_entry = item_fn.sig.ident;
+
+    let mut tracing_control_guid_str: Option<String> = None;
+
+    const TRACING_CONTROL_GUID_ATTR_NAME: &str = "tracing_control_guid";
+
+    let tracing_control_guid_parser = parser(|meta| {
+        if !meta.path.is_ident(TRACING_CONTROL_GUID_ATTR_NAME) {
+            return Err(meta.error(format!("Expected `{TRACING_CONTROL_GUID_ATTR_NAME}`")));
+        }
+
+        let Lit::Str(guid_str_expr) = meta.value()?.parse()? else {
+            return Err(meta.error(format!("Expected tracing control GUID")));
+        };
+
+        let guid_str = guid_str_expr.value();
+
+        if !is_valid_guid(&guid_str) {
+            return Err(Error::new_spanned(guid_str_expr, "Not a valid GUID"));
+        }
+
+        tracing_control_guid_str = Some(guid_str);
+
+        Ok(())
+    });
+
+    parse_macro_input!(args with tracing_control_guid_parser);
+
+    let parse_tracing_control_guid = match tracing_control_guid_str {
+        Some(s) => {
+            quote! {
+                Some(wdf::Guid::parse(#s).expect("Not a valid GUID"))
+            }
+        }
+        None => {
+            quote! {
+                None
+            }
+        }
+    };
 
     let mut wrappers: TokenStream = quote! {
         use wdf::{
@@ -145,7 +184,8 @@ pub fn driver_entry(_args: TokenStream, input: TokenStream) -> TokenStream {
         #[link_section = "INIT"]
         #[export_name = "DriverEntry"] // WDF expects a symbol with the name DriverEntry
         extern "system" fn __driver_entry(driver: &mut DRIVER_OBJECT, registry_path: PCUNICODE_STRING,) -> NTSTATUS {
-            call_safe_driver_entry(driver, registry_path, #safe_driver_entry)
+            let tracing_control_guid = #parse_tracing_control_guid;
+            call_safe_driver_entry(driver, registry_path, #safe_driver_entry, tracing_control_guid)
         }
     }
     .into();
@@ -307,4 +347,35 @@ fn object_context_impl(
     }
 
     expanded.into()
+}
+
+// TODO: this code is repeated in the wdf::Guid.
+// Move it to a common location
+fn is_valid_guid(guid_str: &str) -> bool {
+    // Remove dashes from the input string
+    let guid_str = guid_str.replace("-", "");
+
+    if guid_str.len() != 32 {
+        return false;
+    }
+
+    if u32::from_str_radix(&guid_str[0..8], 16).is_err() {
+        return false;
+    }
+
+    if u16::from_str_radix(&guid_str[8..12], 16).is_err() {
+        return false;
+    }
+
+    if u16::from_str_radix(&guid_str[12..16], 16).is_err() {
+        return false;
+    }
+
+    for i in 0..8 {
+        if u8::from_str_radix(&guid_str[16 + i * 2..18 + i * 2], 16).is_err() {
+            return false;
+        }
+    }
+
+    true
 }
