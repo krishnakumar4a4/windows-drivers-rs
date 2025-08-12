@@ -1,5 +1,6 @@
 use wdk_sys::GUID;
 
+#[doc(hidden)]
 #[derive(Debug)]
 pub struct Guid(GUID);
 
