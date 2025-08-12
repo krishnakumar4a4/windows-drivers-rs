@@ -13,7 +13,6 @@ use wdk_sys::{
     WDF_DRIVER_VERSION_AVAILABLE_PARAMS,
     WDF_NO_OBJECT_ATTRIBUTES,
 };
-
 #[doc(hidden)]
 pub use wdk_sys::{
     DRIVER_OBJECT,
@@ -30,7 +29,7 @@ use crate::{
         device::DeviceInit,
         error::{NtError, NtResult, NtStatus},
         guid::Guid,
-        object::{Handle, wdf_struct_size},
+        object::{wdf_struct_size, Handle},
         string::{to_rust_str, WString},
         tracing::TraceWriter,
     },

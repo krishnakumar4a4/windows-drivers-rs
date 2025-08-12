@@ -1,15 +1,15 @@
 /// A macro to declare a Rust enum that maps one-to-one to a C enum.
-/// 
+///
 /// It implements Copy, Clone, Debug, PartialEq, and Eq traits
 /// for the Rust enum and generates a From implementation to
 /// convert from the Rust enum to the C enum and a TryFrom
 /// implementation to convert in the opposite direction
-/// 
-/// It also allows you to specify attributes on top of the 
+///
+/// It also allows you to specify attributes on top of the
 /// enum like #[repr(C)]
-/// 
+///
 /// # Example
-/// 
+///
 /// If there is a C enum
 /// ```c
 /// typedef enum _WDF_POWER_STATE {

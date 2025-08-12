@@ -2,7 +2,10 @@
 
 #![no_std]
 
-use wdf::{CmResList, Driver, NtResult, Device, DeviceInit, driver_entry, PnpPowerEventCallbacks, PowerDeviceState, trace};
+use wdf::{
+    CmResList, Device, DeviceInit, Driver, NtResult, PnpPowerEventCallbacks, PowerDeviceState,
+    driver_entry, trace,
+};
 
 /// The entry point for the driver. It initializes the driver and is the first
 /// routine called by the system after the driver is loaded. `driver_entry`
@@ -35,18 +38,25 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
 
 fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     trace("Device add callback called");
-    let mut pnp_power_callbacks = PnpPowerEventCallbacks::default();
-    pnp_power_callbacks.evt_device_prepare_hardware = Some(evt_device_prepare_hardware);
-    pnp_power_callbacks.evt_device_d0_entry = Some(evt_device_d0_entry);
+
+    let pnp_power_callbacks = PnpPowerEventCallbacks {
+        evt_device_prepare_hardware: Some(evt_device_prepare_hardware),
+        evt_device_d0_entry: Some(evt_device_d0_entry),
+        evt_device_d0_exit: Some(evt_device_d0_exit),
+        ..PnpPowerEventCallbacks::default()
+    };
 
     // Create the device
     let _device = Device::create(device_init, Some(pnp_power_callbacks))?;
 
-
     Ok(())
 }
 
-fn evt_device_prepare_hardware(_device: &Device, _resources_raw: &CmResList, _resources_translated: &CmResList) -> NtResult<()> {
+fn evt_device_prepare_hardware(
+    _device: &Device,
+    _resources_raw: &CmResList,
+    _resources_translated: &CmResList,
+) -> NtResult<()> {
     trace("Device prepare hardware callback called");
 
     Ok(())
@@ -54,6 +64,12 @@ fn evt_device_prepare_hardware(_device: &Device, _resources_raw: &CmResList, _re
 
 fn evt_device_d0_entry(_device: &Device, _previous_state: PowerDeviceState) -> NtResult<()> {
     trace("Device D0 entry callback called");
+
+    Ok(())
+}
+
+fn evt_device_d0_exit(_device: &Device, _next_state: PowerDeviceState) -> NtResult<()> {
+    trace("Device D0 exit callback called");
 
     Ok(())
 }
