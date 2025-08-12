@@ -11,6 +11,7 @@ use wdk_sys::{
     WDF_NO_HANDLE,
     WDF_NO_OBJECT_ATTRIBUTES,
     WDF_PNPPOWER_EVENT_CALLBACKS,
+    WDF_POWER_DEVICE_STATE,
 };
 
 use crate::api::{
@@ -20,6 +21,7 @@ use crate::api::{
     object::{impl_ref_counted_handle, wdf_struct_size, Handle},
     resource::CmResList,
     string::{to_unicode_string, to_utf16_buf},
+    utils::safe_c_enum,
 };
 
 impl_ref_counted_handle!(Device, DeviceContext);
@@ -124,7 +126,7 @@ struct DeviceContext {
 }
 
 pub struct PnpPowerEventCallbacks {
-    // PFN_WDF_DEVICE_D0_ENTRY                 EvtDeviceD0Entry;
+    pub evt_device_d0_entry: Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
     // PFN_WDF_DEVICE_D0_ENTRY_POST_INTERRUPTS_ENABLED EvtDeviceD0EntryPostInterruptsEnabled;
     // PFN_WDF_DEVICE_D0_EXIT                  EvtDeviceD0Exit;
     // PFN_WDF_DEVICE_D0_EXIT_PRE_INTERRUPTS_DISABLED EvtDeviceD0ExitPreInterruptsDisabled;
@@ -146,6 +148,7 @@ pub struct PnpPowerEventCallbacks {
 impl Default for PnpPowerEventCallbacks {
     fn default() -> Self {
         Self {
+            evt_device_d0_entry: None,
             evt_device_prepare_hardware: None,
             evt_device_self_managed_io_init: None,
             evt_device_self_managed_io_suspend: None,
@@ -154,11 +157,27 @@ impl Default for PnpPowerEventCallbacks {
     }
 }
 
+safe_c_enum! {
+    pub enum PowerDeviceState: WDF_POWER_DEVICE_STATE {
+        Invalid = WdfPowerDeviceInvalid,
+        D0 = WdfPowerDeviceD0,
+        D1 = WdfPowerDeviceD1,
+        D2 = WdfPowerDeviceD2,
+        D3 = WdfPowerDeviceD3,
+        D3Final = WdfPowerDeviceD3Final,
+        PrepareForHibernation = WdfPowerDevicePrepareForHibernation,
+    }
+}
+
 fn to_unsafe_pnp_power_callbacks(
     pnp_power_callbacks: &PnpPowerEventCallbacks,
 ) -> WDF_PNPPOWER_EVENT_CALLBACKS {
     let mut unsafe_callbacks = WDF_PNPPOWER_EVENT_CALLBACKS::default();
     unsafe_callbacks.Size = wdf_struct_size!(WDF_PNPPOWER_EVENT_CALLBACKS);
+
+    if pnp_power_callbacks.evt_device_d0_entry.is_some() {
+        unsafe_callbacks.EvtDeviceD0Entry = Some(__evt_device_d0_entry);
+    }
 
     if pnp_power_callbacks.evt_device_prepare_hardware.is_some() {
         unsafe_callbacks.EvtDevicePrepareHardware = Some(__evt_device_prepare_hardware);
@@ -188,6 +207,25 @@ fn to_unsafe_pnp_power_callbacks(
     unsafe_callbacks
 }
 
+pub extern "C" fn __evt_device_d0_entry(device: WDFDEVICE, previous_state: WDF_POWER_DEVICE_STATE) -> NTSTATUS {
+    let device = unsafe { &*(device as *const Device) };
+    let previous_state = PowerDeviceState::try_from(previous_state)
+        .expect("framework should not send invalid WDF_POWER_DEVICE_STATE");
+
+    if let Some(ctxt) = DeviceContext::get(&device) {
+        if let Some(callbacks) = &ctxt.pnp_power_callbacks {
+            if let Some(callback) = callbacks.evt_device_d0_entry {
+                return match callback(device, previous_state) {
+                    Ok(_) => 0,
+                    Err(err) => err.nt_status(),
+                };
+            }
+        }
+    }
+
+    panic!("User did not provide callback {} but we subscribed to it", stringify!($callback_name));
+}
+
 pub extern "C" fn __evt_device_prepare_hardware(device: WDFDEVICE, resources_raw: WDFCMRESLIST, resources_translated: WDFCMRESLIST) -> NTSTATUS {
     let device = unsafe { &*(device as *const Device) };
     let resources_raw = unsafe { &*(resources_raw as *const CmResList) };
@@ -205,8 +243,6 @@ pub extern "C" fn __evt_device_prepare_hardware(device: WDFDEVICE, resources_raw
     }
 
     panic!("User did not provide callback {} but we subscribed to it", stringify!($callback_name));
-
-
 }
 
 macro_rules! unsafe_pnp_power_callback {

@@ -18,6 +18,7 @@ mod string;
 mod sync;
 mod timer;
 mod tracing;
+mod utils;
 
 pub use device::*;
 pub use driver::*;

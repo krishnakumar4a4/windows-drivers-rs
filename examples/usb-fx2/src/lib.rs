@@ -2,7 +2,7 @@
 
 #![no_std]
 
-use wdf::{CmResList, Driver, NtResult, Device, DeviceInit, driver_entry, PnpPowerEventCallbacks, trace};
+use wdf::{CmResList, Driver, NtResult, Device, DeviceInit, driver_entry, PnpPowerEventCallbacks, PowerDeviceState, trace};
 
 /// The entry point for the driver. It initializes the driver and is the first
 /// routine called by the system after the driver is loaded. `driver_entry`
@@ -37,9 +37,10 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     trace("Device add callback called");
     let mut pnp_power_callbacks = PnpPowerEventCallbacks::default();
     pnp_power_callbacks.evt_device_prepare_hardware = Some(evt_device_prepare_hardware);
+    pnp_power_callbacks.evt_device_d0_entry = Some(evt_device_d0_entry);
 
     // Create the device
-    let _device = Device::create(device_init, None)?;
+    let _device = Device::create(device_init, Some(pnp_power_callbacks))?;
 
 
     Ok(())
@@ -47,6 +48,12 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
 fn evt_device_prepare_hardware(_device: &Device, _resources_raw: &CmResList, _resources_translated: &CmResList) -> NtResult<()> {
     trace("Device prepare hardware callback called");
+
+    Ok(())
+}
+
+fn evt_device_d0_entry(_device: &Device, _previous_state: PowerDeviceState) -> NtResult<()> {
+    trace("Device D0 entry callback called");
 
     Ok(())
 }
