@@ -134,9 +134,8 @@ pub struct PnpPowerEventCallbacks {
         Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
     pub evt_device_prepare_hardware: Option<fn(&Device, &CmResList, &CmResList) -> NtResult<()>>,
     pub evt_device_release_hardware: Option<fn(&Device, &CmResList) -> NtResult<()>>,
-    // PFN_WDF_DEVICE_SELF_MANAGED_IO_CLEANUP  EvtDeviceSelfManagedIoCleanup;
     pub evt_device_self_managed_io_cleanup: Option<fn(&Device)>,
-    // PFN_WDF_DEVICE_SELF_MANAGED_IO_FLUSH    EvtDeviceSelfManagedIoFlush;
+    pub evt_device_self_managed_io_flush: Option<fn(&Device)>,
     pub evt_device_self_managed_io_init: Option<fn(&Device) -> NtResult<()>>,
     pub evt_device_self_managed_io_suspend: Option<fn(&Device) -> NtResult<()>>,
     pub evt_device_self_managed_io_restart: Option<fn(&Device) -> NtResult<()>>,
@@ -158,6 +157,7 @@ impl Default for PnpPowerEventCallbacks {
             evt_device_prepare_hardware: None,
             evt_device_release_hardware: None,
             evt_device_self_managed_io_cleanup: None,
+            evt_device_self_managed_io_flush: None,
             evt_device_self_managed_io_init: None,
             evt_device_self_managed_io_suspend: None,
             evt_device_self_managed_io_restart: None,
@@ -214,6 +214,20 @@ fn to_unsafe_pnp_power_callbacks(
 
     if pnp_power_callbacks.evt_device_release_hardware.is_some() {
         unsafe_callbacks.EvtDeviceReleaseHardware = Some(__evt_device_release_hardware);
+    }
+
+    if pnp_power_callbacks
+        .evt_device_self_managed_io_cleanup
+        .is_some()
+    {
+        unsafe_callbacks.EvtDeviceSelfManagedIoCleanup = Some(__evt_device_self_managed_io_cleanup);
+    }
+
+    if pnp_power_callbacks
+        .evt_device_self_managed_io_flush
+        .is_some()
+    {
+        unsafe_callbacks.EvtDeviceSelfManagedIoFlush = Some(__evt_device_self_managed_io_flush);
     }
 
     if pnp_power_callbacks
@@ -291,6 +305,7 @@ unsafe_pnp_power_callback!(evt_device_release_hardware(
 
 // No return type needed for void functions:
 unsafe_pnp_power_callback!(evt_device_self_managed_io_cleanup());
+unsafe_pnp_power_callback!(evt_device_self_managed_io_flush());
 unsafe_pnp_power_callback!(evt_device_self_managed_io_init() -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_self_managed_io_suspend() -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_self_managed_io_restart() -> NTSTATUS);
