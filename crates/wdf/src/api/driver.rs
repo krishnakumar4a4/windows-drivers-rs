@@ -13,6 +13,7 @@ use wdk_sys::{
     WDF_DRIVER_VERSION_AVAILABLE_PARAMS,
     WDF_NO_OBJECT_ATTRIBUTES,
 };
+
 #[doc(hidden)]
 pub use wdk_sys::{
     DRIVER_OBJECT,
@@ -24,12 +25,16 @@ pub use wdk_sys::{
     WDF_OBJECT_CONTEXT_TYPE_INFO,
 };
 
-use crate::api::{
-    error::NtResult,
-    object::wdf_struct_size,
-    string::{to_rust_str, WString},
-    tracing::TraceWriter,
-    *,
+use crate::{
+    api::{
+        device::DeviceInit,
+        error::{NtError, NtResult, NtStatus},
+        guid::Guid,
+        object::{Handle, wdf_struct_size},
+        string::{to_rust_str, WString},
+        tracing::TraceWriter,
+    },
+    println,
 };
 
 static TRACE_WRITER: UnsafeOnceCell<TraceWriter> = UnsafeOnceCell::new();
