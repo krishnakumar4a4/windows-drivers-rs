@@ -2,7 +2,7 @@
 
 #![no_std]
 
-use wdf::{Driver, NtResult, driver_entry, trace};
+use wdf::{CmResList, Driver, NtResult, Device, DeviceInit, driver_entry, PnpPowerEventCallbacks, trace};
 
 /// The entry point for the driver. It initializes the driver and is the first
 /// routine called by the system after the driver is loaded. `driver_entry`
@@ -25,19 +25,28 @@ use wdf::{Driver, NtResult, driver_entry, trace};
 /// reboots. The path does not store hardware instance specific data.
 #[driver_entry(tracing_control_guid = "cb94defb-592a-4509-8f2e-54f204929669")]
 fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
+    trace("OSRUSBFX2 Driver Sample - Driver Framework Edition.\n");
+
     // Set up the device add callback
     driver.on_evt_device_add(evt_device_add);
-
-    trace("Trace: Safe Rust driver entry complete");
 
     Ok(())
 }
 
-fn evt_device_add(device_init: &mut wdf::DeviceInit) -> NtResult<()> {
-    // Create the device
-    let _device = wdf::Device::create(device_init, None)?;
+fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
+    trace("Device add callback called");
+    let mut pnp_power_callbacks = PnpPowerEventCallbacks::default();
+    pnp_power_callbacks.evt_device_prepare_hardware = Some(evt_device_prepare_hardware);
 
-    trace("Trace: Device created successfully");
+    // Create the device
+    let _device = Device::create(device_init, None)?;
+
+
+    Ok(())
+}
+
+fn evt_device_prepare_hardware(_device: &Device, _resources_raw: &CmResList, _resources_translated: &CmResList) -> NtResult<()> {
+    trace("Device prepare hardware callback called");
 
     Ok(())
 }
