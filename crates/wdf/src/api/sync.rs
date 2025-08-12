@@ -242,12 +242,15 @@ unsafe impl<T: RefCountedHandle + Sync + Send> Sync for Arc<T> {}
 // and `Sync` for the same reason as above.
 unsafe impl<T: RefCountedHandle + Sync + Send> Send for Arc<T> {}
 
-/// Thread-safe implementation of `OnceCell`
+/// Thread-safe version of `OnceCell`
 ///
 /// Like `OnceCell` it allows initialization only
 /// once and getting access to `&T` after that.
 /// All operations, including initialization, are
-/// allowed from multiple threads.
+/// thread-safe.
+///
+/// Compared to `OnceLock` it uses no locks
+/// and relies purely on atomic operations.
 pub struct AtomicOnceCell<T> {
     init_state: AtomicUsize,
     inner: UnsafeCell<Option<T>>,
