@@ -271,10 +271,10 @@ impl<T> AtomicOnceCell<T> {
 
     /// Initializes the cell with the given value.
     ///
-    /// # Panics
-    /// Panics if the cell is already initialized
-    /// or being initialized.
-    pub fn set(&self, value: T) {
+    /// # Returns
+    /// Returns `Ok(())` if the cell was successfully initialized,
+    /// or `Err(value)` if it was already initialized.
+    pub fn set(&self, value: T) -> Result<(), T> {
         if self
             .init_state
             .compare_exchange(
@@ -287,8 +287,9 @@ impl<T> AtomicOnceCell<T> {
         {
             unsafe { (*self.inner.get()) = Some(value) };
             self.init_state.store(INITIALIZED, Ordering::Release);
+            Ok(())
         } else {
-            panic!("AtomicOnceCell already initialized or being initialized")
+            Err(value)
         }
     }
 
