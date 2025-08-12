@@ -133,7 +133,7 @@ pub struct PnpPowerEventCallbacks {
     pub evt_device_d0_exit_pre_interrupts_disabled:
         Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
     pub evt_device_prepare_hardware: Option<fn(&Device, &CmResList, &CmResList) -> NtResult<()>>,
-    // PFN_WDF_DEVICE_RELEASE_HARDWARE         EvtDeviceReleaseHardware;
+    pub evt_device_release_hardware: Option<fn(&Device, &CmResList) -> NtResult<()>>,
     // PFN_WDF_DEVICE_SELF_MANAGED_IO_CLEANUP  EvtDeviceSelfManagedIoCleanup;
     // PFN_WDF_DEVICE_SELF_MANAGED_IO_FLUSH    EvtDeviceSelfManagedIoFlush;
     pub evt_device_self_managed_io_init: Option<fn(&Device) -> NtResult<()>>,
@@ -155,6 +155,7 @@ impl Default for PnpPowerEventCallbacks {
             evt_device_d0_exit: None,
             evt_device_d0_exit_pre_interrupts_disabled: None,
             evt_device_prepare_hardware: None,
+            evt_device_release_hardware: None,
             evt_device_self_managed_io_init: None,
             evt_device_self_managed_io_suspend: None,
             evt_device_self_managed_io_restart: None,
@@ -208,6 +209,11 @@ fn to_unsafe_pnp_power_callbacks(
         unsafe_callbacks.EvtDevicePrepareHardware = Some(__evt_device_prepare_hardware);
     }
 
+
+    if pnp_power_callbacks.evt_device_release_hardware.is_some() {
+        unsafe_callbacks.EvtDeviceReleaseHardware = Some(__evt_device_release_hardware);
+    }
+
     if pnp_power_callbacks
         .evt_device_self_managed_io_init
         .is_some()
@@ -232,18 +238,16 @@ fn to_unsafe_pnp_power_callbacks(
     unsafe_callbacks
 }
 
-macro_rules! unsafe_pnp_power_d0_callback {
-    ($callback_name:ident) => {
+macro_rules! unsafe_pnp_power_callback {
+    ($callback_name:ident $(, $param_name:ident: $param_type:ty => $conversion:expr)*) => {
         paste::paste! {
-            pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE, state: WDF_POWER_DEVICE_STATE) -> NTSTATUS {
+            pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE $(, $param_name: $param_type)*) -> NTSTATUS {
                 let device = unsafe { &*(device as *const Device) };
-                let state = PowerDeviceState::try_from(state)
-                    .expect("framework should not send invalid WDF_POWER_DEVICE_STATE");
-
+                
                 if let Some(ctxt) = DeviceContext::get(&device) {
                     if let Some(callbacks) = &ctxt.pnp_power_callbacks {
                         if let Some(callback) = callbacks.$callback_name {
-                            return match callback(device, state) {
+                            return match callback(device $(, $conversion)*) {
                                 Ok(_) => 0,
                                 Err(err) => err.nt_status(),
                             };
@@ -257,60 +261,38 @@ macro_rules! unsafe_pnp_power_d0_callback {
     };
 }
 
-unsafe_pnp_power_d0_callback!(evt_device_d0_entry);
-unsafe_pnp_power_d0_callback!(evt_device_d0_entry_post_interrupts_enabled);
-unsafe_pnp_power_d0_callback!(evt_device_d0_exit);
-unsafe_pnp_power_d0_callback!(evt_device_d0_exit_pre_interrupts_disabled);
-
-macro_rules! unsafe_pnp_power_hardware_callback {
-    ($callback_name:ident) => {
-        paste::paste! {
-            pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE, resources_raw: WDFCMRESLIST, resources_translated: WDFCMRESLIST) -> NTSTATUS {
-                let device = unsafe { &*(device as *const Device) };
-                let resources_raw = unsafe { &*(resources_raw as *const CmResList) };
-                let resources_translated = unsafe { &*(resources_translated as *const CmResList) };
-
-                if let Some(ctxt) = DeviceContext::get(&device) {
-                    if let Some(callbacks) = &ctxt.pnp_power_callbacks {
-                        if let Some(callback) = callbacks.$callback_name {
-                            return match callback(device, resources_raw, resources_translated) {
-                                Ok(_) => 0,
-                                Err(err) => err.nt_status(),
-                            };
-                        }
-                    }
-                }
-
-                panic!("User did not provide callback {} but we subscribed to it", stringify!($callback_name));
-            }
-        }
-    };
+fn to_rust_enum(state: WDF_POWER_DEVICE_STATE) -> PowerDeviceState {
+    PowerDeviceState::try_from(state)
+        .expect("framework should not send invalid WDF_POWER_DEVICE_STATE")
 }
 
-unsafe_pnp_power_hardware_callback!(evt_device_prepare_hardware);
+unsafe_pnp_power_callback!(evt_device_d0_entry, 
+    previous_state: WDF_POWER_DEVICE_STATE => to_rust_enum(previous_state)
+);
 
-macro_rules! unsafe_pnp_power_io_callback {
-    ($callback_name:ident) => {
-        paste::paste! {
-            pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE) -> NTSTATUS {
-                let device = unsafe { &*(device as *const Device) };
-                if let Some(ctxt) = DeviceContext::get(&device) {
-                    if let Some(callbacks) = &ctxt.pnp_power_callbacks {
-                        if let Some(callback) = callbacks.$callback_name {
-                            return match callback(device) {
-                                Ok(_) => 0,
-                                Err(err) => err.nt_status(),
-                            };
-                        }
-                    }
-                }
+unsafe_pnp_power_callback!(evt_device_d0_entry_post_interrupts_enabled, 
+    previous_state: WDF_POWER_DEVICE_STATE => to_rust_enum(previous_state)
+);
 
-                panic!("User did not provide callback {} but we subscribed to it", stringify!($callback_name));
-            }
-        }
-    };
-}
+unsafe_pnp_power_callback!(evt_device_d0_exit, 
+    target_state: WDF_POWER_DEVICE_STATE => to_rust_enum(target_state)
+);
 
-unsafe_pnp_power_io_callback!(evt_device_self_managed_io_init);
-unsafe_pnp_power_io_callback!(evt_device_self_managed_io_suspend);
-unsafe_pnp_power_io_callback!(evt_device_self_managed_io_restart);
+unsafe_pnp_power_callback!(evt_device_d0_exit_pre_interrupts_disabled, 
+    target_state: WDF_POWER_DEVICE_STATE => to_rust_enum(target_state)
+);
+
+unsafe_pnp_power_callback!(evt_device_prepare_hardware, 
+    resources_raw: WDFCMRESLIST => unsafe { &*(resources_raw as *const CmResList) }, 
+    resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated as *const CmResList) }
+);
+
+unsafe_pnp_power_callback!(evt_device_release_hardware, 
+    resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated as *const CmResList) }
+);
+
+
+
+unsafe_pnp_power_callback!(evt_device_self_managed_io_init);
+unsafe_pnp_power_callback!(evt_device_self_managed_io_suspend);
+unsafe_pnp_power_callback!(evt_device_self_managed_io_restart);
