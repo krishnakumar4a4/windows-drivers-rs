@@ -108,20 +108,20 @@ impl Driver {
 /// be used in certain static variables in this module. In
 /// reality it is not `Sync` under all conditions. It is `Sync`
 /// only when the above-mentioned invariants are maintained.
-/// Therefore **do not use it in contexts which assume/require
-/// that it is always `Sync`**.
+/// Therefore **do not use it in contexts which require that
+/// it is always `Sync`**.
 ///
-/// In general `UnsafeOnceCell` is NOT a general-purpose type.
-/// It is meant to be used only in the way it is used right
-/// now wherein instances of it are placed in static variables,
+/// More broadly speaking `UnsafeOnceCell` is NOT a
+/// general-purpose type. It is meant to be used only in the way it is used
+/// right now wherein instances of it are placed in static variables,
 /// the driver entry function -- and only the driver entry
 /// function -- calls `set` and other methods in this module
-/// call `get` only after driver entry is done. Therefore
+/// call `get` only after driver entry is finished. Therefore
 /// **please do not use it for any other purpose and be careful
-/// when changing its code or any of the code that uses it**.
+/// when changing it or any of the code that uses it**.
 ///
-/// We could have made this type thread-safe and avoid all of
-/// the above constraitns but that would have meant that every
+/// We could have made it thread-safe and avoid all of
+/// the above constraints but that would have meant that every
 /// access to it requires an atomic operation which is bad for
 /// performance because values stored in it are meant to be
 /// accessed very frequently such as from tracing calls.
