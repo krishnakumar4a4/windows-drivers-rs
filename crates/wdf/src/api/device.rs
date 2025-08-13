@@ -2,7 +2,9 @@ use core::{default::Default, sync::atomic::AtomicUsize};
 
 use wdf_macros::internal_object_context;
 use wdk_sys::{
+    BOOLEAN,
     call_unsafe_wdf_function_binding,
+    DEVICE_RELATION_TYPE,
     NTSTATUS,
     NT_SUCCESS,
     WDFCMRESLIST,
@@ -12,6 +14,7 @@ use wdk_sys::{
     WDF_NO_OBJECT_ATTRIBUTES,
     WDF_PNPPOWER_EVENT_CALLBACKS,
     WDF_POWER_DEVICE_STATE,
+    WDF_SPECIAL_FILE_TYPE,
 };
 
 use crate::api::{
@@ -139,12 +142,12 @@ pub struct PnpPowerEventCallbacks {
     pub evt_device_self_managed_io_init: Option<fn(&Device) -> NtResult<()>>,
     pub evt_device_self_managed_io_suspend: Option<fn(&Device) -> NtResult<()>>,
     pub evt_device_self_managed_io_restart: Option<fn(&Device) -> NtResult<()>>,
-    // PFN_WDF_DEVICE_SURPRISE_REMOVAL         EvtDeviceSurpriseRemoval;
-    // PFN_WDF_DEVICE_QUERY_REMOVE             EvtDeviceQueryRemove;
-    // PFN_WDF_DEVICE_QUERY_STOP               EvtDeviceQueryStop;
-    // PFN_WDF_DEVICE_USAGE_NOTIFICATION       EvtDeviceUsageNotification;
-    // PFN_WDF_DEVICE_RELATIONS_QUERY          EvtDeviceRelationsQuery;
-    // PFN_WDF_DEVICE_USAGE_NOTIFICATION_EX    EvtDeviceUsageNotificationEx;
+    pub evt_device_surprise_removal: Option<fn(&Device)>,
+    pub evt_device_query_remove: Option<fn(&Device) -> NtResult<()>>,
+    pub evt_device_query_stop: Option<fn(&Device) -> NtResult<()>>,
+    pub evt_device_usage_notification: Option<fn(&Device, SpecialFileType,  bool)>,
+    pub evt_device_relations_query: Option<fn(&Device, DeviceRelationType)>,
+    pub evt_device_usage_notification_ex: Option<fn(&Device, SpecialFileType,  bool) -> NtResult<()>>,
 }
 
 impl Default for PnpPowerEventCallbacks {
@@ -161,6 +164,12 @@ impl Default for PnpPowerEventCallbacks {
             evt_device_self_managed_io_init: None,
             evt_device_self_managed_io_suspend: None,
             evt_device_self_managed_io_restart: None,
+            evt_device_surprise_removal: None,
+            evt_device_query_remove: None,
+            evt_device_query_stop: None,
+            evt_device_usage_notification: None,
+            evt_device_relations_query: None,
+            evt_device_usage_notification_ex: None,
         }
     }
 }
@@ -174,6 +183,31 @@ safe_c_enum! {
         D3 = WdfPowerDeviceD3,
         D3Final = WdfPowerDeviceD3Final,
         PrepareForHibernation = WdfPowerDevicePrepareForHibernation,
+    }
+}
+
+safe_c_enum! {
+    pub enum SpecialFileType: WDF_SPECIAL_FILE_TYPE {
+        Undefined = WdfSpecialFileUndefined,
+        Paging = WdfSpecialFilePaging,
+        Hibernation = WdfSpecialFileHibernation,
+        Dump = WdfSpecialFileDump,
+        Boot = WdfSpecialFileBoot,
+        PostDisplay = WdfSpecialFilePostDisplay,
+        GuestAssigned = WdfSpecialFileGuestAssigned,
+        // InlineCryptoEngine = WdfSpecialFileInlineCryptoEngine,
+    }
+}
+
+safe_c_enum! {
+    pub enum DeviceRelationType: DEVICE_RELATION_TYPE {
+        Bus = BusRelations,
+        Ejection = EjectionRelations,
+        Power = PowerRelations,
+        Removal = RemovalRelations,
+        TargetDevice = TargetDeviceRelation,
+        SingleBus = SingleBusRelations,
+        Transport = TransportRelations,
     }
 }
 
@@ -251,6 +285,30 @@ fn to_unsafe_pnp_power_callbacks(
         unsafe_callbacks.EvtDeviceSelfManagedIoRestart = Some(__evt_device_self_managed_io_restart);
     }
 
+    if pnp_power_callbacks.evt_device_surprise_removal.is_some() {
+        unsafe_callbacks.EvtDeviceSurpriseRemoval = Some(__evt_device_surprise_removal);
+    }
+
+    if pnp_power_callbacks.evt_device_query_remove.is_some() {
+        unsafe_callbacks.EvtDeviceQueryRemove = Some(__evt_device_query_remove);
+    }
+
+    if pnp_power_callbacks.evt_device_query_stop.is_some() {
+        unsafe_callbacks.EvtDeviceQueryStop = Some(__evt_device_query_stop);
+    }
+
+    if pnp_power_callbacks.evt_device_usage_notification.is_some() {
+        unsafe_callbacks.EvtDeviceUsageNotification = Some(__evt_device_usage_notification);
+    }
+
+    if pnp_power_callbacks.evt_device_relations_query.is_some() {
+        unsafe_callbacks.EvtDeviceRelationsQuery = Some(__evt_device_relations_query);
+    }
+
+    if pnp_power_callbacks.evt_device_usage_notification_ex.is_some() {
+        unsafe_callbacks.EvtDeviceUsageNotificationEx = Some(__evt_device_usage_notification_ex);
+    }
+
     unsafe_callbacks
 }
 
@@ -290,11 +348,10 @@ macro_rules! unsafe_pnp_power_callback {
     };
 }
 
-// Users CAN call this (public API):
-unsafe_pnp_power_callback!(evt_device_d0_entry(previous_state: WDF_POWER_DEVICE_STATE => to_rust_enum(previous_state)) -> NTSTATUS);
-unsafe_pnp_power_callback!(evt_device_d0_entry_post_interrupts_enabled(previous_state: WDF_POWER_DEVICE_STATE => to_rust_enum(previous_state)) -> NTSTATUS);
-unsafe_pnp_power_callback!(evt_device_d0_exit(target_state: WDF_POWER_DEVICE_STATE => to_rust_enum(target_state)) -> NTSTATUS);
-unsafe_pnp_power_callback!(evt_device_d0_exit_pre_interrupts_disabled(target_state: WDF_POWER_DEVICE_STATE => to_rust_enum(target_state)) -> NTSTATUS);
+unsafe_pnp_power_callback!(evt_device_d0_entry(previous_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(previous_state)) -> NTSTATUS);
+unsafe_pnp_power_callback!(evt_device_d0_entry_post_interrupts_enabled(previous_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(previous_state)) -> NTSTATUS);
+unsafe_pnp_power_callback!(evt_device_d0_exit(target_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(target_state)) -> NTSTATUS);
+unsafe_pnp_power_callback!(evt_device_d0_exit_pre_interrupts_disabled(target_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(target_state)) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_prepare_hardware(
     resources_raw: WDFCMRESLIST => unsafe { &*(resources_raw as *const CmResList) },
     resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated as *const CmResList) }
@@ -303,14 +360,29 @@ unsafe_pnp_power_callback!(evt_device_release_hardware(
     resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated as *const CmResList) }
 ) -> NTSTATUS);
 
-// No return type needed for void functions:
 unsafe_pnp_power_callback!(evt_device_self_managed_io_cleanup());
 unsafe_pnp_power_callback!(evt_device_self_managed_io_flush());
 unsafe_pnp_power_callback!(evt_device_self_managed_io_init() -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_self_managed_io_suspend() -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_self_managed_io_restart() -> NTSTATUS);
+unsafe_pnp_power_callback!(evt_device_surprise_removal());
+unsafe_pnp_power_callback!(evt_device_query_remove() -> NTSTATUS);
+unsafe_pnp_power_callback!(evt_device_query_stop() -> NTSTATUS);
+unsafe_pnp_power_callback!(evt_device_usage_notification(notification_type: WDF_SPECIAL_FILE_TYPE => to_rust_special_file_type_enum(notification_type), is_in_notification_path: BOOLEAN => is_in_notification_path == 1));
+unsafe_pnp_power_callback!(evt_device_relations_query(relation_type: DEVICE_RELATION_TYPE => to_rust_device_relation_type_enum(relation_type)));
+unsafe_pnp_power_callback!(evt_device_usage_notification_ex(notification_type: WDF_SPECIAL_FILE_TYPE => to_rust_special_file_type_enum(notification_type), is_in_notification_path: BOOLEAN => is_in_notification_path == 1) -> NTSTATUS);
 
-fn to_rust_enum(state: WDF_POWER_DEVICE_STATE) -> PowerDeviceState {
+fn to_rust_power_state_enum(state: WDF_POWER_DEVICE_STATE) -> PowerDeviceState {
     PowerDeviceState::try_from(state)
         .expect("framework should not send invalid WDF_POWER_DEVICE_STATE")
+}
+
+fn to_rust_special_file_type_enum(file_type: WDF_SPECIAL_FILE_TYPE) -> SpecialFileType {
+    SpecialFileType::try_from(file_type)
+        .expect("framework should not send invalid WDF_SPECIAL_FILE_TYPE")
+}
+
+fn to_rust_device_relation_type_enum(relation_type: DEVICE_RELATION_TYPE) -> DeviceRelationType {
+    DeviceRelationType::try_from(relation_type)
+        .expect("framework should not send invalid DEVICE_RELATION_TYPE")
 }
