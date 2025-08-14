@@ -208,7 +208,7 @@ pub fn call_safe_driver_entry(
     wdm_driver.DriverUnload = Some(driver_unload);
 
     let mut driver_config = WDF_DRIVER_CONFIG {
-        Size: mem::size_of::<WDF_DRIVER_CONFIG>() as ULONG,
+        Size: wdf_struct_size!(WDF_DRIVER_CONFIG),
         EvtDriverDeviceAdd: Some(evt_driver_device_add),
         ..WDF_DRIVER_CONFIG::default()
     };
