@@ -3,9 +3,14 @@
 #![no_std]
 
 use wdf::{
-    CmResList, Device, DeviceInit, Driver, NtResult, PnpPowerEventCallbacks, PowerDeviceState,
-    driver_entry, trace,
+    Arc, CmResList, Device, DeviceInit, Driver, NtResult, object_context, PnpPowerEventCallbacks, PowerDeviceState,
+    driver_entry, SpinLock, trace, UsbDevice, UsbDeviceCreateConfig
 };
+
+#[object_context(Device)]
+struct DeviceContext {
+    usb_device: SpinLock<Option<Arc<UsbDevice>>>,
+}
 
 /// The entry point for the driver. It initializes the driver and is the first
 /// routine called by the system after the driver is loaded. `driver_entry`
@@ -46,18 +51,39 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..PnpPowerEventCallbacks::default()
     };
 
-    // Create the device
-    let _device = Device::create(device_init, Some(pnp_power_callbacks))?;
+    let device = Device::create(device_init, Some(pnp_power_callbacks))?;
+
+    let context = DeviceContext {
+        usb_device: SpinLock::create(None)?,
+    };
+
+    DeviceContext::attach(&device, context)?;
 
     Ok(())
 }
 
 fn evt_device_prepare_hardware(
-    _device: &Device,
+    device: &Device,
     _resources_raw: &CmResList,
     _resources_translated: &CmResList,
 ) -> NtResult<()> {
     trace("Device prepare hardware callback called");
+
+    if let Some(device_context) = DeviceContext::get(device) {
+        let usb_device = UsbDevice::create_with_parameters(
+            device,
+            &UsbDeviceCreateConfig {
+                usbd_client_contract_version: 0x0100_0000,
+            },
+        )?;
+
+        {
+            let mut usb_device_in_ctxt = device_context.usb_device.lock();
+            if usb_device_in_ctxt.is_none() {
+                *usb_device_in_ctxt = Some(usb_device);
+            }
+        }
+    }
 
     Ok(())
 }

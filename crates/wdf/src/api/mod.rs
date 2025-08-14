@@ -20,6 +20,9 @@ mod timer;
 mod tracing;
 mod utils;
 
+#[cfg(feature = "usb")]
+mod usb;
+
 pub use device::*;
 pub use driver::*;
 pub use error::*;
@@ -32,5 +35,9 @@ pub use request::*;
 pub use resource::*;
 pub use sync::*;
 pub use timer::*;
+
+#[cfg(feature = "usb")]
+pub use usb::*;
+
 pub use wdf_macros::*;
 pub use wdk::println;

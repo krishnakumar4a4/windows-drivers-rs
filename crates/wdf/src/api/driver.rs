@@ -1,11 +1,10 @@
 extern crate alloc;
 
 use alloc::string::String;
-use core::{cell::UnsafeCell, mem, ptr};
+use core::{cell::UnsafeCell, ptr};
 
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
-    ULONG,
     UNICODE_STRING,
     WDFDEVICE_INIT,
     WDFDRIVER,

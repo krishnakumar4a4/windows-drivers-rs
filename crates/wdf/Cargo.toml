@@ -26,6 +26,7 @@ paste.workspace = true
 [features]
 default = []
 umdf = []
+usb = ["wdk-sys/usb"]
 
 # TODO temporarily turned off lints
 # [lints]
