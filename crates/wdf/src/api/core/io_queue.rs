@@ -13,7 +13,7 @@ use wdk_sys::{
     _WDF_IO_QUEUE_DISPATCH_TYPE,
 };
 
-use crate::api::{
+use super::{
     device::Device,
     error::NtError,
     object::{impl_ref_counted_handle, wdf_struct_size, Handle},

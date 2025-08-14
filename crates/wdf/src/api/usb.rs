@@ -9,7 +9,7 @@ use wdk_sys::{
     WDF_USB_DEVICE_CREATE_CONFIG,
 };
 
-use crate::api::{
+use super::core::{
     device::Device,
     error::NtError,
     object::{Handle, impl_ref_counted_handle, wdf_struct_size},

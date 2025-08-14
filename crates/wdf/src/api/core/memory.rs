@@ -1,6 +1,6 @@
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS};
 
-use crate::api::{
+use super::{
     error::NtError,
     object::{impl_handle, Handle},
 };

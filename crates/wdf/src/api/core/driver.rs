@@ -23,16 +23,14 @@ pub use wdk_sys::{
     WDF_OBJECT_CONTEXT_TYPE_INFO,
 };
 
-use crate::{
-    api::{
-        device::DeviceInit,
-        error::{NtError, NtResult, NtStatus},
-        guid::Guid,
-        object::{wdf_struct_size, Handle},
-        string::{to_rust_str, WString},
-        tracing::TraceWriter,
-    },
-    println,
+use crate::println;
+use super::{
+    device::DeviceInit,
+    error::{NtError, NtResult, NtStatus},
+    guid::Guid,
+    object::{wdf_struct_size, Handle},
+    string::{to_rust_str, WString},
+    tracing::TraceWriter,
 };
 
 static TRACE_WRITER: UnsafeOnceCell<TraceWriter> = UnsafeOnceCell::new();

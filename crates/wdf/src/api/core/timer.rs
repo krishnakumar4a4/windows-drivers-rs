@@ -3,7 +3,7 @@ use core::{mem::MaybeUninit, ptr::null_mut, sync::atomic::AtomicUsize, time::Dur
 use wdf_macros::internal_object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_TIMER_CONFIG};
 
-use crate::api::{
+use super::{
     device::Device,
     error::NtResult,
     object::{impl_ref_counted_handle, init_attributes, wdf_struct_size, Handle},

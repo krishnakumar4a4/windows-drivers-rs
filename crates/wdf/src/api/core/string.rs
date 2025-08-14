@@ -11,7 +11,7 @@ use wdk_sys::{
     WDF_NO_OBJECT_ATTRIBUTES,
 };
 
-use crate::api::{error::NtResult, object::Handle};
+use super::{error::NtResult, object::Handle};
 
 pub(crate) struct WString(WDFSTRING);
 

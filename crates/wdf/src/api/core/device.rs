@@ -17,7 +17,7 @@ use wdk_sys::{
     WDF_SPECIAL_FILE_TYPE,
 };
 
-use crate::api::{
+use super::{
     error::NtResult,
     guid::Guid,
     io_queue::IoQueue,

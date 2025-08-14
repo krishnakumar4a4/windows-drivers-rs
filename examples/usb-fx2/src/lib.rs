@@ -4,7 +4,7 @@
 
 use wdf::{
     Arc, CmResList, Device, DeviceInit, Driver, NtResult, object_context, PnpPowerEventCallbacks, PowerDeviceState,
-    driver_entry, SpinLock, trace, UsbDevice, UsbDeviceCreateConfig
+    driver_entry, SpinLock, trace, usb::{UsbDevice, UsbDeviceCreateConfig}
 };
 
 #[object_context(Device)]

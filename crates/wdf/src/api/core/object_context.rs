@@ -14,7 +14,10 @@ use wdk_sys::{
     WDF_OBJECT_CONTEXT_TYPE_INFO,
 };
 
-use crate::api::{init_attributes, Handle, NtResult, RefCountedHandle};
+use super::{
+    object::{init_attributes, Handle, RefCountedHandle},
+    error::NtResult,
+};
 
 #[doc(hidden)]
 #[repr(transparent)]

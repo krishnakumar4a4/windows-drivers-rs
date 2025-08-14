@@ -13,10 +13,9 @@ use core::{
 use wdk::println;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFSPINLOCK};
 
-use super::init_attributes;
-use crate::api::{
+use super::{
     error::NtResult,
-    object::{Handle, RefCountedHandle},
+    object::{Handle, init_attributes, RefCountedHandle},
     object_context::bug_check,
 };
 

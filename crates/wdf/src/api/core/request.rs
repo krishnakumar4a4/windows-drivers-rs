@@ -5,7 +5,7 @@ use alloc::string::String;
 use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY, WDFOBJECT, WDFREQUEST};
 
-use crate::api::{
+use super::{
     error::{NtError, NtResult, NtStatus},
     io_queue::IoQueue,
     memory::Memory,
