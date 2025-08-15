@@ -23,13 +23,6 @@ use super::{
 
 impl_ref_counted_handle!(IoQueue, IoQueueContext);
 
-/// SAFETY: This is safe because all the WDF functions
-/// that operate on WDFQUEUE do so in a thread-safe manner.
-/// As a result, all the Rust methods on this struct are
-/// also thread-safe.
-unsafe impl Send for IoQueue {}
-unsafe impl Sync for IoQueue {}
-
 impl IoQueue {
     pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Arc<Self>, NtError> {
         unsafe { Self::create_with_attributes(device, queue_config, WDF_NO_OBJECT_ATTRIBUTES) }

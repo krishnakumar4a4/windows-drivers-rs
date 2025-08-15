@@ -49,16 +49,7 @@ impl UsbDevice {
             Err(status.into())
         }
     }
-
 }
-
-/// SAFETY: This is safe because all the WDF functions
-/// that operate on WDFQUEUE do so in a thread-safe manner.
-/// As a result, all the Rust methods on this struct are
-/// also thread-safe.
-unsafe impl Send for UsbDevice {}
-unsafe impl Sync for UsbDevice {}
-
 
 pub struct UsbDeviceCreateConfig {
     pub usbd_client_contract_version: u32

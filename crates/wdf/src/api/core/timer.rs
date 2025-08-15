@@ -91,13 +91,6 @@ impl Timer {
     }
 }
 
-/// SAFETY: This is safe because all the WDF functions
-/// that operate on WDFTIMER do so in a thread-safe manner.
-/// As a result, all the Rust methods on this struct are
-/// also thread-safe.
-unsafe impl Send for Timer {}
-unsafe impl Sync for Timer {}
-
 pub struct TimerConfig<'a, P: Handle> {
     pub evt_timer_func: fn(&Timer),
     pub period: u32,

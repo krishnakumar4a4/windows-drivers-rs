@@ -40,6 +40,12 @@ macro_rules! impl_handle {
             }
         }
 
+        // All WDF objects are thread-safe
+        // and safe to share and send across
+        // threads
+        unsafe impl Sync for $obj {}
+        unsafe impl Send for $obj {}
+
         impl core::fmt::Debug for $obj {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 write!(f, "{}({:#x})", stringify!($obj), self as *const _ as usize)
