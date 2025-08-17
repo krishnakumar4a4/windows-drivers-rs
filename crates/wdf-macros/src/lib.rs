@@ -236,7 +236,7 @@ fn object_context_impl(
     // Make sure the struct does not have any odd alignment requirements
     // that conflict with the alignment of the framework's allocations.
     // This boils down to ensuring that the struct does not have any
-    // repr atrributes other than Rust and transparent.
+    // repr attributes other than Rust and transparent.
     // Note that for performance reasons we check the repr attributes
     // only on the struct itself and not on its fields.
     // Alignment violations by the fields will be caught at run time

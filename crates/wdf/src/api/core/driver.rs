@@ -62,10 +62,10 @@ impl Driver {
         Ok(string.to_rust_string())
     }
 
-    pub fn is_version_available(&self, major_vesion: u32, minor_version: u32) -> bool {
+    pub fn is_version_available(&self, major_version: u32, minor_version: u32) -> bool {
         let mut params = WDF_DRIVER_VERSION_AVAILABLE_PARAMS {
             Size: wdf_struct_size!(WDF_DRIVER_VERSION_AVAILABLE_PARAMS),
-            MajorVersion: major_vesion,
+            MajorVersion: major_version,
             MinorVersion: minor_version,
         };
 
@@ -235,7 +235,7 @@ pub fn call_safe_driver_entry(
         // SAFETY: We are uploading the invariants of `UnsafeOnceCell.set`
         // because:
         // 1. This is the only call to `TRACE_WRITER.set` and it runs only
-        // on one thread. Therefore, there is no question of `set` runnning
+        // on one thread. Therefore, there is no question of `set` running
         // concurrently with itself
         // 2. This is the driver entry and it is guaranteed to run before
         // any other driver code. Therefore `TRACE_WRITER.get` cannot run

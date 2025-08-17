@@ -248,7 +248,7 @@ fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
 /// * `Request` - Handle to a framework request object.
 ///
 /// * `Length`  - number of bytes to be read. The default property of the queue
-///   is to not dispatch zero lenght read & write requests to the driver and
+///   is to not dispatch zero length read & write requests to the driver and
 ///   complete is with status success. So we will never get a zero length
 ///   request.
 fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
@@ -323,7 +323,7 @@ fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 /// * `Request` - Handle to a framework request object.
 ///
 /// * `Length`  - number of bytes to be read. The default property of the queue
-///   is to not dispatch zero lenght read & write requests to the driver and
+///   is to not dispatch zero length read & write requests to the driver and
 ///   complete is with status success. So we will never get a zero length
 ///   request.
 fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
@@ -437,7 +437,7 @@ fn print_driver_version(driver: &Driver) -> NtResult<()> {
     if driver.is_version_available(1, 0) {
         println!("Yes, framework version is 1.0");
     } else {
-        println!("No, framework verison is not 1.0");
+        println!("No, framework version is not 1.0");
     }
 
     Ok(())

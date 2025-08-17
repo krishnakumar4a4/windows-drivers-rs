@@ -119,7 +119,7 @@ fn set_up_context<T: Handle, U: ObjectContext>(
     cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
     destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>,
 ) -> NtResult<()> {
-    // Make sure the aligntment requirement of the object struct
+    // Make sure the alignment requirement of the object struct
     // does not exceed the minimum possible alignment of allocations
     // made by the framework.
     if core::mem::align_of::<U>() > MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT {
