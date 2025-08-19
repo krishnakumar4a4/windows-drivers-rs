@@ -189,7 +189,6 @@ safe_c_enum! {
 
 safe_c_enum! {
     pub enum SpecialFileType: WDF_SPECIAL_FILE_TYPE {
-        Undefined = WdfSpecialFileUndefined,
         Paging = WdfSpecialFilePaging,
         Hibernation = WdfSpecialFileHibernation,
         Dump = WdfSpecialFileDump,
