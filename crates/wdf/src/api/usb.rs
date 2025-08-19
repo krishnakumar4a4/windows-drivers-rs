@@ -72,10 +72,10 @@ impl UsbDevice {
         }
     }
 
-    pub fn select_config_single_interface<'a>(&self) -> NtResult<UsbSingleInterfaceConfig<'a>> {
-        let mut select_config = WDF_USB_DEVICE_SELECT_CONFIG_PARAMS::default();
-        select_config.Size = wdf_struct_size!(WDF_USB_DEVICE_SELECT_CONFIG_PARAMS);
-        select_config.Type =
+    pub fn select_config_single_interface<'a>(&self) -> NtResult<UsbSingleInterfaceInformation<'a>> {
+        let mut config = WDF_USB_DEVICE_SELECT_CONFIG_PARAMS::default();
+        config.Size = wdf_struct_size!(WDF_USB_DEVICE_SELECT_CONFIG_PARAMS);
+        config.Type =
             _WdfUsbTargetDeviceSelectConfigType::WdfUsbTargetDeviceSelectConfigTypeSingleInterface;
 
         let status = unsafe {
@@ -83,20 +83,20 @@ impl UsbDevice {
                 WdfUsbTargetDeviceSelectConfig,
                 self.as_ptr() as *mut _,
                 ptr::null_mut(),
-                &mut select_config
+                &mut config
             )
         };
 
         if NT_SUCCESS(status) {
-            let interface_config = UsbSingleInterfaceConfig {
+            let info = UsbSingleInterfaceInformation {
                 number_of_configured_pipes: unsafe {
-                    select_config.Types.SingleInterface.NumberConfiguredPipes
+                    config.Types.SingleInterface.NumberConfiguredPipes
                 },
                 configured_usb_interface: unsafe {
-                    &*(select_config.Types.SingleInterface.ConfiguredUsbInterface as *const _)
+                    &*(config.Types.SingleInterface.ConfiguredUsbInterface as *const _)
                 },
             };
-            Ok(interface_config)
+            Ok(info)
         } else {
             Err(status.into())
         }
@@ -159,7 +159,7 @@ fn to_unsafe_config(safe_config: &UsbDeviceCreateConfig) -> WDF_USB_DEVICE_CREAT
     config
 }
 
-pub struct UsbSingleInterfaceConfig<'a> {
+pub struct UsbSingleInterfaceInformation<'a> {
     pub number_of_configured_pipes: u8,
     pub configured_usb_interface: &'a UsbInterface,
 }
