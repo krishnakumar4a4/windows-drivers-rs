@@ -32,6 +32,5 @@ pub use request::*;
 pub use resource::*;
 pub use sync::*;
 pub use timer::*;
-
 pub use wdf_macros::*;
 pub use wdk::println;

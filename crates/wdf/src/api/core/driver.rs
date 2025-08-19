@@ -21,7 +21,6 @@ pub use wdk_sys::{
     WDF_OBJECT_CONTEXT_TYPE_INFO,
 };
 
-use crate::println;
 use super::{
     device::DeviceInit,
     error::{NtError, NtResult, NtStatus},
@@ -30,6 +29,7 @@ use super::{
     string::{to_rust_str, WString},
     tracing::TraceWriter,
 };
+use crate::println;
 
 static TRACE_WRITER: UnsafeOnceCell<TraceWriter> = UnsafeOnceCell::new();
 static EVT_DEVICE_ADD: UnsafeOnceCell<fn(&mut DeviceInit) -> Result<(), NtError>> =

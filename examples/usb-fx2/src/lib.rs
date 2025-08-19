@@ -3,8 +3,19 @@
 #![no_std]
 
 use wdf::{
-    Arc, CmResList, Device, DeviceInit, Driver, NtResult, object_context, PnpPowerEventCallbacks, PowerDeviceState,
-    driver_entry, SpinLock, trace, usb::{UsbDevice, UsbDeviceCreateConfig}
+    Arc,
+    CmResList,
+    Device,
+    DeviceInit,
+    Driver,
+    NtResult,
+    PnpPowerEventCallbacks,
+    PowerDeviceState,
+    SpinLock,
+    driver_entry,
+    object_context,
+    trace,
+    usb::{UsbDevice, UsbDeviceCreateConfig},
 };
 
 #[object_context(Device)]

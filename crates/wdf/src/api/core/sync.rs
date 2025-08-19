@@ -13,7 +13,7 @@ use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFSPINLO
 
 use super::{
     error::NtResult,
-    object::{Handle, init_attributes, RefCountedHandle},
+    object::{init_attributes, Handle, RefCountedHandle},
     object_context::bug_check,
 };
 

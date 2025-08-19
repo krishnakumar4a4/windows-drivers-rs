@@ -2,8 +2,8 @@ use core::{default::Default, sync::atomic::AtomicUsize};
 
 use wdf_macros::internal_object_context;
 use wdk_sys::{
-    BOOLEAN,
     call_unsafe_wdf_function_binding,
+    BOOLEAN,
     DEVICE_RELATION_TYPE,
     NTSTATUS,
     NT_SUCCESS,
@@ -145,9 +145,10 @@ pub struct PnpPowerEventCallbacks {
     pub evt_device_surprise_removal: Option<fn(&Device)>,
     pub evt_device_query_remove: Option<fn(&Device) -> NtResult<()>>,
     pub evt_device_query_stop: Option<fn(&Device) -> NtResult<()>>,
-    pub evt_device_usage_notification: Option<fn(&Device, SpecialFileType,  bool)>,
+    pub evt_device_usage_notification: Option<fn(&Device, SpecialFileType, bool)>,
     pub evt_device_relations_query: Option<fn(&Device, DeviceRelationType)>,
-    pub evt_device_usage_notification_ex: Option<fn(&Device, SpecialFileType,  bool) -> NtResult<()>>,
+    pub evt_device_usage_notification_ex:
+        Option<fn(&Device, SpecialFileType, bool) -> NtResult<()>>,
 }
 
 impl Default for PnpPowerEventCallbacks {
@@ -245,7 +246,6 @@ fn to_unsafe_pnp_power_callbacks(
         unsafe_callbacks.EvtDevicePrepareHardware = Some(__evt_device_prepare_hardware);
     }
 
-
     if pnp_power_callbacks.evt_device_release_hardware.is_some() {
         unsafe_callbacks.EvtDeviceReleaseHardware = Some(__evt_device_release_hardware);
     }
@@ -305,7 +305,10 @@ fn to_unsafe_pnp_power_callbacks(
         unsafe_callbacks.EvtDeviceRelationsQuery = Some(__evt_device_relations_query);
     }
 
-    if pnp_power_callbacks.evt_device_usage_notification_ex.is_some() {
+    if pnp_power_callbacks
+        .evt_device_usage_notification_ex
+        .is_some()
+    {
         unsafe_callbacks.EvtDeviceUsageNotificationEx = Some(__evt_device_usage_notification_ex);
     }
 
