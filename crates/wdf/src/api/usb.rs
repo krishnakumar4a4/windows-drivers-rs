@@ -12,6 +12,8 @@ use wdk_sys::{
     WDF_USB_DEVICE_CREATE_CONFIG,
     WDF_USB_DEVICE_INFORMATION,
     WDF_USB_DEVICE_SELECT_CONFIG_PARAMS,
+    WDF_USB_PIPE_INFORMATION,
+    WDF_USB_PIPE_TYPE,
 };
 
 use super::core::{
@@ -19,6 +21,7 @@ use super::core::{
     error::NtResult,
     object::{impl_handle, impl_ref_counted_handle, wdf_struct_size, Handle},
     sync::Arc,
+    utils::safe_c_enum,
 };
 
 impl_ref_counted_handle!(UsbDevice, UsbDeviceContext);
@@ -72,7 +75,9 @@ impl UsbDevice {
         }
     }
 
-    pub fn select_config_single_interface<'a>(&self) -> NtResult<UsbSingleInterfaceInformation<'a>> {
+    pub fn select_config_single_interface<'a>(
+        &self,
+    ) -> NtResult<UsbSingleInterfaceInformation<'a>> {
         let mut config = WDF_USB_DEVICE_SELECT_CONFIG_PARAMS::default();
         config.Size = wdf_struct_size!(WDF_USB_DEVICE_SELECT_CONFIG_PARAMS);
         config.Type =
@@ -165,3 +170,92 @@ pub struct UsbSingleInterfaceInformation<'a> {
 }
 
 impl_handle!(UsbInterface);
+
+impl UsbInterface {
+    pub fn get_configured_pipe<'a>(&self, pipe_index: u8) -> Option<&'a UsbPipe> {
+        self.get_configured_pipe_impl(pipe_index, false)
+            .map(|(pipe, _)| pipe)
+    }
+
+    pub fn get_configured_pipe_with_information<'a>(
+        &self,
+        pipe_index: u8,
+    ) -> Option<(&'a UsbPipe, UsbPipeInformation)> {
+        self.get_configured_pipe_impl(pipe_index, true)
+            .map(|(pipe, info)| {
+                (
+                    pipe,
+                    info.expect("framework should return pipe information if pipe exists"),
+                )
+            })
+    }
+
+    pub fn get_configured_pipe_impl<'a>(
+        &self,
+        pipe_index: u8,
+        get_info: bool,
+    ) -> Option<(&'a UsbPipe, Option<UsbPipeInformation>)> {
+        let mut pipe_info = WDF_USB_PIPE_INFORMATION::default();
+        let pipe_info_ptr = if get_info {
+            &raw mut pipe_info
+        } else {
+            ptr::null_mut()
+        };
+
+        let pipe = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbInterfaceGetConfiguredPipe,
+                self.as_ptr() as *mut _,
+                pipe_index,
+                pipe_info_ptr
+            )
+        };
+
+        if pipe.is_null() {
+            None
+        } else {
+            let pipe_ref = unsafe { &*(pipe as *const UsbPipe) };
+            let tuple = if get_info {
+                (pipe_ref, Some(pipe_info.into()))
+            } else {
+                (pipe_ref, None)
+            };
+
+            Some(tuple)
+        }
+    }
+}
+
+impl_handle!(UsbPipe);
+
+pub struct UsbPipeInformation {
+    pub maximum_packet_size: u32,
+    pub endpoint_address: u8,
+    pub interval: u8,
+    pub setting_index: u8,
+    pub pipe_type: UsbPipeType,
+    pub maximum_transfer_size: u32,
+}
+
+impl From<WDF_USB_PIPE_INFORMATION> for UsbPipeInformation {
+    fn from(info: WDF_USB_PIPE_INFORMATION) -> Self {
+        Self {
+            maximum_packet_size: info.MaximumPacketSize,
+            endpoint_address: info.EndpointAddress,
+            interval: info.Interval,
+            setting_index: info.SettingIndex,
+            pipe_type: UsbPipeType::try_from(info.PipeType)
+                .expect("framework should return correct pipe type"),
+            maximum_transfer_size: info.MaximumTransferSize,
+        }
+    }
+}
+
+safe_c_enum! {
+    pub enum UsbPipeType: WDF_USB_PIPE_TYPE {
+        Control = WdfUsbPipeTypeControl,
+        Isochronous = WdfUsbPipeTypeIsochronous,
+        Bulk = WdfUsbPipeTypeBulk,
+        Interrupt = WdfUsbPipeTypeInterrupt
+    }
+}
