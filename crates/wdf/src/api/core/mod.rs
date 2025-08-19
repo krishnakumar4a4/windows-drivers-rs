@@ -1,9 +1,3 @@
-// This module exits only to make it easy to
-// apply cfg attributes for conditional compilation
-// in lib.rs. Without it the cfg attributes would
-// have to be applied to every mod and pub uses
-// statement individually.
-
 pub mod device;
 pub mod driver;
 pub mod error;
