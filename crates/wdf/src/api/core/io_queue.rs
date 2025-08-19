@@ -143,8 +143,7 @@ impl Default for IoQueueConfig {
 }
 
 fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
-    let mut config =
-        unsafe { core::mem::MaybeUninit::<WDF_IO_QUEUE_CONFIG>::zeroed().assume_init() };
+    let mut config = WDF_IO_QUEUE_CONFIG::default();
 
     let size = wdf_struct_size!(WDF_IO_QUEUE_CONFIG);
 

@@ -1,4 +1,4 @@
-use core::{mem::MaybeUninit, ptr::null_mut, sync::atomic::AtomicUsize, time::Duration};
+use core::{ptr::null_mut, sync::atomic::AtomicUsize, time::Duration};
 
 use wdf_macros::internal_object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_TIMER_CONFIG};
@@ -129,7 +129,7 @@ impl<'a, P: Handle> TimerConfig<'a, P> {
 
 impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
     fn from(config: &TimerConfig<'a, P>) -> Self {
-        let mut wdf_config: WDF_TIMER_CONFIG = unsafe { MaybeUninit::zeroed().assume_init() };
+        let mut wdf_config = WDF_TIMER_CONFIG::default();
 
         wdf_config.Size = wdf_struct_size!(WDF_TIMER_CONFIG);
         wdf_config.Period = config.period;
