@@ -1,5 +1,3 @@
-extern crate alloc;
-
 use alloc::{boxed::Box, string::String, vec::Vec};
 
 use wdk_sys::{

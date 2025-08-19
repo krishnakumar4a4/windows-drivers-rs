@@ -6,6 +6,8 @@
 #![no_std]
 #![allow(non_snake_case, non_camel_case_types)]
 
+extern crate alloc;
+
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 mod api;
 

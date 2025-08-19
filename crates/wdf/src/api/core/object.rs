@@ -1,5 +1,3 @@
-extern crate alloc;
-
 use alloc::string::String;
 use core::sync::atomic::AtomicUsize;
 
@@ -16,8 +14,6 @@ pub trait RefCountedHandle: Handle {
 
 macro_rules! impl_handle {
     ($obj:ident) => {
-        extern crate alloc;
-
         #[repr(C)]
         pub struct $obj {
             _private: [u8; 0], // Prevents instantiation of the struct from driver code

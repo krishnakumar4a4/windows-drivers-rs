@@ -1,5 +1,3 @@
-extern crate alloc;
-
 use alloc::string::String;
 
 use wdf_macros::object_context;
