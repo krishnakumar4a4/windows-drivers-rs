@@ -5,19 +5,21 @@
 //! `mockall` crate to enable mocking of its methods, facilitating easier unit
 //! testing.
 
-// Warns the get_cargo_metadata_at_path method is not used, however it is used.
-// The intellisense confusion seems to come from automock
-#![allow(dead_code)]
 #![allow(clippy::unused_self)]
 
 use std::path::Path;
 
-use mockall::automock;
-
 #[derive(Default)]
 pub struct Metadata {}
 
-#[automock]
+#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(
+    test,
+    allow(
+        dead_code,
+        reason = "This implementation is mocked in test configuration."
+    )
+)]
 impl Metadata {
     /// Get the Cargo metadata at a given path.
     ///
