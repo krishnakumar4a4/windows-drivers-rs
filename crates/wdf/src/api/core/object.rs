@@ -3,6 +3,8 @@ use core::sync::atomic::AtomicUsize;
 
 use wdk_sys::{WDFOBJECT, WDF_OBJECT_ATTRIBUTES, _WDF_EXECUTION_LEVEL, _WDF_SYNCHRONIZATION_SCOPE};
 
+use super::wdf_struct_size;
+
 pub trait Handle {
     fn as_ptr(&self) -> WDFOBJECT;
     fn type_name() -> String;
@@ -64,26 +66,8 @@ macro_rules! impl_ref_counted_handle {
     };
 }
 
-macro_rules! wdf_struct_size {
-    ($StructName:ty) => {{
-        paste::paste! {
-            if unsafe { wdk_sys::WdfClientVersionHigherThanFramework } != 0 {
-                let index = wdk_sys::_WDFSTRUCTENUM::[<INDEX_ $StructName>] as u32;
-                if index < unsafe { wdk_sys::WdfStructureCount } {
-                    unsafe {wdk_sys::WdfStructures.add(index as usize) as u32 }
-                } else {
-                    usize::MAX as u32
-                }
-            } else {
-                core::mem::size_of::<$StructName>() as u32
-            }
-        }
-    }};
-}
-
 pub(crate) use impl_handle;
 pub(crate) use impl_ref_counted_handle;
-pub(crate) use wdf_struct_size;
 
 pub fn init_attributes() -> WDF_OBJECT_ATTRIBUTES {
     let mut attributes = WDF_OBJECT_ATTRIBUTES::default();

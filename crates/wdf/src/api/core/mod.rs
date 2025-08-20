@@ -28,3 +28,31 @@ pub use sync::*;
 pub use timer::*;
 pub use wdf_macros::*;
 pub use wdk::println;
+
+
+#[derive(Copy, Clone, Debug)]
+pub enum TriState {
+    False = 0,
+    True = 1,
+    UseDefault = 2,
+}
+
+macro_rules! wdf_struct_size {
+    ($StructName:ty) => {{
+        paste::paste! {
+            if unsafe { wdk_sys::WdfClientVersionHigherThanFramework } != 0 {
+                let index = wdk_sys::_WDFSTRUCTENUM::[<INDEX_ $StructName>] as u32;
+                if index < unsafe { wdk_sys::WdfStructureCount } {
+                    unsafe {wdk_sys::WdfStructures.add(index as usize) as u32 }
+                } else {
+                    usize::MAX as u32
+                }
+            } else {
+                core::mem::size_of::<$StructName>() as u32
+            }
+        }
+    }};
+}
+
+pub(crate) use wdf_struct_size;
+

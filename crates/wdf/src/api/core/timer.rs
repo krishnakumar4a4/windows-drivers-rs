@@ -6,8 +6,9 @@ use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_TIMER_
 use super::{
     device::Device,
     error::NtResult,
-    object::{impl_ref_counted_handle, init_attributes, wdf_struct_size, Handle},
+    object::{impl_ref_counted_handle, init_attributes, Handle},
     sync::Arc,
+    wdf_struct_size,
 };
 
 // TODO: Make timer more ergonomic and safer. It's

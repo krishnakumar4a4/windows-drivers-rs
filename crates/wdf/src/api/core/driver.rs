@@ -25,9 +25,10 @@ use super::{
     device::DeviceInit,
     error::{NtError, NtResult, NtStatus},
     guid::Guid,
-    object::{wdf_struct_size, Handle},
+    object::Handle,
     string::{to_rust_str, WString},
     tracing::TraceWriter,
+    wdf_struct_size,
 };
 use crate::println;
 

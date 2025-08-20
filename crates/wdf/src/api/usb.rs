@@ -19,9 +19,10 @@ use wdk_sys::{
 use super::core::{
     device::Device,
     error::NtResult,
-    object::{impl_handle, impl_ref_counted_handle, wdf_struct_size, Handle},
+    object::{impl_handle, impl_ref_counted_handle, Handle},
     sync::Arc,
     utils::safe_c_enum,
+    wdf_struct_size,
 };
 
 impl_ref_counted_handle!(UsbDevice, UsbDeviceContext);

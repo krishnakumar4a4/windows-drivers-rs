@@ -16,9 +16,11 @@ use wdk_sys::{
 use super::{
     device::Device,
     error::NtError,
-    object::{impl_ref_counted_handle, wdf_struct_size, Handle},
+    object::{impl_ref_counted_handle, Handle},
     request::Request,
     sync::Arc,
+    TriState,
+    wdf_struct_size,
 };
 
 impl_ref_counted_handle!(IoQueue, IoQueueContext);
@@ -107,13 +109,6 @@ impl Into<WDF_IO_QUEUE_DISPATCH_TYPE> for IoQueueDispatchType {
             IoQueueDispatchType::Manual => _WDF_IO_QUEUE_DISPATCH_TYPE::WdfIoQueueDispatchManual,
         }
     }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum TriState {
-    False = 0,
-    True = 1,
-    UseDefault = 2,
 }
 
 pub struct IoQueueConfig {

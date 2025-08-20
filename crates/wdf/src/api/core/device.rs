@@ -21,10 +21,11 @@ use super::{
     error::NtResult,
     guid::Guid,
     io_queue::IoQueue,
-    object::{impl_ref_counted_handle, wdf_struct_size, Handle},
+    object::{impl_ref_counted_handle, Handle},
     resource::CmResList,
     string::{to_unicode_string, to_utf16_buf},
     utils::safe_c_enum,
+    wdf_struct_size,
 };
 
 impl_ref_counted_handle!(Device, DeviceContext);
