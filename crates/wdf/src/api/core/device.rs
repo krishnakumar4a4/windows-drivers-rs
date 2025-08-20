@@ -4,6 +4,7 @@ use wdf_macros::internal_object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
     BOOLEAN,
+    DEVICE_POWER_STATE,
     DEVICE_RELATION_TYPE,
     NTSTATUS,
     NT_SUCCESS,
@@ -14,6 +15,10 @@ use wdk_sys::{
     WDF_NO_OBJECT_ATTRIBUTES,
     WDF_PNPPOWER_EVENT_CALLBACKS,
     WDF_POWER_DEVICE_STATE,
+    WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
+    WDF_POWER_POLICY_IDLE_TIMEOUT_TYPE,
+    WDF_POWER_POLICY_S0_IDLE_CAPABILITIES,
+    WDF_POWER_POLICY_S0_IDLE_USER_CONTROL,
     WDF_SPECIAL_FILE_TYPE,
 };
 
@@ -25,6 +30,7 @@ use super::{
     resource::CmResList,
     safe_c_enum,
     string::{to_unicode_string, to_utf16_buf},
+    TriState,
     wdf_struct_size,
 };
 
@@ -388,4 +394,64 @@ fn to_rust_special_file_type_enum(file_type: WDF_SPECIAL_FILE_TYPE) -> SpecialFi
 fn to_rust_device_relation_type_enum(relation_type: DEVICE_RELATION_TYPE) -> DeviceRelationType {
     DeviceRelationType::try_from(relation_type)
         .expect("framework should not send invalid DEVICE_RELATION_TYPE")
+}
+
+pub struct DevicePowerPolicyIdleSettings {
+    pub idle_caps: PowerPolicyS0IdleCapabilities,
+    pub dx_state: DevicePowerState,
+    pub idle_timeout: u32,
+    pub user_control_of_idle_settings: PowerPolicyS0IdleUserControl,
+    pub enabled: TriState,
+    pub power_up_idle_device_on_system_wake: TriState,
+    pub idle_timeout_type: PowerPolicyIdleTimeoutType,
+    pub exclude_d3_cold: TriState,
+}
+
+impl From<WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS> for DevicePowerPolicyIdleSettings {
+    fn from(settings: WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS) -> Self {
+        Self {
+            idle_caps: settings.IdleCaps.try_into().expect("invalid IdleCaps"),
+            dx_state: settings.DxState.try_into().expect("invalid DxState"),
+            idle_timeout: settings.IdleTimeout,
+            user_control_of_idle_settings: settings.UserControlOfIdleSettings.try_into().expect("invalid UserControlOfIdleSettings"),
+            enabled: settings.Enabled.try_into().expect("invalid Enabled"),
+            power_up_idle_device_on_system_wake: settings.PowerUpIdleDeviceOnSystemWake.try_into().expect("invalid PowerUpIdleDeviceOnSystemWake"),
+            idle_timeout_type: settings.IdleTimeoutType.try_into().expect("invalid IdleTimeoutType"),
+            exclude_d3_cold: settings.ExcludeD3Cold.try_into().expect("invalid ExcludeD3Cold"),
+        }
+    }
+}
+
+safe_c_enum! {
+    pub enum PowerPolicyS0IdleCapabilities: WDF_POWER_POLICY_S0_IDLE_CAPABILITIES {
+        CannotWakeFromS0 = IdleCannotWakeFromS0,
+        CanWakeFromS0 = IdleCanWakeFromS0,
+        UsbSelectiveSuspend = IdleUsbSelectiveSuspend
+    }
+}
+
+safe_c_enum! {
+    pub enum DevicePowerState: DEVICE_POWER_STATE {
+        Unspecified = PowerDeviceUnspecified,
+        D0 = PowerDeviceD0,
+        D1 = PowerDeviceD1,
+        D2 = PowerDeviceD2,
+        D3 = PowerDeviceD3,
+    }
+}
+
+safe_c_enum! {
+    pub enum PowerPolicyS0IdleUserControl: WDF_POWER_POLICY_S0_IDLE_USER_CONTROL {
+        Invalid = IdleUserControlInvalid,
+        DoNotAllowUserControl = IdleDoNotAllowUserControl,
+        AllowUserControl = IdleAllowUserControl
+    }
+}
+
+safe_c_enum! {
+    pub enum PowerPolicyIdleTimeoutType: WDF_POWER_POLICY_IDLE_TIMEOUT_TYPE {
+        DriverManagedIdleTimeout = DriverManagedIdleTimeout,
+        SystemManagedIdleTimeout = SystemManagedIdleTimeout,
+        SystemManagedIdleTimeoutWithHint = SystemManagedIdleTimeoutWithHint
+    }
 }

@@ -28,12 +28,14 @@ pub use timer::*;
 pub use wdf_macros::*;
 pub use wdk::println;
 
+use wdk_sys::WDF_TRI_STATE;
 
-#[derive(Copy, Clone, Debug)]
-pub enum TriState {
-    False = 0,
-    True = 1,
-    UseDefault = 2,
+safe_c_enum! {
+    pub enum TriState: WDF_TRI_STATE {
+        False = WdfFalse,
+        True = WdfTrue,
+        UseDefault = WdfUseDefault
+    }
 }
 
 macro_rules! wdf_struct_size {
