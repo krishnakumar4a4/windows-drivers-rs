@@ -232,6 +232,17 @@ impl UsbInterface {
 
 impl_handle!(UsbPipe);
 
+impl UsbPipe {
+    pub fn set_no_maximum_packet_size_check(&self) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbTargetPipeSetNoMaximumPacketSizeCheck,
+                self.as_ptr() as *mut _
+            )
+        }
+    }
+}
+
 pub struct UsbPipeInformation {
     pub maximum_packet_size: u32,
     pub endpoint_address: u8,
