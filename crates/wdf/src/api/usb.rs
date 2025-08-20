@@ -172,6 +172,10 @@ pub struct UsbSingleInterfaceInformation<'a> {
 impl_handle!(UsbInterface);
 
 impl UsbInterface {
+    // TODO - UNSOUNDNESS: the framework can delete the pipe returned here
+    // while the caller has got a hold hold of it. it happens if the
+    // alternate settings of this interface are changed.
+    // Need to plug this soundness hole.
     pub fn get_configured_pipe<'a>(&self, pipe_index: u8) -> Option<&'a UsbPipe> {
         self.get_configured_pipe_impl(pipe_index, false)
             .map(|(pipe, _)| pipe)
