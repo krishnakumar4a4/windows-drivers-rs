@@ -8,6 +8,7 @@ use wdk_sys::{
     NT_SUCCESS,
     USBD_VERSION_INFORMATION,
     WDFUSBDEVICE,
+    WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
     WDF_NO_OBJECT_ATTRIBUTES,
     WDF_USB_DEVICE_CREATE_CONFIG,
     WDF_USB_DEVICE_INFORMATION,
@@ -17,7 +18,7 @@ use wdk_sys::{
 };
 
 use super::core::{
-    device::Device,
+    device::{Device, DevicePowerPolicyIdleSettings},
     error::NtResult,
     object::{impl_handle, impl_ref_counted_handle, Handle},
     safe_c_enum,
@@ -103,6 +104,25 @@ impl UsbDevice {
                 },
             };
             Ok(info)
+        } else {
+            Err(status.into())
+        }
+    }
+
+    pub fn assign_s0_idle_settings(
+        &self,
+    ) -> NtResult<DevicePowerPolicyIdleSettings> {
+        let mut settings = WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS::default();
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceAssignS0IdleSettings,
+                self.as_ptr() as *mut _,
+                &mut settings
+            )
+        };
+
+        if NT_SUCCESS(status) {
+            Ok(settings.into())
         } else {
             Err(status.into())
         }
