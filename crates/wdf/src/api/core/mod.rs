@@ -31,6 +31,7 @@ pub use wdk::println;
 use wdk_sys::WDF_TRI_STATE;
 
 safe_c_enum! {
+    infallible;
     pub enum TriState: WDF_TRI_STATE {
         False = WdfFalse,
         True = WdfTrue,
@@ -62,8 +63,7 @@ pub(crate) use wdf_struct_size;
 ///
 /// It implements Copy, Clone, Debug, PartialEq, and Eq traits
 /// for the Rust enum and generates a From implementation to
-/// convert from the Rust enum to the C enum and a TryFrom
-/// implementation to convert in the opposite direction
+/// convert from the Rust enum to the C enum and back.
 ///
 /// It also allows you to specify attributes on top of the
 /// enum like #[repr(C)]
@@ -77,8 +77,15 @@ pub(crate) use wdf_struct_size;
 ///     WdfPowerSleep,
 ///     WdfPowerHibernate
 /// } WDF_POWER_STATE;
-/// ```
-/// The corresponding Rust enum can be defined as:
+/// 
+/// the macro defines a Rust enum that maps it to a Rust enum.
+/// 
+/// By default, the conversion from the C type to the Rust enum is fallible (using `TryFrom`).
+/// If you want the conversion to be infallible (using `From`), specify `infallible;` as the first argument.
+/// 
+/// # Examples
+/// 
+/// Fallible (default):
 /// ```rust
 /// safe_c_enum! {
 ///     #[repr(C)]
@@ -89,42 +96,85 @@ pub(crate) use wdf_struct_size;
 ///     }
 /// }
 /// ```
+/// 
+/// Infallible:
+/// ```rust
+/// safe_c_enum! {
+///     infallible;
+///     #[repr(C)]
+///     pub enum PowerState: WDF_POWER_STATE {
+///         Value1 = WdfPowerRunning,
+///         Value2 = WdfPowerSleep,
+///         Value3 = WdfPowerHibernate
+///     }
+/// }
+/// ```
 macro_rules! safe_c_enum {
-    (
+    // Helper for enum definition
+    (@enumdef
         $(#[$enum_meta:meta])*
         $vis:vis enum $safe_name:ident : $c_type:ident {
-            $(
-                $variant:ident = $c_variant:ident
-            ),* $(,)?
+            $( $variant:ident = $c_variant:ident ),* $(,)?
         }
     ) => {
         paste::paste! {
             $(#[$enum_meta])*
             #[derive(Copy, Clone, Debug, PartialEq, Eq)]
             $vis enum $safe_name {
-                $(
-                    $variant
-                ),*
+                $( $variant ),*
             }
-
+        }
+    };
+    // Helper for From<$safe_name> for $c_type
+    (@from_safe_to_c
+        $safe_name:ident, $c_type:ident, $( $variant:ident = $c_variant:ident ),*
+    ) => {
+        paste::paste! {
             impl From<$safe_name> for $c_type {
                 fn from(value: $safe_name) -> Self {
                     match value {
-                        $(
-                            $safe_name::$variant => wdk_sys::[<_ $c_type>]::$c_variant
-                        ),*
+                        $( $safe_name::$variant => wdk_sys::[<_ $c_type>]::$c_variant ),*
                     }
                 }
             }
-
+        }
+    };
+    // Infallible conversion
+    (
+        infallible;
+        $(#[$enum_meta:meta])*
+        $vis:vis enum $safe_name:ident : $c_type:ident {
+            $( $variant:ident = $c_variant:ident ),* $(,)?
+        }
+    ) => {
+        safe_c_enum!(@enumdef $(#[$enum_meta])* $vis enum $safe_name : $c_type { $( $variant = $c_variant ),* });
+        safe_c_enum!(@from_safe_to_c $safe_name, $c_type, $( $variant = $c_variant ),*);
+        paste::paste! {
+            impl From<$c_type> for $safe_name {
+                fn from(value: $c_type) -> Self {
+                    match value {
+                        $( v if v == wdk_sys::[<_ $c_type>]::$c_variant => $safe_name::$variant, )*
+                        _ => unreachable!("Invalid value for {}", stringify!($safe_name)),
+                    }
+                }
+            }
+        }
+    };
+    // Fallible conversion (default)
+    (
+        $(#[$enum_meta:meta])*
+        $vis:vis enum $safe_name:ident : $c_type:ident {
+            $( $variant:ident = $c_variant:ident ),* $(,)?
+        }
+    ) => {
+        safe_c_enum!(@enumdef $(#[$enum_meta])* $vis enum $safe_name : $c_type { $( $variant = $c_variant ),* });
+        safe_c_enum!(@from_safe_to_c $safe_name, $c_type, $( $variant = $c_variant ),*);
+        paste::paste! {
             impl TryFrom<$c_type> for $safe_name {
                 type Error = ();
-
                 fn try_from(value: $c_type) -> Result<Self, Self::Error> {
                     match value {
-                        $(
-                            v if v == wdk_sys::[<_ $c_type>]::$c_variant => Ok($safe_name::$variant),
-                        )*
+                        $( v if v == wdk_sys::[<_ $c_type>]::$c_variant => Ok($safe_name::$variant), )*
                         _ => Err(()),
                     }
                 }

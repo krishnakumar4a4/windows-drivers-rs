@@ -414,10 +414,10 @@ impl From<WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS> for DevicePowerPolicyIdleSettin
             dx_state: settings.DxState.try_into().expect("invalid DxState"),
             idle_timeout: settings.IdleTimeout,
             user_control_of_idle_settings: settings.UserControlOfIdleSettings.try_into().expect("invalid UserControlOfIdleSettings"),
-            enabled: settings.Enabled.try_into().expect("invalid Enabled"),
-            power_up_idle_device_on_system_wake: settings.PowerUpIdleDeviceOnSystemWake.try_into().expect("invalid PowerUpIdleDeviceOnSystemWake"),
+            enabled: settings.Enabled.into(),
+            power_up_idle_device_on_system_wake: settings.PowerUpIdleDeviceOnSystemWake.into(),
             idle_timeout_type: settings.IdleTimeoutType.try_into().expect("invalid IdleTimeoutType"),
-            exclude_d3_cold: settings.ExcludeD3Cold.try_into().expect("invalid ExcludeD3Cold"),
+            exclude_d3_cold: settings.ExcludeD3Cold.into(),
         }
     }
 }
