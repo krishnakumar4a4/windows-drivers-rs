@@ -20,8 +20,8 @@ use super::core::{
     device::Device,
     error::NtResult,
     object::{impl_handle, impl_ref_counted_handle, Handle},
+    safe_c_enum,
     sync::Arc,
-    utils::safe_c_enum,
     wdf_struct_size,
 };
 

@@ -23,8 +23,8 @@ use super::{
     io_queue::IoQueue,
     object::{impl_ref_counted_handle, Handle},
     resource::CmResList,
+    safe_c_enum,
     string::{to_unicode_string, to_utf16_buf},
-    utils::safe_c_enum,
     wdf_struct_size,
 };
 
