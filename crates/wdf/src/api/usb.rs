@@ -4,28 +4,40 @@ use bitflags::bitflags;
 use wdf_macros::internal_object_context;
 use wdk_sys::{
     _WdfUsbTargetDeviceSelectConfigType,
+    BOOLEAN,
     call_unsafe_wdf_function_binding,
     NT_SUCCESS,
+    NTSTATUS,
     USBD_VERSION_INFORMATION,
+    USBD_STATUS,
+    WDFCONTEXT,
+    WDFMEMORY,
     WDFUSBDEVICE,
     WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
     WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS,
     WDF_NO_OBJECT_ATTRIBUTES,
+    WDF_USB_CONTINUOUS_READER_CONFIG,
     WDF_USB_DEVICE_CREATE_CONFIG,
     WDF_USB_DEVICE_INFORMATION,
     WDF_USB_DEVICE_SELECT_CONFIG_PARAMS,
     WDF_USB_PIPE_INFORMATION,
     WDF_USB_PIPE_TYPE,
+    WDFUSBPIPE,
+
 };
 
 use super::core::{
     device::{Device, DevicePowerPolicyIdleSettings, DevicePowerPolicyWakeSettings},
-    error::NtResult,
+    error::{NtResult, NtStatus},
+    memory::Memory,
     object::{impl_handle, impl_ref_counted_handle, Handle},
     enum_mapping,
     sync::Arc,
     wdf_struct_size,
 };
+
+
+use wdf_macros::object_context;
 
 impl_ref_counted_handle!(UsbDevice, UsbDeviceContext);
 
@@ -35,7 +47,7 @@ impl UsbDevice {
         config: &UsbDeviceCreateConfig,
     ) -> NtResult<Arc<Self>> {
         let mut usb_device: WDFUSBDEVICE = core::ptr::null_mut();
-        let mut config = to_unsafe_config(config);
+        let mut config = config.into();
 
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
@@ -197,13 +209,14 @@ bitflags! {
     }
 }
 
-fn to_unsafe_config(safe_config: &UsbDeviceCreateConfig) -> WDF_USB_DEVICE_CREATE_CONFIG {
-    let mut config = WDF_USB_DEVICE_CREATE_CONFIG::default();
+impl From<&UsbDeviceCreateConfig> for WDF_USB_DEVICE_CREATE_CONFIG {
+    fn from(safe_config: &UsbDeviceCreateConfig) -> Self {
+        let mut config = WDF_USB_DEVICE_CREATE_CONFIG::default();
+        config.Size = wdf_struct_size!(WDF_USB_DEVICE_CREATE_CONFIG);
+        config.USBDClientContractVersion = safe_config.usbd_client_contract_version;
 
-    config.Size = wdf_struct_size!(WDF_USB_DEVICE_CREATE_CONFIG);
-    config.USBDClientContractVersion = safe_config.usbd_client_contract_version;
-
-    config
+        config
+    }
 }
 
 pub struct UsbSingleInterfaceInformation<'a> {
@@ -283,6 +296,42 @@ impl UsbPipe {
             )
         }
     }
+
+    pub fn config_continuous_reader(&self, config: &UsbContinuousReaderConfig) -> NtResult<()> {
+        // TODO: if this function is called more than once, we need to handle
+        // the case where the context is already attached.
+        // Actually we plan to not have this function at all and in fact
+        // allow the user to set up the reader only once while creating 
+        // the USB device. Then this problem will be removed entirely.
+        let ctxt = UsbPipeContinuousReaderContext {
+            read_complete_callback: config.read_complete_callback,
+            readers_failed_callback: config.readers_failed_callback,
+        };
+
+        UsbPipeContinuousReaderContext::attach(self, ctxt)?;
+
+        let mut config = config.into();
+
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbTargetPipeConfigContinuousReader,
+                self.as_ptr() as *mut _,
+                &mut config
+            )
+        };
+
+        if NT_SUCCESS(status) {
+            Ok(())
+        } else {
+            Err(status.into())
+        }
+    }
+}
+
+#[object_context(UsbPipe)]
+struct UsbPipeContinuousReaderContext {
+    read_complete_callback: Option<fn(&UsbPipe, &Memory, usize)>,
+    readers_failed_callback: Option<fn(&UsbPipe, NtStatus, UsbdStatus) -> bool>,
 }
 
 pub struct UsbPipeInformation {
@@ -315,4 +364,103 @@ enum_mapping! {
         Bulk = WdfUsbPipeTypeBulk,
         Interrupt = WdfUsbPipeTypeInterrupt
     }
+}
+
+pub struct UsbContinuousReaderConfig {
+    pub transfer_length: usize,
+    pub header_length: usize,
+    pub trailer_length: usize,
+    pub num_pending_reads: u8,
+
+    // TODO: omitting the context param for now (see below comment)
+    pub read_complete_callback: Option<fn(&UsbPipe, &Memory, usize)>,
+    // TODO: for now not passing any context because it is hard to
+    // decide what it type should be how and when we will drop it
+    // WDF seems to internally keep the context pointer and doesn't
+    // tell us when it's done with it which makes drop hard.
+    // pub read_complete_context: Option<Arc<dyn super::object::ObjectContext>>,
+    pub readers_failed_callback: Option<fn(&UsbPipe, NtStatus, UsbdStatus) -> bool>,
+}
+
+impl From<&UsbContinuousReaderConfig> for WDF_USB_CONTINUOUS_READER_CONFIG {
+    fn from(safe_config: &UsbContinuousReaderConfig) -> Self {
+        let mut unsafe_config = WDF_USB_CONTINUOUS_READER_CONFIG::default();
+        unsafe_config.Size = wdf_struct_size!(WDF_USB_CONTINUOUS_READER_CONFIG);
+        unsafe_config.TransferLength = safe_config.transfer_length;
+        unsafe_config.HeaderLength = safe_config.header_length;
+        unsafe_config.TrailerLength = safe_config.trailer_length;
+        unsafe_config.NumPendingReads = safe_config.num_pending_reads;
+
+        // TODO: setting to no attributes for now.
+        // Will come back to it later
+        unsafe_config.BufferAttributes = WDF_NO_OBJECT_ATTRIBUTES;
+
+        if safe_config.read_complete_callback.is_some() {
+            unsafe_config.EvtUsbTargetPipeReadComplete = Some(__evt_usb_target_pipe_read_complete);
+        }
+
+        // TODO: not supporting context for now because we're not
+        // clear on what type it should have and the soundness issues.
+        unsafe_config.EvtUsbTargetPipeReadCompleteContext = ptr::null_mut();
+
+        if safe_config.readers_failed_callback.is_some() {
+            unsafe_config.EvtUsbTargetPipeReadersFailed = Some(__evt_usb_target_pipe_readers_failed);
+        }
+
+        unsafe_config
+    }
+}
+
+pub struct UsbdStatus(u32);
+
+impl UsbdStatus {
+    pub fn new(status: u32) -> Self {
+        Self(status)
+    }
+
+    pub fn inner(&self) -> u32 {
+        self.0
+    }
+}
+
+pub extern "C" fn __evt_usb_target_pipe_read_complete(
+    pipe: WDFUSBPIPE,
+    buffer: WDFMEMORY,
+    num_bytes_transferred: usize,
+    _context: WDFCONTEXT,
+) {
+    let pipe = unsafe { &*(pipe as *const UsbPipe) };
+
+    if let Some(ctxt) = UsbPipeContinuousReaderContext::get(pipe) {
+        if let Some(callback) = ctxt.read_complete_callback {
+            let buffer: &Memory = unsafe { &*(buffer as *const Memory) };
+            callback(pipe, buffer, num_bytes_transferred);
+            return;
+        }
+    }
+
+    panic!(
+        "User did not provide callback read_complete_callback but we subscribed to it"
+    );
+}
+
+pub extern "C" fn __evt_usb_target_pipe_readers_failed(
+    pipe: WDFUSBPIPE,
+    status: NTSTATUS,
+    usbd_status: USBD_STATUS,
+) -> BOOLEAN {
+    let pipe = unsafe { &*(pipe as *const UsbPipe) };
+
+    if let Some(ctxt) = UsbPipeContinuousReaderContext::get(pipe) {
+        if let Some(callback) = ctxt.readers_failed_callback {
+            let nt_status: NtStatus = status.into();
+            let usbd = UsbdStatus::new(usbd_status as u32);
+            let result = callback(pipe, nt_status, usbd);
+            return if result { 1 } else { 0 };
+        }
+    }
+
+    panic!(
+        "User did not provide callback readers_failed_callback but we subscribed to it"
+    );
 }
