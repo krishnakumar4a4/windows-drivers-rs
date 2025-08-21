@@ -29,6 +29,7 @@ use wdk_sys::{
 use super::core::{
     device::{Device, DevicePowerPolicyIdleSettings, DevicePowerPolicyWakeSettings},
     error::{NtResult, NtStatus},
+    io_target::IoTarget,
     memory::Memory,
     object::{impl_handle, impl_ref_counted_handle, Handle},
     enum_mapping,
@@ -288,6 +289,17 @@ impl UsbInterface {
 impl_handle!(UsbPipe);
 
 impl UsbPipe {
+    pub fn get_io_target(&self) -> &IoTarget {
+        unsafe {
+            let io_target = call_unsafe_wdf_function_binding!(
+                WdfUsbTargetPipeGetIoTarget,
+                self.as_ptr() as *mut _
+            );
+
+            &*(io_target as *const IoTarget)
+        }
+    }
+
     pub fn set_no_maximum_packet_size_check(&self) {
         unsafe {
             call_unsafe_wdf_function_binding!(
