@@ -16,9 +16,11 @@ use wdk_sys::{
     WDF_PNPPOWER_EVENT_CALLBACKS,
     WDF_POWER_DEVICE_STATE,
     WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
+    WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS,
     WDF_POWER_POLICY_IDLE_TIMEOUT_TYPE,
     WDF_POWER_POLICY_S0_IDLE_CAPABILITIES,
     WDF_POWER_POLICY_S0_IDLE_USER_CONTROL,
+    WDF_POWER_POLICY_SX_WAKE_USER_CONTROL,
     WDF_SPECIAL_FILE_TYPE,
 };
 
@@ -453,5 +455,32 @@ safe_c_enum! {
         DriverManagedIdleTimeout = DriverManagedIdleTimeout,
         SystemManagedIdleTimeout = SystemManagedIdleTimeout,
         SystemManagedIdleTimeoutWithHint = SystemManagedIdleTimeoutWithHint
+    }
+}
+
+pub struct DevicePowerPolicyWakeSettings {
+    pub dx_state: DevicePowerState,
+    pub user_control_of_wake_settings: PowerPolicySxWakeUserControl,
+    pub enabled: TriState,
+    pub arm_for_wake_if_children_are_armed_for_wake: bool,
+    pub indicate_child_wake_on_parent_wake: bool,
+}
+
+impl From<WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS> for DevicePowerPolicyWakeSettings {
+    fn from(settings: WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS) -> Self {
+        Self {
+            dx_state: settings.DxState.try_into().expect("invalid DxState"),
+            user_control_of_wake_settings: settings.UserControlOfWakeSettings.try_into().expect("invalid UserControlOfWakeSettings"),
+            enabled: settings.Enabled.into(),
+            arm_for_wake_if_children_are_armed_for_wake: settings.ArmForWakeIfChildrenAreArmedForWake != 0,
+            indicate_child_wake_on_parent_wake: settings.IndicateChildWakeOnParentWake != 0,
+        }
+    }
+}
+
+safe_c_enum! {
+    pub enum PowerPolicySxWakeUserControl: WDF_POWER_POLICY_SX_WAKE_USER_CONTROL {
+        DoNotAllowUserControl = WakeDoNotAllowUserControl,
+        AllowUserControl = WakeAllowUserControl
     }
 }
