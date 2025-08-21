@@ -30,7 +30,7 @@ use super::{
     io_queue::IoQueue,
     object::{impl_ref_counted_handle, Handle},
     resource::CmResList,
-    safe_c_enum,
+    enum_mapping,
     string::{to_unicode_string, to_utf16_buf},
     TriState,
     wdf_struct_size,
@@ -184,7 +184,7 @@ impl Default for PnpPowerEventCallbacks {
     }
 }
 
-safe_c_enum! {
+enum_mapping! {
     pub enum PowerDeviceState: WDF_POWER_DEVICE_STATE {
         Invalid = WdfPowerDeviceInvalid,
         D0 = WdfPowerDeviceD0,
@@ -196,7 +196,7 @@ safe_c_enum! {
     }
 }
 
-safe_c_enum! {
+enum_mapping! {
     pub enum SpecialFileType: WDF_SPECIAL_FILE_TYPE {
         Paging = WdfSpecialFilePaging,
         Hibernation = WdfSpecialFileHibernation,
@@ -208,7 +208,7 @@ safe_c_enum! {
     }
 }
 
-safe_c_enum! {
+enum_mapping! {
     pub enum DeviceRelationType: DEVICE_RELATION_TYPE {
         Bus = BusRelations,
         Ejection = EjectionRelations,
@@ -424,7 +424,7 @@ impl From<WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS> for DevicePowerPolicyIdleSettin
     }
 }
 
-safe_c_enum! {
+enum_mapping! {
     pub enum PowerPolicyS0IdleCapabilities: WDF_POWER_POLICY_S0_IDLE_CAPABILITIES {
         CannotWakeFromS0 = IdleCannotWakeFromS0,
         CanWakeFromS0 = IdleCanWakeFromS0,
@@ -432,7 +432,7 @@ safe_c_enum! {
     }
 }
 
-safe_c_enum! {
+enum_mapping! {
     pub enum DevicePowerState: DEVICE_POWER_STATE {
         Unspecified = PowerDeviceUnspecified,
         D0 = PowerDeviceD0,
@@ -442,7 +442,7 @@ safe_c_enum! {
     }
 }
 
-safe_c_enum! {
+enum_mapping! {
     pub enum PowerPolicyS0IdleUserControl: WDF_POWER_POLICY_S0_IDLE_USER_CONTROL {
         Invalid = IdleUserControlInvalid,
         DoNotAllowUserControl = IdleDoNotAllowUserControl,
@@ -450,7 +450,7 @@ safe_c_enum! {
     }
 }
 
-safe_c_enum! {
+enum_mapping! {
     pub enum PowerPolicyIdleTimeoutType: WDF_POWER_POLICY_IDLE_TIMEOUT_TYPE {
         DriverManagedIdleTimeout = DriverManagedIdleTimeout,
         SystemManagedIdleTimeout = SystemManagedIdleTimeout,
@@ -478,7 +478,7 @@ impl From<WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS> for DevicePowerPolicyWakeSettin
     }
 }
 
-safe_c_enum! {
+enum_mapping! {
     pub enum PowerPolicySxWakeUserControl: WDF_POWER_POLICY_SX_WAKE_USER_CONTROL {
         DoNotAllowUserControl = WakeDoNotAllowUserControl,
         AllowUserControl = WakeAllowUserControl

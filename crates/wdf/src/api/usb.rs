@@ -22,7 +22,7 @@ use super::core::{
     device::{Device, DevicePowerPolicyIdleSettings, DevicePowerPolicyWakeSettings},
     error::NtResult,
     object::{impl_handle, impl_ref_counted_handle, Handle},
-    safe_c_enum,
+    enum_mapping,
     sync::Arc,
     wdf_struct_size,
 };
@@ -308,7 +308,7 @@ impl From<WDF_USB_PIPE_INFORMATION> for UsbPipeInformation {
     }
 }
 
-safe_c_enum! {
+enum_mapping! {
     pub enum UsbPipeType: WDF_USB_PIPE_TYPE {
         Control = WdfUsbPipeTypeControl,
         Isochronous = WdfUsbPipeTypeIsochronous,

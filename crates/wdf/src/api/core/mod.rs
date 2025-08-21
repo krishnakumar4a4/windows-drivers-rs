@@ -30,7 +30,7 @@ pub use wdk::println;
 
 use wdk_sys::WDF_TRI_STATE;
 
-safe_c_enum! {
+enum_mapping! {
     infallible;
     pub enum TriState: WDF_TRI_STATE {
         False = WdfFalse,
@@ -87,7 +87,7 @@ pub(crate) use wdf_struct_size;
 /// 
 /// Fallible (default):
 /// ```rust
-/// safe_c_enum! {
+/// enum_mapping! {
 ///     #[repr(C)]
 ///     pub enum PowerState: WDF_POWER_STATE {
 ///         Value1 = WdfPowerRunning,
@@ -99,7 +99,7 @@ pub(crate) use wdf_struct_size;
 /// 
 /// Infallible:
 /// ```rust
-/// safe_c_enum! {
+/// enum_mapping! {
 ///     infallible;
 ///     #[repr(C)]
 ///     pub enum PowerState: WDF_POWER_STATE {
@@ -109,7 +109,7 @@ pub(crate) use wdf_struct_size;
 ///     }
 /// }
 /// ```
-macro_rules! safe_c_enum {
+macro_rules! enum_mapping {
     // Helper for enum definition
     (@enumdef
         $(#[$enum_meta:meta])*
@@ -147,8 +147,8 @@ macro_rules! safe_c_enum {
             $( $variant:ident = $c_variant:ident ),* $(,)?
         }
     ) => {
-        safe_c_enum!(@enumdef $(#[$enum_meta])* $vis enum $safe_name : $c_type { $( $variant = $c_variant ),* });
-        safe_c_enum!(@from_safe_to_c $safe_name, $c_type, $( $variant = $c_variant ),*);
+        enum_mapping!(@enumdef $(#[$enum_meta])* $vis enum $safe_name : $c_type { $( $variant = $c_variant ),* });
+        enum_mapping!(@from_safe_to_c $safe_name, $c_type, $( $variant = $c_variant ),*);
         paste::paste! {
             impl From<$c_type> for $safe_name {
                 fn from(value: $c_type) -> Self {
@@ -167,8 +167,8 @@ macro_rules! safe_c_enum {
             $( $variant:ident = $c_variant:ident ),* $(,)?
         }
     ) => {
-        safe_c_enum!(@enumdef $(#[$enum_meta])* $vis enum $safe_name : $c_type { $( $variant = $c_variant ),* });
-        safe_c_enum!(@from_safe_to_c $safe_name, $c_type, $( $variant = $c_variant ),*);
+        enum_mapping!(@enumdef $(#[$enum_meta])* $vis enum $safe_name : $c_type { $( $variant = $c_variant ),* });
+        enum_mapping!(@from_safe_to_c $safe_name, $c_type, $( $variant = $c_variant ),*);
         paste::paste! {
             impl TryFrom<$c_type> for $safe_name {
                 type Error = ();
@@ -183,6 +183,6 @@ macro_rules! safe_c_enum {
     };
 }
 
-pub(crate) use safe_c_enum;
+pub(crate) use enum_mapping;
 
 
