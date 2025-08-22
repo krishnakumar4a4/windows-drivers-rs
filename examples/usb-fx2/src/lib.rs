@@ -81,7 +81,7 @@ fn evt_device_prepare_hardware(
     trace("Device prepare hardware callback called");
 
     if let Some(device_context) = DeviceContext::get(device) {
-        let usb_device = UsbDevice::create_with_parameters(
+        let usb_device = UsbDevice::create(
             device,
             &UsbDeviceCreateConfig {
                 usbd_client_contract_version: 0x0100_0000,

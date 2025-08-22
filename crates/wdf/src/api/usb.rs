@@ -43,7 +43,7 @@ use wdf_macros::object_context;
 impl_ref_counted_handle!(UsbDevice, UsbDeviceContext);
 
 impl UsbDevice {
-    pub fn create_with_parameters(
+    pub fn create(
         device: &Device,
         config: &UsbDeviceCreateConfig,
     ) -> NtResult<Arc<Self>> {
