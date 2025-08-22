@@ -9,7 +9,6 @@ use wdk_sys::{
     WDF_IO_QUEUE_CONFIG,
     WDF_IO_QUEUE_DISPATCH_TYPE,
     WDF_NO_OBJECT_ATTRIBUTES,
-    WDF_OBJECT_ATTRIBUTES,
     _WDF_IO_QUEUE_DISPATCH_TYPE,
 };
 
@@ -27,14 +26,6 @@ impl_ref_counted_handle!(IoQueue, IoQueueContext);
 
 impl IoQueue {
     pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Arc<Self>, NtError> {
-        unsafe { Self::create_with_attributes(device, queue_config, WDF_NO_OBJECT_ATTRIBUTES) }
-    }
-
-    unsafe fn create_with_attributes(
-        device: &Device,
-        queue_config: &IoQueueConfig,
-        attributes: *mut WDF_OBJECT_ATTRIBUTES,
-    ) -> Result<Arc<Self>, NtError> {
         let mut config = to_unsafe_config(&queue_config);
         let mut queue: WDFQUEUE = core::ptr::null_mut();
 
@@ -43,7 +34,7 @@ impl IoQueue {
                 WdfIoQueueCreate,
                 device.as_ptr() as *mut _,
                 &mut config as *mut _,
-                attributes,
+                WDF_NO_OBJECT_ATTRIBUTES,
                 &mut queue,
             )
         };
