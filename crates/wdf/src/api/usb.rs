@@ -290,13 +290,10 @@ impl_handle!(UsbPipe);
 
 impl UsbPipe {
     pub fn get_io_target(&self) -> &IoTarget {
+        // SAFETY: The pipe pointer is also a valid
+        // I/O target pointer. Hence this case is safe
         unsafe {
-            let io_target = call_unsafe_wdf_function_binding!(
-                WdfUsbTargetPipeGetIoTarget,
-                self.as_ptr() as *mut _
-            );
-
-            &*(io_target as *const IoTarget)
+            &*(self.as_ptr() as *const IoTarget)
         }
     }
 
