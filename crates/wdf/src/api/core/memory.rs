@@ -7,6 +7,15 @@ use super::{
 
 impl_handle!(Memory);
 
+// TODO: the copy_*_buffer methods are not thread safe.
+// However at this moment the only way the driver can get
+// access to a Memory object is by calling retrieve_*_memory
+// methods on a request object and request objects always
+// requires a lock to interact with it if it's reachable
+// from multiple threads. So _currently_ these methods are
+// being called in a thread safe way, but that may not remain
+// the case if we support creation of independent Memory objects
+// tomorrow. Fix this!
 impl Memory {
     pub fn copy_from_buffer(&mut self, offset: usize, buffer: &[u8]) -> Result<(), NtError> {
         let status = unsafe {
