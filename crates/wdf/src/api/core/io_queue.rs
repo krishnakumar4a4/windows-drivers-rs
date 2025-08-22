@@ -77,6 +77,23 @@ impl IoQueue {
             call_unsafe_wdf_function_binding!(WdfIoQueueStopSynchronously, self.as_ptr() as *mut _,);
         }
     }
+
+    pub fn retrieve_next_request(&self) -> NtResult<Request> {
+        let mut request: WDFREQUEST = core::ptr::null_mut();
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfIoQueueRetrieveNextRequest,
+                self.as_ptr() as *mut _,
+                &mut request
+            )
+        };
+
+        if NT_SUCCESS(status) {
+            Ok(unsafe { Request::from_raw(request) })
+        } else {
+            Err(status.into())
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
