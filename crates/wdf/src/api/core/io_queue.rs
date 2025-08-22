@@ -14,7 +14,7 @@ use wdk_sys::{
 
 use super::{
     device::Device,
-    error::NtError,
+    error::{NtError, NtResult},
     object::{impl_ref_counted_handle, Handle},
     request::Request,
     sync::Arc,
@@ -25,7 +25,7 @@ use super::{
 impl_ref_counted_handle!(IoQueue, IoQueueContext);
 
 impl IoQueue {
-    pub fn create(device: &Device, queue_config: &IoQueueConfig) -> Result<Arc<Self>, NtError> {
+    pub fn create(device: &Device, queue_config: &IoQueueConfig) -> NtResult<Arc<Self>> {
         let mut config = to_unsafe_config(&queue_config);
         let mut queue: WDFQUEUE = core::ptr::null_mut();
 
