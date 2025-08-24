@@ -19,9 +19,6 @@ macro_rules! impl_handle {
         #[repr(C)]
         pub struct $obj {
             _private: [u8; 0], // Prevents instantiation of the struct from driver code
-            _no_send_sync: core::marker::PhantomData<*const ()>, /* Prevents Send and Sync
-                                * traits from being
-                                * implemented automatically */
         }
 
         impl crate::api::object::Handle for $obj {
@@ -37,12 +34,6 @@ macro_rules! impl_handle {
                 alloc::string::String::from(name)
             }
         }
-
-        // All WDF objects are thread-safe
-        // and safe to share and send across
-        // threads
-        unsafe impl Sync for $obj {}
-        unsafe impl Send for $obj {}
 
         impl core::fmt::Debug for $obj {
             fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
