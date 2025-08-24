@@ -139,13 +139,17 @@ impl Handle for Request {
     }
 }
 
-/// SAFETY: This is safe because all the WDF functions
-/// that operate on WDFREQUEST do so in a thread-safe manner.
-/// As a result, all the Rust methods on this struct are
-/// also thread-safe.
-/// Note that `Request` is not `Sync` because it can be
-/// it carries subsidiary data like memory buffers which
-/// are not safe to access from multiple threads simultaneously.
+
+/// Although `Request` carries a raw pointer type, `WDFREQUEST`,
+/// it is still `Sync` because all the C methods on `WDFREQUEST`
+/// are thread-safe and therefore all the `Request` methods which
+/// call these C methods are also thread-safe
+unsafe impl Sync for Request {}
+
+/// Although `Request` carries a raw pointer type, `WDFREQUEST`,
+/// it is still `Send` because all the C methods on `WDFREQUEST`
+/// are thread-safe and therefore all the `Request` methods which
+/// call these C methods are also thread-safe
 unsafe impl Send for Request {}
 
 #[object_context(Request)]
