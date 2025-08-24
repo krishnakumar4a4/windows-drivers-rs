@@ -64,6 +64,8 @@ impl IoTarget {
     //     }
     // }
 
+    // TODO: start and stop are not thread-safe. They
+    // cannot be called concurrently with each other. Fix that!
     pub fn start(&self) -> NtResult<()> {
         let status = unsafe { call_unsafe_wdf_function_binding!(WdfIoTargetStart, self.as_ptr() as *mut _) };
         if NT_SUCCESS(status) {
@@ -73,6 +75,8 @@ impl IoTarget {
         }
     }
 
+    // TODO: start and stop are not thread-safe. They
+    // cannot be called concurrently with each other. Fix that!
     pub fn stop(&self, action: IoTargetSentIoAction) {
         let action_val: wdk_sys::WDF_IO_TARGET_SENT_IO_ACTION = action.into();
         unsafe { call_unsafe_wdf_function_binding!(WdfIoTargetStop, self.as_ptr() as *mut _, action_val) }
