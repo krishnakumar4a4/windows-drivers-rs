@@ -23,6 +23,10 @@ pub struct SpinLock<T> {
     data: UnsafeCell<T>,
 }
 
+/// `SpinLock` requires `T` to be `Send` because non-`Send`
+/// types could allow their internal state to be accessible
+/// from another thread which is NOT holding the lock
+/// (case in point being `Rc` from the std lib).
 unsafe impl<T> Sync for SpinLock<T> where T: Send {}
 
 impl<T> SpinLock<T> {
@@ -227,16 +231,16 @@ impl<T: RefCountedHandle> Deref for Arc<T> {
     }
 }
 
-// Safety: `Arc<T>` being `Sync` requires `T` to be `Sync`
-// because sharing it effectively shares `T`. However it
-// also requires `T` to be `Send` because any thread that
-// has `&Arc<T>` can call `clone` on it and get an `Arc<T>`.
-// Later that `Arc<T>` could drop `T` if it is the last
-// reference implying that `T` is effectively moved.
+/// `Arc<T>` being `Sync` requires `T` to be `Sync`
+/// because sharing `Arc<T>` effectively shares `T`. It
+/// also requires `T` to be `Send` because any thread that
+/// has `&Arc<T>` can call `clone` on it and get an `Arc<T>`.
+/// Later that `Arc<T>` could drop `T` if it is the last
+/// reference, implying that `T` is effectively being moved.
 unsafe impl<T: RefCountedHandle + Sync + Send> Sync for Arc<T> {}
 
-// Safety: `Arc<T>` being `Send` requires `T` to be both `Send`
-// and `Sync` for the same reason as above.
+/// `Arc<T>` being `Send` requires `T` to be both `Send`
+/// and `Sync` for the same reason as above.
 unsafe impl<T: RefCountedHandle + Sync + Send> Send for Arc<T> {}
 
 /// Thread-safe version of `OnceCell`
@@ -304,13 +308,13 @@ impl<T> AtomicOnceCell<T> {
     }
 }
 
-// Safety: `AtomicOnceCell` contains two pieces of data:
-// the initialization state and the inner value `T`.
-// The initialization state being atomic is automatically
-// `Sync`. Therefore `AtomicOnceCell` is `Sync` if and
-// only if `T` is `Sync`.
+/// `AtomicOnceCell` contains two pieces of data:
+/// the initialization state and the inner value `T`.
+/// The initialization state being atomic is automatically
+/// `Sync`. Therefore `AtomicOnceCell` is `Sync` if and
+/// only if `T` is `Sync`.
 unsafe impl<T> Sync for AtomicOnceCell<T> where T: Sync {}
 
-// Safety: For the same reason as above, `AtomicOnceCell<T>` is
+/// For the same reason as above, `AtomicOnceCell<T>` is
 // `Send` if and only if `T` is `Send`.
 unsafe impl<T> Send for AtomicOnceCell<T> where T: Send {}
