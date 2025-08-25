@@ -127,6 +127,18 @@ impl Request {
             Err(status.into())
         }
     }
+
+    pub fn stop_acknowledge_requeue(self) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, self.as_ptr() as *mut _, 1);
+        }
+    }
+
+    pub fn stop_acknowledge_no_requeue(&self) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, self.as_ptr() as *mut _, 0);
+        }
+    }
 }
 
 impl Handle for Request {
