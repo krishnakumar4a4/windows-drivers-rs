@@ -318,3 +318,42 @@ unsafe impl<T> Sync for AtomicOnceCell<T> where T: Sync {}
 /// For the same reason as above, `AtomicOnceCell<T>` is
 // `Send` if and only if `T` is `Send`.
 unsafe impl<T> Send for AtomicOnceCell<T> where T: Send {}
+
+
+/// A thread-safe, `Option`-like container
+/// for a values that implement `Clone`.
+///
+/// Provides thread-safe access to `T`
+/// by internally using a `SpinLock`.
+pub struct Slot<T: Clone> {
+    val: SpinLock<Option<T>>,
+}
+
+impl<T: Clone> Slot<T> {
+    /// Creates a new `Slot` with the given inner value
+    /// 
+    /// # Errors
+    /// Returns an error if it fails to create the `SpinLock`
+    pub fn try_new(val: Option<T>) -> NtResult<Self> {
+        Ok(Self {
+            val: SpinLock::create(val)?,
+        })
+    }
+
+    /// Returns a clone of the inner value if it exists.
+    /// 
+    /// To do it in a thread-safe way, it acquires the
+    /// `SpinLock` first, clones the inner value,
+    /// releases the lock and then returns the value.
+    ///
+    /// # Returns
+    /// `Some(T)` if the inner value exists, `None` otherwise. 
+    pub fn get(&self) -> Option<T> {
+        self.val.lock().as_ref().cloned()
+    }
+
+    /// Sets the inner value to `val`
+    pub fn set(&self, val: Option<T>) {
+        *self.val.lock() = val;
+    }
+}
