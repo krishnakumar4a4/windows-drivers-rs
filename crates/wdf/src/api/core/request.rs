@@ -58,9 +58,6 @@ impl Request {
         mut self,
         cancel_fn: fn(&RequestCancellationToken),
     ) -> Result<CancellableMarkedRequest, (NtError, Request)> {
-        // TODO: check for the race where another thread
-        // could call this method method and thay might
-        // attach the context before us.
         if let Err(e) = RequestContext::attach(
             &mut self,
             RequestContext {
