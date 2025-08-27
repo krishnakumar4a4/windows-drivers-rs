@@ -111,6 +111,7 @@ impl IoTarget {
                 request,
                 output_buffer,
                 &mut output_buffer_offset,
+                false,
                 device_offset,
             )?;
 
@@ -132,10 +133,45 @@ impl IoTarget {
         }
     }
 
+    pub fn format_request_for_write(
+        &self,
+        request: &mut Request,
+        input_buffer: Option<MemoryWithOffset>,
+        device_offset: Option<i64>,
+    ) -> NtResult<()> {
+        let mut output_buffer_offset = WDFMEMORY_OFFSET::default();
+        let (input_buffer_ptr, input_buffer_offset_ptr, device_offset_ptr) =
+            Self::save_memory_and_get_ptrs(
+                request,
+                input_buffer,
+                &mut output_buffer_offset,
+                true,
+                device_offset,
+            )?;
+
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfIoTargetFormatRequestForWrite,
+                self.as_ptr() as *mut _,
+                request.as_ptr() as *mut _,
+                input_buffer_ptr as *mut _,
+                input_buffer_offset_ptr,
+                device_offset_ptr
+            )
+        };
+
+        if NT_SUCCESS(status) {
+            Ok(())
+        } else {
+            Err(status.into())
+        }
+    }
+
     fn save_memory_and_get_ptrs(
         request: &mut Request,
         memory: Option<MemoryWithOffset>,
         c_memory_offset: &mut WDFMEMORY_OFFSET,
+        is_input_memory: bool,
         device_offset: Option<i64>,
     ) -> NtResult<(WDFMEMORY, PWDFMEMORY_OFFSET, *mut i64)> {
         let (memory_ptr, memory_offset_ptr) = match memory {
@@ -146,7 +182,12 @@ impl IoTarget {
                 // IMPORTANT: Save the buffer in the request
                 // so that it stays alive while the request
                 // is being processed
-                request.set_user_output_memory(mem.into_memory())?;
+                let mem = mem.into_memory();
+                if is_input_memory {
+                    request.set_user_input_memory(mem)?;
+                } else {
+                    request.set_user_output_memory(mem)?;
+                }
 
                 (ptr as *mut _, c_memory_offset as *mut _)
             }
