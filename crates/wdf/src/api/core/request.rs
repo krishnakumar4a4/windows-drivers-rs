@@ -17,6 +17,10 @@ use super::{
 #[repr(transparent)]
 pub struct Request(WDFREQUEST);
 
+// Removed the generic trait and its functions; the macro below generates
+// per-buffer context structs and the Request methods, so the trait is not needed.
+// (Remove the entire `trait UserMemoryContextLike { ... }` block here)
+
 impl Request {
     pub(crate) unsafe fn from_raw(inner: WDFREQUEST) -> Self {
         Self(inner)
@@ -151,7 +155,6 @@ impl Handle for Request {
     }
 }
 
-
 /// Although `Request` carries a raw pointer type, `WDFREQUEST`,
 /// it is still `Sync` because all the C methods on `WDFREQUEST`
 /// are thread-safe and therefore all the `Request` methods which
@@ -159,9 +162,8 @@ impl Handle for Request {
 unsafe impl Sync for Request {}
 
 /// Although `Request` carries a raw pointer type, `WDFREQUEST`,
-/// it is still `Send` because all the C methods on `WDFREQUEST`
-/// are thread-safe and therefore all the `Request` methods which
-/// call these C methods are also thread-safe
+/// it is still `Send` because it uniquely owns the `WDFREQUEST`
+/// pointer
 unsafe impl Send for Request {}
 
 #[object_context(Request)]
@@ -169,64 +171,52 @@ struct RequestContext {
     evt_request_cancel: fn(&RequestCancellationToken),
 }
 
+/// Macro that defines input and output memory contexts
+/// and methods to retrieve and set them
+macro_rules! define_user_memory_context {
+    (input) => {
+        define_user_memory_context!(@impl UserInputMemoryContext, retrieve_user_input_memory, set_user_input_memory);
+    };
+    (output) => {
+        define_user_memory_context!(@impl UserOutputMemoryContext, retrieve_user_output_memory, set_user_output_memory);
+    };
+
+    // helper: contains the common implementation for any per-request-memory context
+    (@impl $ctx_name:ident, $retrieve_fn:ident, $set_fn:ident) => {
+        #[object_context(Request)]
+        struct $ctx_name {
+            memory: Option<Memory>,
+        }
+
+        impl Request {
+            pub(crate) fn $retrieve_fn(&mut self) -> Option<Memory> {
+                let context = $ctx_name::get_mut(self)?;
+                context.memory.take()
+            }
+
+            pub(crate) fn $set_fn(&mut self, memory: Memory) -> NtResult<()> {
+                match $ctx_name::get_mut(self) {
+                    Some(context) => {
+                        context.memory = Some(memory);
+                        Ok(())
+                    }
+                    None => $ctx_name::attach(self, $ctx_name { memory: Some(memory) }),
+                }
+            }
+        }
+    };
+}
+
+define_user_memory_context!(input);
+define_user_memory_context!(output);
+
 pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     if let Some(context) = RequestContext::get(unsafe { &Request::from_raw(request as _) }) {
         (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
     }
 }
 
-// TODO: remove code duplication in this impl
-impl Request {
-    pub(crate) fn retrieve_user_input_memory(&mut self) -> Option<Memory> {
-        let context = UserInputMemoryContext::get_mut(self)?;
-        context.memory.take()
-    }
 
-    pub(crate) fn set_user_input_memory(&mut self, memory: Memory) -> NtResult<()> {
-        match UserInputMemoryContext::get_mut(self) {
-            Some(context) => {
-                context.memory = Some(memory);
-                Ok(())
-            },
-            None => UserInputMemoryContext::attach(
-                self,
-                UserInputMemoryContext {
-                    memory: Some(memory),
-                },
-            )
-        }
-    }
-
-    pub(crate) fn retrieve_user_output_memory(&mut self) -> Option<Memory> {
-        let context = UserOutputMemoryContext::get_mut(self)?;
-        context.memory.take()
-    }
-
-    pub(crate) fn set_user_output_memory(&mut self, memory: Memory) -> NtResult<()> {
-        match UserOutputMemoryContext::get_mut(self) {
-            Some(context) => {
-                context.memory = Some(memory);
-                Ok(())
-            },
-            None => UserOutputMemoryContext::attach(
-                self,
-                UserOutputMemoryContext {
-                    memory: Some(memory),
-                },
-            )
-        }
-    }
-}
-
-#[object_context(Request)]
-struct UserInputMemoryContext {
-    memory: Option<Memory>,
-}
-
-#[object_context(Request)]
-struct UserOutputMemoryContext {
-    memory: Option<Memory>,
-}
 
 pub struct CancellableMarkedRequest(Request);
 
