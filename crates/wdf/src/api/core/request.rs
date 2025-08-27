@@ -1,7 +1,4 @@
-use alloc::{
-    boxed::Box,
-    string::String,
-};
+use alloc::string::String;
 
 use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY, WDFOBJECT, WDFREQUEST};
