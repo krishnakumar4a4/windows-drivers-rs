@@ -23,9 +23,9 @@ pub use wdk_sys::{
 
 use super::{
     device::DeviceInit,
-    result::{status_codes, NtResult},
     guid::Guid,
     object::Handle,
+    result::{status_codes, NtResult},
     string::{to_rust_str, WString},
     tracing::TraceWriter,
     wdf_struct_size,
@@ -33,8 +33,7 @@ use super::{
 use crate::println;
 
 static TRACE_WRITER: UnsafeOnceCell<TraceWriter> = UnsafeOnceCell::new();
-static EVT_DEVICE_ADD: UnsafeOnceCell<fn(&mut DeviceInit) -> NtResult<()>> =
-    UnsafeOnceCell::new();
+static EVT_DEVICE_ADD: UnsafeOnceCell<fn(&mut DeviceInit) -> NtResult<()>> = UnsafeOnceCell::new();
 
 /// Represents a driver
 pub struct Driver {

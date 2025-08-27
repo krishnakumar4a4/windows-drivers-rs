@@ -15,8 +15,8 @@ use wdk_sys::{
 };
 
 use super::{
-    result::NtResult,
     object::{init_attributes, Handle, RefCountedHandle},
+    result::NtResult,
 };
 
 #[doc(hidden)]

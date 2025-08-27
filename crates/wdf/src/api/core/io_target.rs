@@ -15,10 +15,10 @@ use wdk_sys::{
 use super::{
     device::Device,
     enum_mapping,
-    result::NtResult,
     memory::MemoryWithOffset,
     object::{impl_ref_counted_handle, Handle},
     request::Request,
+    result::NtResult,
     sync::Arc,
 };
 

@@ -9,7 +9,7 @@ use wdk_sys::{
     WDF_NO_OBJECT_ATTRIBUTES,
 };
 
-use super::{result::NtResult, object::Handle};
+use super::{object::Handle, result::NtResult};
 
 pub(crate) struct WString(WDFSTRING);
 

@@ -5,8 +5,8 @@ use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_TIMER_
 
 use super::{
     device::Device,
-    result::NtResult,
     object::{impl_ref_counted_handle, init_attributes, Handle},
+    result::NtResult,
     sync::Arc,
     wdf_struct_size,
 };

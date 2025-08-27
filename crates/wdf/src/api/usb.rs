@@ -28,10 +28,10 @@ use wdk_sys::{
 use super::core::{
     device::{Device, DevicePowerPolicyIdleSettings, DevicePowerPolicyWakeSettings},
     enum_mapping,
-    result::{NtResult, NtStatus},
     io_target::IoTarget,
     memory::Memory,
     object::{impl_handle, impl_ref_counted_handle, Handle},
+    result::{NtResult, NtStatus},
     sync::Arc,
     wdf_struct_size,
 };

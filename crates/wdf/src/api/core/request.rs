@@ -4,10 +4,10 @@ use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY, WDFOBJECT, WDFREQUEST};
 
 use super::{
-    result::{NtStatusError, NtResult, NtStatus},
     io_queue::IoQueue,
     memory::Memory,
     object::Handle,
+    result::{NtResult, NtStatus, NtStatusError},
 };
 
 #[derive(Debug)]

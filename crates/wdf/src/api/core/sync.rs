@@ -12,9 +12,9 @@ use wdk::println;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFSPINLOCK};
 
 use super::{
-    result::NtResult,
     object::{init_attributes, Handle, RefCountedHandle},
     object_context::bug_check,
+    result::NtResult,
 };
 
 /// WDF Spin Lock

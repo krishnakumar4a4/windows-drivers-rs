@@ -1,8 +1,8 @@
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY_OFFSET};
 
 use super::{
-    result::{status_codes, NtResult},
     object::{impl_handle, Handle},
+    result::{status_codes, NtResult},
 };
 
 impl_handle!(Memory);

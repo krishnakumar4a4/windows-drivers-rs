@@ -26,11 +26,11 @@ use wdk_sys::{
 
 use super::{
     enum_mapping,
-    result::NtResult,
     guid::Guid,
     io_queue::IoQueue,
     object::{impl_ref_counted_handle, Handle},
     resource::CmResList,
+    result::NtResult,
     string::{to_unicode_string, to_utf16_buf},
     wdf_struct_size,
     TriState,
