@@ -30,12 +30,12 @@ impl NtStatus {
 
     /// Returns true if the status is `Success` or `Informational`
     /// Matches the behavior of the NT_SUCCESS macro in C
-    pub fn is_success_or_informational(&self) -> bool {
-        self.is_success() || self.is_informational()
+    pub fn is_success(&self) -> bool {
+        self.is_success_only() || self.is_informational()
     }
 
     /// Returns true if the status is `Success`
-    pub fn is_success(&self) -> bool {
+    pub fn is_success_only(&self) -> bool {
         matches!(*self, Self::NonError(NtStatusNonError::Success(_)))
     }
 
