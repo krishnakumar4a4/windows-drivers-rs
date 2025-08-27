@@ -347,7 +347,7 @@ macro_rules! unsafe_pnp_power_callback {
     (@call_and_return NTSTATUS, $call:expr) => {
         match $call {
             Ok(_) => 0,
-            Err(err) => err.nt_status(),
+            Err(err) => err.code(),
         }
     };
     // Helper: call and return for ()

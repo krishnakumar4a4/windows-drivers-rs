@@ -23,7 +23,7 @@ pub use wdk_sys::{
 
 use super::{
     device::DeviceInit,
-    error::{NtError, NtResult, NtStatus},
+    error::{NtResult, NtStatusError},
     guid::Guid,
     object::Handle,
     string::{to_rust_str, WString},
@@ -33,12 +33,12 @@ use super::{
 use crate::println;
 
 static TRACE_WRITER: UnsafeOnceCell<TraceWriter> = UnsafeOnceCell::new();
-static EVT_DEVICE_ADD: UnsafeOnceCell<fn(&mut DeviceInit) -> Result<(), NtError>> =
+static EVT_DEVICE_ADD: UnsafeOnceCell<fn(&mut DeviceInit) -> NtResult<()>> =
     UnsafeOnceCell::new();
 
 /// Represents a driver
 pub struct Driver {
-    evt_device_add: Option<fn(&mut DeviceInit) -> Result<(), NtError>>,
+    evt_device_add: Option<fn(&mut DeviceInit) -> NtResult<()>>,
     wdf_driver: WDFDRIVER,
 }
 
@@ -80,7 +80,7 @@ impl Driver {
     }
 
     /// Registers a callback for the `EvtDeviceAdd` event
-    pub fn on_evt_device_add(&mut self, callback: fn(&mut DeviceInit) -> Result<(), NtError>) {
+    pub fn on_evt_device_add(&mut self, callback: fn(&mut DeviceInit) -> NtResult<()>) {
         self.evt_device_add = Some(callback);
     }
 }
@@ -162,8 +162,7 @@ impl<T> UnsafeOnceCell<T> {
         unsafe {
             let val_ptr = self.val.get();
             if (*val_ptr).is_some() {
-                return Err(NtError::from(1)); // TODO: Change this to a proper
-                                              // error
+                return Err(NtStatusError::InvalidParameter); // TODO: Change this to a proper error
             }
             *val_ptr = Some(val);
         };
@@ -198,7 +197,7 @@ fn clean_up_tracing() {
 pub fn call_safe_driver_entry(
     wdm_driver: &mut DRIVER_OBJECT,
     reg_path: PCUNICODE_STRING,
-    safe_entry: fn(&mut Driver, &str) -> Result<(), NtError>,
+    safe_entry: fn(&mut Driver, &str) -> NtResult<()>,
     tracing_control_guid: Option<Guid>,
 ) -> NTSTATUS {
     wdm_driver.DriverUnload = Some(driver_unload);
@@ -260,10 +259,10 @@ pub fn call_safe_driver_entry(
 
     let reg_path = to_rust_str(reg_path);
     match safe_entry(&mut safe_driver, &reg_path) {
-        Ok(_) => NtStatus::Success.into(),
+        Ok(_) => 0,
         Err(e) => {
             clean_up_tracing();
-            e.nt_status()
+            e.code()
         }
     }
 }
@@ -283,7 +282,7 @@ extern "C" fn evt_driver_device_add(
         let mut device_init = unsafe { DeviceInit::from(device_init) };
         match cb(&mut device_init) {
             Ok(_) => 0,
-            Err(e) => e.nt_status(),
+            Err(e) => e.code(),
         }
     } else {
         0

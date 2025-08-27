@@ -4,7 +4,7 @@ use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY, WDFOBJECT, WDFREQUEST};
 
 use super::{
-    error::{NtError, NtResult, NtStatus},
+    error::{NtStatusError, NtResult, NtStatus},
     io_queue::IoQueue,
     memory::Memory,
     object::Handle,
@@ -32,7 +32,7 @@ impl Request {
             call_unsafe_wdf_function_binding!(
                 WdfRequestComplete,
                 self.as_ptr() as *mut _,
-                status.nt_status()
+                status.code()
             )
         };
     }
@@ -42,7 +42,7 @@ impl Request {
             call_unsafe_wdf_function_binding!(
                 WdfRequestCompleteWithInformation,
                 self.as_ptr() as *mut _,
-                status.nt_status(),
+                status.code(),
                 information as core::ffi::c_ulonglong
             )
         };
@@ -61,7 +61,7 @@ impl Request {
     pub fn mark_cancellable(
         mut self,
         cancel_fn: fn(&RequestCancellationToken),
-    ) -> Result<CancellableMarkedRequest, (NtError, Request)> {
+    ) -> Result<CancellableMarkedRequest, (NtStatusError, Request)> {
         if let Err(e) = RequestContext::attach(
             &mut self,
             RequestContext {

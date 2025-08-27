@@ -1,7 +1,7 @@
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY_OFFSET};
 
 use super::{
-    error::{NtError, NtResult},
+    error::{NtStatusError, NtResult},
     object::{impl_handle, Handle},
 };
 
@@ -81,7 +81,7 @@ pub struct MemoryWithOffset {
 impl MemoryWithOffset {
     pub fn try_new(memory: Memory, offset: MemoryOffset) -> NtResult<Self> {
         if !Self::is_valid_offset(&memory, &offset) {
-            return Err(NtError::from(-1));
+            return Err(NtStatusError::InvalidParameter);
         }
 
         Ok(Self { memory, offset })

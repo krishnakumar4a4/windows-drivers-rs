@@ -14,7 +14,7 @@ use wdk_sys::{
 
 use super::{
     device::Device,
-    error::{NtError, NtResult},
+    error::{NtStatusError, NtResult},
     object::{impl_ref_counted_handle, Handle},
     request::Request,
     sync::Arc,
@@ -207,7 +207,7 @@ macro_rules! unsafe_request_handler {
                     }
                 }
 
-                request.complete(super::NtStatus::Error(NtError::from(1))); // TODO: pass proper error status e.g. unsupported request
+                request.complete(super::NtStatus::Error(NtStatusError::from(1))); // TODO: pass proper error status e.g. unsupported request
             }
         }
     };
