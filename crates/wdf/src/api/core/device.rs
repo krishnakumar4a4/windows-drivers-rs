@@ -26,7 +26,7 @@ use wdk_sys::{
 
 use super::{
     enum_mapping,
-    error::NtResult,
+    result::NtResult,
     guid::Guid,
     io_queue::IoQueue,
     object::{impl_ref_counted_handle, Handle},

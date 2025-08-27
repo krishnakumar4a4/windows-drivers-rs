@@ -14,7 +14,7 @@ use wdk_sys::{
 
 use super::{
     device::Device,
-    error::{NtStatusError, NtResult},
+    result::{NtStatusError, NtResult},
     object::{impl_ref_counted_handle, Handle},
     request::Request,
     sync::Arc,

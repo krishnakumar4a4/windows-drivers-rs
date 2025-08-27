@@ -1,6 +1,6 @@
 pub mod device;
 pub mod driver;
-pub mod error;
+pub mod result;
 pub mod guid;
 pub mod io_queue;
 pub mod io_target;
@@ -16,7 +16,7 @@ pub mod tracing;
 
 pub use device::*;
 pub use driver::*;
-pub use error::*;
+pub use result::*;
 pub use guid::*;
 pub use io_queue::*;
 pub use io_target::*;

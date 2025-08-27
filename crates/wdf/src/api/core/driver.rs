@@ -23,7 +23,7 @@ pub use wdk_sys::{
 
 use super::{
     device::DeviceInit,
-    error::{status_codes, NtResult},
+    result::{status_codes, NtResult},
     guid::Guid,
     object::Handle,
     string::{to_rust_str, WString},
