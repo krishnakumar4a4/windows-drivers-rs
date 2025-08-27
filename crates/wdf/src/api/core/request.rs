@@ -1,4 +1,7 @@
-use alloc::string::String;
+use alloc::{
+    boxed::Box,
+    string::String,
+};
 
 use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY, WDFOBJECT, WDFREQUEST};
@@ -170,6 +173,59 @@ pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     if let Some(context) = RequestContext::get(unsafe { &Request::from_raw(request as _) }) {
         (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
     }
+}
+
+// TODO: remove code duplication in this impl
+impl Request {
+    pub(crate) fn retrieve_user_input_memory(&mut self) -> Option<Memory> {
+        let context = UserInputMemoryContext::get_mut(self)?;
+        context.memory.take()
+    }
+
+    pub(crate) fn set_user_input_memory(&mut self, memory: Memory) -> NtResult<()> {
+        match UserInputMemoryContext::get_mut(self) {
+            Some(context) => {
+                context.memory = Some(memory);
+                Ok(())
+            },
+            None => UserInputMemoryContext::attach(
+                self,
+                UserInputMemoryContext {
+                    memory: Some(memory),
+                },
+            )
+        }
+    }
+
+    pub(crate) fn retrieve_user_output_memory(&mut self) -> Option<Memory> {
+        let context = UserOutputMemoryContext::get_mut(self)?;
+        context.memory.take()
+    }
+
+    pub(crate) fn set_user_output_memory(&mut self, memory: Memory) -> NtResult<()> {
+        match UserOutputMemoryContext::get_mut(self) {
+            Some(context) => {
+                context.memory = Some(memory);
+                Ok(())
+            },
+            None => UserOutputMemoryContext::attach(
+                self,
+                UserOutputMemoryContext {
+                    memory: Some(memory),
+                },
+            )
+        }
+    }
+}
+
+#[object_context(Request)]
+struct UserInputMemoryContext {
+    memory: Option<Memory>,
+}
+
+#[object_context(Request)]
+struct UserOutputMemoryContext {
+    memory: Option<Memory>,
 }
 
 pub struct CancellableMarkedRequest(Request);
