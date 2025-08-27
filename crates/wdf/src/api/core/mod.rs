@@ -29,7 +29,6 @@ pub use sync::*;
 pub use timer::*;
 pub use wdf_macros::*;
 pub use wdk::println;
-
 use wdk_sys::WDF_TRI_STATE;
 
 enum_mapping! {
@@ -60,7 +59,6 @@ macro_rules! wdf_struct_size {
 
 pub(crate) use wdf_struct_size;
 
-
 /// A macro to declare a Rust enum that maps one-to-one to a C enum.
 ///
 /// It implements Copy, Clone, Debug, PartialEq, and Eq traits
@@ -79,14 +77,14 @@ pub(crate) use wdf_struct_size;
 ///     WdfPowerSleep,
 ///     WdfPowerHibernate
 /// } WDF_POWER_STATE;
-/// 
+///
 /// the macro defines a Rust enum that maps it to a Rust enum.
-/// 
+///
 /// By default, the conversion from the C type to the Rust enum is fallible (using `TryFrom`).
 /// If you want the conversion to be infallible (using `From`), specify `infallible;` as the first argument.
-/// 
+///
 /// # Examples
-/// 
+///
 /// Fallible (default):
 /// ```rust
 /// enum_mapping! {
@@ -186,5 +184,3 @@ macro_rules! enum_mapping {
 }
 
 pub(crate) use enum_mapping;
-
-

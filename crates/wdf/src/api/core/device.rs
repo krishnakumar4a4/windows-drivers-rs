@@ -11,12 +11,12 @@ use wdk_sys::{
     WDFCMRESLIST,
     WDFDEVICE,
     WDFDEVICE_INIT,
+    WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
+    WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS,
     WDF_NO_HANDLE,
     WDF_NO_OBJECT_ATTRIBUTES,
     WDF_PNPPOWER_EVENT_CALLBACKS,
     WDF_POWER_DEVICE_STATE,
-    WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
-    WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS,
     WDF_POWER_POLICY_IDLE_TIMEOUT_TYPE,
     WDF_POWER_POLICY_S0_IDLE_CAPABILITIES,
     WDF_POWER_POLICY_S0_IDLE_USER_CONTROL,
@@ -25,15 +25,15 @@ use wdk_sys::{
 };
 
 use super::{
+    enum_mapping,
     error::NtResult,
     guid::Guid,
     io_queue::IoQueue,
     object::{impl_ref_counted_handle, Handle},
     resource::CmResList,
-    enum_mapping,
     string::{to_unicode_string, to_utf16_buf},
-    TriState,
     wdf_struct_size,
+    TriState,
 };
 
 impl_ref_counted_handle!(Device, DeviceContext);
@@ -415,10 +415,16 @@ impl From<WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS> for DevicePowerPolicyIdleSettin
             idle_caps: settings.IdleCaps.try_into().expect("invalid IdleCaps"),
             dx_state: settings.DxState.try_into().expect("invalid DxState"),
             idle_timeout: settings.IdleTimeout,
-            user_control_of_idle_settings: settings.UserControlOfIdleSettings.try_into().expect("invalid UserControlOfIdleSettings"),
+            user_control_of_idle_settings: settings
+                .UserControlOfIdleSettings
+                .try_into()
+                .expect("invalid UserControlOfIdleSettings"),
             enabled: settings.Enabled.into(),
             power_up_idle_device_on_system_wake: settings.PowerUpIdleDeviceOnSystemWake.into(),
-            idle_timeout_type: settings.IdleTimeoutType.try_into().expect("invalid IdleTimeoutType"),
+            idle_timeout_type: settings
+                .IdleTimeoutType
+                .try_into()
+                .expect("invalid IdleTimeoutType"),
             exclude_d3_cold: settings.ExcludeD3Cold.into(),
         }
     }
@@ -470,9 +476,14 @@ impl From<WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS> for DevicePowerPolicyWakeSettin
     fn from(settings: WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS) -> Self {
         Self {
             dx_state: settings.DxState.try_into().expect("invalid DxState"),
-            user_control_of_wake_settings: settings.UserControlOfWakeSettings.try_into().expect("invalid UserControlOfWakeSettings"),
+            user_control_of_wake_settings: settings
+                .UserControlOfWakeSettings
+                .try_into()
+                .expect("invalid UserControlOfWakeSettings"),
             enabled: settings.Enabled.into(),
-            arm_for_wake_if_children_are_armed_for_wake: settings.ArmForWakeIfChildrenAreArmedForWake != 0,
+            arm_for_wake_if_children_are_armed_for_wake: settings
+                .ArmForWakeIfChildrenAreArmedForWake
+                != 0,
             indicate_child_wake_on_parent_wake: settings.IndicateChildWakeOnParentWake != 0,
         }
     }

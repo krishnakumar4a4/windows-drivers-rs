@@ -18,8 +18,8 @@ use super::{
     object::{impl_ref_counted_handle, Handle},
     request::Request,
     sync::Arc,
-    TriState,
     wdf_struct_size,
+    TriState,
 };
 
 impl_ref_counted_handle!(IoQueue, IoQueueContext);

@@ -159,7 +159,8 @@ pub fn get_context<T: Handle, U: ObjectContext>(fw_obj: &T) -> Option<&U> {
     }
 }
 
-/// Gets mutable context of type `U` for the given frameework object if it exists
+/// Gets mutable context of type `U` for the given frameework object if it
+/// exists
 pub fn get_context_mut<T: Handle, U: ObjectContext>(fw_obj: &mut T) -> Option<&mut U> {
     // SAFETY: The pointer to framework object is obtained via as_ptr()
     // which is guaranteed to be valid

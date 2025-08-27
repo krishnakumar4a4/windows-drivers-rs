@@ -1,18 +1,19 @@
 use core::{ptr, sync::atomic::AtomicUsize};
 
 use bitflags::bitflags;
-use wdf_macros::object_context_with_ref_count_check;
+use wdf_macros::{object_context, object_context_with_ref_count_check};
 use wdk_sys::{
     _WdfUsbTargetDeviceSelectConfigType,
-    BOOLEAN,
     call_unsafe_wdf_function_binding,
-    NT_SUCCESS,
+    BOOLEAN,
     NTSTATUS,
-    USBD_VERSION_INFORMATION,
+    NT_SUCCESS,
     USBD_STATUS,
+    USBD_VERSION_INFORMATION,
     WDFCONTEXT,
     WDFMEMORY,
     WDFUSBDEVICE,
+    WDFUSBPIPE,
     WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
     WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS,
     WDF_NO_OBJECT_ATTRIBUTES,
@@ -22,31 +23,23 @@ use wdk_sys::{
     WDF_USB_DEVICE_SELECT_CONFIG_PARAMS,
     WDF_USB_PIPE_INFORMATION,
     WDF_USB_PIPE_TYPE,
-    WDFUSBPIPE,
-
 };
 
 use super::core::{
     device::{Device, DevicePowerPolicyIdleSettings, DevicePowerPolicyWakeSettings},
+    enum_mapping,
     error::{NtResult, NtStatus},
     io_target::IoTarget,
     memory::Memory,
     object::{impl_handle, impl_ref_counted_handle, Handle},
-    enum_mapping,
     sync::Arc,
     wdf_struct_size,
 };
 
-
-use wdf_macros::object_context;
-
 impl_ref_counted_handle!(UsbDevice, UsbDeviceContext);
 
 impl UsbDevice {
-    pub fn create(
-        device: &Device,
-        config: &UsbDeviceCreateConfig,
-    ) -> NtResult<Arc<Self>> {
+    pub fn create(device: &Device, config: &UsbDeviceCreateConfig) -> NtResult<Arc<Self>> {
         let mut usb_device: WDFUSBDEVICE = core::ptr::null_mut();
         let mut config = config.into();
 
@@ -123,9 +116,7 @@ impl UsbDevice {
         }
     }
 
-    pub fn assign_s0_idle_settings(
-        &self,
-    ) -> NtResult<DevicePowerPolicyIdleSettings> {
+    pub fn assign_s0_idle_settings(&self) -> NtResult<DevicePowerPolicyIdleSettings> {
         let mut settings = WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS::default();
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
@@ -142,9 +133,7 @@ impl UsbDevice {
         }
     }
 
-    pub fn assign_sx_wake_settings(
-        &self,
-    ) -> NtResult<DevicePowerPolicyWakeSettings> {
+    pub fn assign_sx_wake_settings(&self) -> NtResult<DevicePowerPolicyWakeSettings> {
         let mut settings = WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS::default();
 
         let status = unsafe {
@@ -292,9 +281,7 @@ impl UsbPipe {
     pub fn get_io_target(&self) -> &IoTarget {
         // SAFETY: The pipe pointer is also a valid
         // I/O target pointer. Hence this case is safe
-        unsafe {
-            &*(self.as_ptr() as *const IoTarget)
-        }
+        unsafe { &*(self.as_ptr() as *const IoTarget) }
     }
 
     pub fn set_no_maximum_packet_size_check(&self) {
@@ -310,7 +297,7 @@ impl UsbPipe {
         // TODO: if this function is called more than once, we need to handle
         // the case where the context is already attached.
         // Actually we plan to not have this function at all and in fact
-        // allow the user to set up the reader only once while creating 
+        // allow the user to set up the reader only once while creating
         // the USB device. Then this problem will be removed entirely.
         let ctxt = UsbPipeContinuousReaderContext {
             read_complete_callback: config.read_complete_callback,
@@ -413,7 +400,8 @@ impl From<&UsbContinuousReaderConfig> for WDF_USB_CONTINUOUS_READER_CONFIG {
         unsafe_config.EvtUsbTargetPipeReadCompleteContext = ptr::null_mut();
 
         if safe_config.readers_failed_callback.is_some() {
-            unsafe_config.EvtUsbTargetPipeReadersFailed = Some(__evt_usb_target_pipe_readers_failed);
+            unsafe_config.EvtUsbTargetPipeReadersFailed =
+                Some(__evt_usb_target_pipe_readers_failed);
         }
 
         unsafe_config
@@ -448,9 +436,7 @@ pub extern "C" fn __evt_usb_target_pipe_read_complete(
         }
     }
 
-    panic!(
-        "User did not provide callback read_complete_callback but we subscribed to it"
-    );
+    panic!("User did not provide callback read_complete_callback but we subscribed to it");
 }
 
 pub extern "C" fn __evt_usb_target_pipe_readers_failed(
@@ -469,7 +455,5 @@ pub extern "C" fn __evt_usb_target_pipe_readers_failed(
         }
     }
 
-    panic!(
-        "User did not provide callback readers_failed_callback but we subscribed to it"
-    );
+    panic!("User did not provide callback readers_failed_callback but we subscribed to it");
 }

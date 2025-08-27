@@ -62,7 +62,11 @@ impl Memory {
     fn get_buffer_raw_impl(&self) -> (*mut u8, usize) {
         let mut buf_size = 0;
         let buffer = unsafe {
-            call_unsafe_wdf_function_binding!(WdfMemoryGetBuffer, self.as_ptr() as *mut _, &mut buf_size)
+            call_unsafe_wdf_function_binding!(
+                WdfMemoryGetBuffer,
+                self.as_ptr() as *mut _,
+                &mut buf_size
+            )
         };
         (buffer as *mut _, buf_size)
     }

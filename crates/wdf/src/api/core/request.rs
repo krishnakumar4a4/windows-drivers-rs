@@ -15,8 +15,8 @@ use super::{
 pub struct Request(WDFREQUEST);
 
 // Removed the generic trait and its functions; the macro below generates
-// per-buffer context structs and the Request methods, so the trait is not needed.
-// (Remove the entire `trait UserMemoryContextLike { ... }` block here)
+// per-buffer context structs and the Request methods, so the trait is not
+// needed. (Remove the entire `trait UserMemoryContextLike { ... }` block here)
 
 impl Request {
     pub(crate) unsafe fn from_raw(inner: WDFREQUEST) -> Self {
@@ -131,13 +131,21 @@ impl Request {
 
     pub fn stop_acknowledge_requeue(self) {
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, self.as_ptr() as *mut _, 1);
+            call_unsafe_wdf_function_binding!(
+                WdfRequestStopAcknowledge,
+                self.as_ptr() as *mut _,
+                1
+            );
         }
     }
 
     pub fn stop_acknowledge_no_requeue(&self) {
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, self.as_ptr() as *mut _, 0);
+            call_unsafe_wdf_function_binding!(
+                WdfRequestStopAcknowledge,
+                self.as_ptr() as *mut _,
+                0
+            );
         }
     }
 }
@@ -212,8 +220,6 @@ pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
         (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
     }
 }
-
-
 
 pub struct CancellableMarkedRequest(Request);
 
