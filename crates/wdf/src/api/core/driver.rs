@@ -23,7 +23,7 @@ pub use wdk_sys::{
 
 use super::{
     device::DeviceInit,
-    error::{NtResult, NtStatusError},
+    error::{status_codes, NtResult},
     guid::Guid,
     object::Handle,
     string::{to_rust_str, WString},
@@ -162,7 +162,7 @@ impl<T> UnsafeOnceCell<T> {
         unsafe {
             let val_ptr = self.val.get();
             if (*val_ptr).is_some() {
-                return Err(NtStatusError::InvalidParameter); // TODO: Change this to a proper error
+                return Err(status_codes::STATUS_UNSUCCESSFUL.into());
             }
             *val_ptr = Some(val);
         };
