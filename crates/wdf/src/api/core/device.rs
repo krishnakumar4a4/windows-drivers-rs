@@ -1,6 +1,6 @@
 use core::{default::Default, sync::atomic::AtomicUsize};
 
-use wdf_macros::internal_object_context;
+use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
     BOOLEAN,
@@ -131,7 +131,7 @@ impl DeviceInit {
     }
 }
 
-#[internal_object_context(Device)]
+#[object_context_with_ref_count_check(Device)]
 struct DeviceContext {
     ref_count: AtomicUsize,
     pnp_power_callbacks: Option<PnpPowerEventCallbacks>,

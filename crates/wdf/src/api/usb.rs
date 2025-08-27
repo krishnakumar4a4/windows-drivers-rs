@@ -1,7 +1,7 @@
 use core::{ptr, sync::atomic::AtomicUsize};
 
 use bitflags::bitflags;
-use wdf_macros::internal_object_context;
+use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
     _WdfUsbTargetDeviceSelectConfigType,
     BOOLEAN,
@@ -163,7 +163,7 @@ impl UsbDevice {
     }
 }
 
-#[internal_object_context(UsbDevice)]
+#[object_context_with_ref_count_check(UsbDevice)]
 struct UsbDeviceContext {
     ref_count: AtomicUsize,
 }

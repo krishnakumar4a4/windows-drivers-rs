@@ -201,21 +201,24 @@ pub fn object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
     object_context_impl("object_context", attr, item, false)
 }
 
-/// The attribute used to mark a struct as an "internal" framework object
-/// context An internal object context is the one that we attach to a framework
-/// object in order to store the object's internal Rust specific state. It is
-/// not a context the user can access
+/// The attribute used to mark a struct as a framework object context.
+/// It is the same as `object_context` but it also checks if the ref
+/// count of the parent framework object is > 0 when this context is
+/// being destroyed and bug checks if that is /// the case. This check
+/// helps us catch a safety hole wherein a framework handle is left
+/// behind, say in a static variable, when the framework is tearing
+/// the handle down.
 #[doc(hidden)]
 #[proc_macro_attribute]
-pub fn internal_object_context(attr: TokenStream, item: TokenStream) -> TokenStream {
-    object_context_impl("internal_object_context", attr, item, true)
+pub fn object_context_with_ref_count_check(attr: TokenStream, item: TokenStream) -> TokenStream {
+    object_context_impl("object_context_with_ref_count_check", attr, item, true)
 }
 
 fn object_context_impl(
     attr_name: &str,
     attr: TokenStream,
     item: TokenStream,
-    parent_is_ref_counted: bool,
+    check_ref_count: bool,
 ) -> TokenStream {
     let fw_obj_type_name = parse_macro_input!(attr as Ident);
     let context_struct = parse_macro_input!(item as ItemStruct);
@@ -287,7 +290,7 @@ fn object_context_impl(
         struct_name.span(),
     );
 
-    let attach_param_destroy_callback_name = if parent_is_ref_counted {
+    let attach_param_destroy_callback_name = if check_ref_count {
         quote! { Some(#destroy_callback_name) }
     } else {
         quote! { None }
@@ -341,7 +344,7 @@ fn object_context_impl(
         }
     };
 
-    if parent_is_ref_counted {
+    if check_ref_count {
         let extended = quote! {
             #[allow(non_snake_case)]
             extern "C" fn #destroy_callback_name(fw_obj: #wdf_crate_path::WDFOBJECT) {

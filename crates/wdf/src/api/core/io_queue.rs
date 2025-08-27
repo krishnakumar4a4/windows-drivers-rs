@@ -1,6 +1,6 @@
 use core::sync::atomic::AtomicUsize;
 
-use wdf_macros::internal_object_context;
+use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
     NT_SUCCESS,
@@ -185,7 +185,7 @@ fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
     config
 }
 
-#[internal_object_context(IoQueue)]
+#[object_context_with_ref_count_check(IoQueue)]
 struct IoQueueContext {
     ref_count: AtomicUsize,
     evt_io_default: Option<fn(&IoQueue, Request)>,

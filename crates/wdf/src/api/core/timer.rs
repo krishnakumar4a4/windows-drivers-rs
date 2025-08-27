@@ -1,6 +1,6 @@
 use core::{ptr::null_mut, sync::atomic::AtomicUsize, time::Duration};
 
-use wdf_macros::internal_object_context;
+use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_TIMER_CONFIG};
 
 use super::{
@@ -143,7 +143,7 @@ impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
     }
 }
 
-#[internal_object_context(Timer)]
+#[object_context_with_ref_count_check(Timer)]
 struct TimerContext {
     ref_count: AtomicUsize,
     evt_timer_func: fn(&Timer),

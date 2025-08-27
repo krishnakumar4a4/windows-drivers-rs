@@ -1,5 +1,5 @@
 use core::sync::atomic::AtomicUsize;
-use wdf_macros::internal_object_context;
+use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
     NT_SUCCESS,
@@ -90,7 +90,7 @@ impl IoTarget {
     }
 }
 
-#[internal_object_context(IoTarget)]
+#[object_context_with_ref_count_check(IoTarget)]
 struct IoTargetContext {
     ref_count: AtomicUsize,
 }
