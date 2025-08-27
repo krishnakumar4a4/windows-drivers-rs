@@ -40,16 +40,19 @@ impl NtStatus {
     }
 
     /// Returns true if the status is `Informational`
+    /// Matches the behavior of the NT_INFORMATION macro in C
     pub fn is_informational(&self) -> bool {
         matches!(*self, Self::NonError(NtStatusNonError::Informational(_)))
     }
 
     /// Returns true if the status is `Warning`
+    /// Matches the behavior of the NT_WARNING macro in C
     pub fn is_warning(&self) -> bool {
         matches!(*self, Self::NonError(NtStatusNonError::Warning(_)))
     }
 
     /// Returns true if the status is `Error`
+    /// Matches the behavior of the NT_ERROR macro in C
     pub fn is_error(&self) -> bool {
         matches!(*self, Self::Error(_) )
     }
