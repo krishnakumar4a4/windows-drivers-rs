@@ -324,6 +324,12 @@ fn object_context_impl(
                     #wdf_crate_path::get_context(fw_obj)
                 }
             }
+
+            fn get_mut(fw_obj: &mut #fw_obj_type_name) -> Option<&mut #struct_name> where Self: Sync {
+                unsafe {
+                    #wdf_crate_path::get_context_mut(fw_obj)
+                }
+            }
         }
 
         #[allow(non_snake_case)]

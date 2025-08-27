@@ -148,7 +148,7 @@ fn set_up_context<T: Handle, U: ObjectContext>(
 
 /// Gets context of type `U` for the given frameework object if it exists
 pub fn get_context<T: Handle, U: ObjectContext>(fw_obj: &T) -> Option<&U> {
-    // SAFETY: The pointer to framewok object is obtained via as_raw()
+    // SAFETY: The pointer to framework object is obtained via as_ptr()
     // which is guaranteed to be valid
     let context = unsafe { get_context_raw::<U>(fw_obj.as_ptr()) };
 
@@ -159,7 +159,20 @@ pub fn get_context<T: Handle, U: ObjectContext>(fw_obj: &T) -> Option<&U> {
     }
 }
 
-/// Gets raw pointer to the context object for a given raw framework handle.
+/// Gets mutable context of type `U` for the given frameework object if it exists
+pub fn get_context_mut<T: Handle, U: ObjectContext>(fw_obj: &mut T) -> Option<&mut U> {
+    // SAFETY: The pointer to framework object is obtained via as_ptr()
+    // which is guaranteed to be valid
+    let context = unsafe { get_context_raw::<U>(fw_obj.as_ptr()) };
+
+    if !context.is_null() {
+        Some(unsafe { &mut *context })
+    } else {
+        None
+    }
+}
+
+/// Gets raw pointer to the context object for a given raw framework object.
 // SAFETY: The pointer to WDF object must point to a valid WDF object
 unsafe fn get_context_raw<U: ObjectContext>(fw_obj: WDFOBJECT) -> *mut U {
     let context_metadata = U::get_type_info();
