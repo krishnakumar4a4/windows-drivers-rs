@@ -7,7 +7,6 @@ use wdk_sys::{
     call_unsafe_wdf_function_binding,
     BOOLEAN,
     NTSTATUS,
-    NT_SUCCESS,
     USBD_STATUS,
     USBD_VERSION_INFORMATION,
     WDFCONTEXT,
@@ -31,7 +30,7 @@ use super::core::{
     io_target::IoTarget,
     memory::Memory,
     object::{impl_handle, impl_ref_counted_handle, Handle},
-    result::{NtResult, NtStatus},
+    result::{NtResult, NtStatus, StatusCodeExt},
     sync::Arc,
     wdf_struct_size,
 };
@@ -43,7 +42,7 @@ impl UsbDevice {
         let mut usb_device: WDFUSBDEVICE = core::ptr::null_mut();
         let mut config = config.into();
 
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceCreateWithParameters,
                 device.as_ptr() as *mut _,
@@ -51,9 +50,7 @@ impl UsbDevice {
                 WDF_NO_OBJECT_ATTRIBUTES,
                 &mut usb_device
             )
-        };
-
-        if NT_SUCCESS(status) {
+        }.and_then_try(|| {
             let ctxt = UsbDeviceContext {
                 ref_count: AtomicUsize::new(0),
             };
@@ -62,26 +59,18 @@ impl UsbDevice {
 
             let usb_device = unsafe { Arc::from_raw(usb_device as *mut _) };
             Ok(usb_device)
-        } else {
-            Err(status.into())
-        }
+        }) 
     }
 
     pub fn retrieve_information(&self) -> NtResult<UsbDeviceInformation> {
         let mut information = WDF_USB_DEVICE_INFORMATION::default();
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceRetrieveInformation,
                 self.as_ptr() as *mut _,
                 &mut information
             )
-        };
-
-        if NT_SUCCESS(status) {
-            Ok(information.into())
-        } else {
-            Err(status.into())
-        }
+        }.and_then(|| information.into())
     }
 
     pub fn select_config_single_interface<'a>(
@@ -92,16 +81,14 @@ impl UsbDevice {
         config.Type =
             _WdfUsbTargetDeviceSelectConfigType::WdfUsbTargetDeviceSelectConfigTypeSingleInterface;
 
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceSelectConfig,
                 self.as_ptr() as *mut _,
                 ptr::null_mut(),
                 &mut config
             )
-        };
-
-        if NT_SUCCESS(status) {
+        }.and_then_try(|| {
             let info = UsbSingleInterfaceInformation {
                 number_of_configured_pipes: unsafe {
                     config.Types.SingleInterface.NumberConfiguredPipes
@@ -111,44 +98,30 @@ impl UsbDevice {
                 },
             };
             Ok(info)
-        } else {
-            Err(status.into())
-        }
+        }) 
     }
 
     pub fn assign_s0_idle_settings(&self) -> NtResult<DevicePowerPolicyIdleSettings> {
         let mut settings = WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS::default();
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceAssignS0IdleSettings,
                 self.as_ptr() as *mut _,
                 &mut settings
             )
-        };
-
-        if NT_SUCCESS(status) {
-            Ok(settings.into())
-        } else {
-            Err(status.into())
-        }
+        }.and_then(|| settings.into())
     }
 
     pub fn assign_sx_wake_settings(&self) -> NtResult<DevicePowerPolicyWakeSettings> {
         let mut settings = WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS::default();
 
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceAssignSxWakeSettings,
                 self.as_ptr() as *mut _,
                 &mut settings
             )
-        };
-
-        if NT_SUCCESS(status) {
-            Ok(settings.into())
-        } else {
-            Err(status.into())
-        }
+        }.and_then(|| settings.into())
     }
 }
 
@@ -308,19 +281,13 @@ impl UsbPipe {
 
         let mut config = config.into();
 
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetPipeConfigContinuousReader,
                 self.as_ptr() as *mut _,
                 &mut config
             )
-        };
-
-        if NT_SUCCESS(status) {
-            Ok(())
-        } else {
-            Err(status.into())
-        }
+        }.ok()
     }
 }
 
