@@ -1,8 +1,8 @@
-use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY_OFFSET};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY_OFFSET};
 
 use super::{
     object::{impl_handle, Handle},
-    result::NtResult,
+    result::{NtResult, StatusCodeExt},
 };
 
 impl_handle!(Memory);
@@ -24,7 +24,7 @@ impl Memory {
     }
 
     pub fn copy_from_buffer(&mut self, offset: usize, buffer: &[u8]) -> NtResult<()> {
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfMemoryCopyFromBuffer,
                 self.as_ptr() as *mut _,
@@ -32,17 +32,12 @@ impl Memory {
                 buffer.as_ptr() as *mut _,
                 buffer.len()
             )
-        };
-
-        if NT_SUCCESS(status) {
-            Ok(())
-        } else {
-            Err(status.into())
         }
+        .ok()
     }
 
     pub fn copy_to_buffer(&self, offset: usize, buffer: &mut [u8]) -> NtResult<()> {
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfMemoryCopyToBuffer,
                 self.as_ptr() as *mut _,
@@ -50,13 +45,8 @@ impl Memory {
                 buffer.as_mut_ptr() as *mut _,
                 buffer.len()
             )
-        };
-
-        if NT_SUCCESS(status) {
-            Ok(())
-        } else {
-            Err(status.into())
         }
+        .ok()
     }
 
     fn get_buffer_raw_impl(&self) -> (*mut u8, usize) {

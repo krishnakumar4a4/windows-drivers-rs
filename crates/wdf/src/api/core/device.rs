@@ -7,7 +7,6 @@ use wdk_sys::{
     DEVICE_POWER_STATE,
     DEVICE_RELATION_TYPE,
     NTSTATUS,
-    NT_SUCCESS,
     WDFCMRESLIST,
     WDFDEVICE,
     WDFDEVICE_INIT,
@@ -30,7 +29,7 @@ use super::{
     io_queue::IoQueue,
     object::{impl_ref_counted_handle, Handle},
     resource::CmResList,
-    result::NtResult,
+    result::{NtResult, StatusCodeExt},
     string::{to_unicode_string, to_utf16_buf},
     wdf_struct_size,
     TriState,
@@ -58,16 +57,15 @@ impl Device {
         let mut device: WDFDEVICE = WDF_NO_HANDLE.cast();
         let mut device_init_ptr: *mut WDFDEVICE_INIT = device_init.as_ptr_mut();
 
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceCreate,
                 &mut device_init_ptr,
                 WDF_NO_OBJECT_ATTRIBUTES,
                 &mut device,
             )
-        };
-
-        if NT_SUCCESS(status) {
+        }
+        .and_then_try(|| {
             let device = unsafe { &*(device as *mut _) };
             DeviceContext::attach(
                 device,
@@ -77,9 +75,7 @@ impl Device {
                 },
             )?;
             Ok(device)
-        } else {
-            Err(status.into())
-        }
+        })
     }
 
     pub fn create_interface(
@@ -90,20 +86,15 @@ impl Device {
         let ref_str_buf = reference_string.map(to_utf16_buf);
         let unicode_ref_str = ref_str_buf.map(|b| to_unicode_string(b.as_ref()));
 
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceCreateDeviceInterface,
                 self.as_ptr() as *mut _,
                 interaface_class_guid.as_lpcguid(),
                 unicode_ref_str.map_or(core::ptr::null(), |s| &s)
             )
-        };
-
-        if NT_SUCCESS(status) {
-            Ok(())
-        } else {
-            Err(status.into())
         }
+        .ok()
     }
 
     pub fn get_default_queue(&self) -> Option<&IoQueue> {

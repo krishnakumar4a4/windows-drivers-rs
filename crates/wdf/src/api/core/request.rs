@@ -1,13 +1,13 @@
 use alloc::string::String;
 
 use wdf_macros::object_context;
-use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY, WDFOBJECT, WDFREQUEST};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFOBJECT, WDFREQUEST};
 
 use super::{
     io_queue::IoQueue,
     memory::Memory,
     object::Handle,
-    result::{NtResult, NtStatus, NtStatusError},
+    result::{NtResult, NtStatus, NtStatusError, StatusCodeExt},
 };
 
 #[derive(Debug)]
@@ -96,37 +96,27 @@ impl Request {
     pub fn retrieve_input_memory(&self) -> NtResult<&Memory> {
         let mut raw_memory: WDFMEMORY = core::ptr::null_mut();
 
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestRetrieveInputMemory,
                 self.as_ptr() as *mut _,
                 &mut raw_memory
             )
-        };
-
-        if NT_SUCCESS(status) {
-            Ok(unsafe { &*(raw_memory as *const Memory) })
-        } else {
-            Err(status.into())
         }
+        .and_then(|| unsafe { &*(raw_memory as *const Memory) })
     }
 
     pub fn retrieve_output_memory(&mut self) -> NtResult<&mut Memory> {
         let mut raw_memory: WDFMEMORY = core::ptr::null_mut();
 
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestRetrieveOutputMemory,
                 self.as_ptr() as *mut _,
                 &mut raw_memory
             )
-        };
-
-        if NT_SUCCESS(status) {
-            Ok(unsafe { &mut *(raw_memory as *mut Memory) })
-        } else {
-            Err(status.into())
         }
+        .and_then(|| unsafe { &mut *(raw_memory as *mut Memory) })
     }
 
     pub fn stop_acknowledge_requeue(self) {

@@ -77,7 +77,6 @@ pub(crate) use impl_ref_counted_handle;
 #[repr(transparent)]
 pub struct WdfObjectContextTypeInfo(WDF_OBJECT_CONTEXT_TYPE_INFO);
 
-
 /// SAFETY: This type is NOT safe to send or share
 /// across threads but still implements `Sync` because
 /// it is used to declare a static during the setup
@@ -103,13 +102,13 @@ impl WdfObjectContextTypeInfo {
 /// context.
 ///
 /// # Safety
-/// 
+///
 /// This trait is unsafe because implementing it involves
 /// inherently unsafe and error-prone operations like
 /// declaring a static variable, correctly storing its
 /// address in an `WDF_OBJECT_CONTEXT_TYPE_INFO` object
 /// in a specific way and so on.
-/// 
+///
 /// Typically you should not have to implement it by hand.
 /// It is implemented automatically by the attributes
 /// `object_context` and `object_context_with_ref_count_check`.

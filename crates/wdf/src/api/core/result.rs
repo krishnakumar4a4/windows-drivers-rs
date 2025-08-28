@@ -1,4 +1,4 @@
-use wdk_sys::{NT_ERROR, NT_INFORMATION, NT_WARNING, NT_SUCCESS, NTSTATUS};
+use wdk_sys::{NT_ERROR, NT_INFORMATION, NT_SUCCESS, NT_WARNING};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NtStatus {
@@ -162,11 +162,52 @@ impl Into<i32> for NtStatusError {
 
 pub type NtResult<T> = Result<T, NtStatusError>;
 
-pub fn to_result(code: NTSTATUS) -> NtResult<()> {
-    if NT_SUCCESS(code) {
-        Ok(())
-    } else {
-        Err(NtStatusError::from(code))
+/// Extension trait to convert an NTSTATUS (i32) into NtResult combinators
+pub trait StatusCodeExt {
+    fn ok(self) -> NtResult<()>;
+
+    /// If status is non-error, run closure and return its value wrapped in
+    /// `Ok`. Otherwise return Err(NtStatusError).
+    fn and_then<T, F>(self, f: F) -> NtResult<T>
+    where
+        F: FnOnce() -> T;
+
+    /// If status is non-error, run closure which may return an NtResult and
+    /// return it. Otherwise immediately return Err(NtStatusError).
+    fn and_then_try<T, F>(self, f: F) -> NtResult<T>
+    where
+        F: FnOnce() -> NtResult<T>;
+}
+
+impl StatusCodeExt for i32 {
+    fn ok(self) -> NtResult<()> {
+        if NT_SUCCESS(self) {
+            Ok(())
+        } else {
+            Err(NtStatusError::from(self))
+        }
+    }
+
+    fn and_then<T, F>(self, f: F) -> NtResult<T>
+    where
+        F: FnOnce() -> T,
+    {
+        if !NT_ERROR(self) {
+            Ok(f())
+        } else {
+            Err(NtStatusError::from(self))
+        }
+    }
+
+    fn and_then_try<T, F>(self, f: F) -> NtResult<T>
+    where
+        F: FnOnce() -> NtResult<T>,
+    {
+        if !NT_ERROR(self) {
+            f()
+        } else {
+            Err(NtStatusError::from(self))
+        }
     }
 }
 

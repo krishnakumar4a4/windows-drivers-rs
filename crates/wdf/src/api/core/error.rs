@@ -159,61 +159,6 @@ impl Into<i32> for NtStatusError {
 }
 
 pub type NtResult<T> = Result<T, NtStatusError>;
-
-// Extension trait to convert an NTSTATUS (i32) into NtResult combinators
-// Usage examples:
-//    unsafe { WdfIoQueueCreate(... ) }.ok()?; // short-circuit on error
-//    let v = unsafe { SomeWdfCall(...) }.and_then(|| compute_value())?; // run a closure when success
-//    unsafe { SomeWdfCall(...) }.and_then_try(|| do_more_that_may_fail())?; // chain a fallible closure
-
-pub trait NtStatusExt {
-    fn ok(self) -> NtResult<()>;
-
-    /// If status is non-error, run closure and return its value wrapped in Ok.
-    /// Otherwise return Err(NtStatusError).
-    fn and_then<T, F>(self, f: F) -> NtResult<T>
-    where
-        F: FnOnce() -> T;
-
-    /// If status is non-error, run closure which may return an NtResult and return it.
-    /// Otherwise immediately return Err(NtStatusError).
-    fn and_then_try<T, F>(self, f: F) -> NtResult<T>
-    where
-        F: FnOnce() -> NtResult<T>;
-}
-
-impl NtStatusExt for i32 {
-    fn ok(self) -> NtResult<()> {
-        if !NT_ERROR(self) {
-            Ok(())
-        } else {
-            Err(NtStatusError::from(self))
-        }
-    }
-
-    fn and_then<T, F>(self, f: F) -> NtResult<T>
-    where
-        F: FnOnce() -> T,
-    {
-        if !NT_ERROR(self) {
-            Ok(f())
-        } else {
-            Err(NtStatusError::from(self))
-        }
-    }
-
-    fn and_then_try<T, F>(self, f: F) -> NtResult<T>
-    where
-        F: FnOnce() -> NtResult<T>,
-    {
-        if !NT_ERROR(self) {
-            f()
-        } else {
-            Err(NtStatusError::from(self))
-        }
-    }
-}
-
 /// This module provides NTSTATUS codes as constants
 pub mod status_codes {
     use wdk_sys::NTSTATUS;

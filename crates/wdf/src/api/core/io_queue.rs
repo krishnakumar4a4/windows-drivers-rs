@@ -3,7 +3,6 @@ use core::sync::atomic::AtomicUsize;
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
-    NT_SUCCESS,
     WDFQUEUE,
     WDFREQUEST,
     WDF_IO_QUEUE_CONFIG,
@@ -16,7 +15,7 @@ use super::{
     device::Device,
     object::{impl_ref_counted_handle, Handle},
     request::Request,
-    result::{NtResult, NtStatusError},
+    result::{NtResult, NtStatusError, StatusCodeExt},
     sync::Arc,
     wdf_struct_size,
     TriState,
@@ -29,7 +28,7 @@ impl IoQueue {
         let mut config = to_unsafe_config(&queue_config);
         let mut queue: WDFQUEUE = core::ptr::null_mut();
 
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoQueueCreate,
                 device.as_ptr() as *mut _,
@@ -37,9 +36,8 @@ impl IoQueue {
                 WDF_NO_OBJECT_ATTRIBUTES,
                 &mut queue,
             )
-        };
-
-        if NT_SUCCESS(status) {
+        }
+        .and_then_try(|| {
             let ctxt = IoQueueContext {
                 ref_count: AtomicUsize::new(0),
                 evt_io_default: queue_config.evt_io_default,
@@ -53,9 +51,7 @@ impl IoQueue {
             let queue = unsafe { Arc::from_raw(queue as *mut _) };
 
             Ok(queue)
-        } else {
-            Err(status.into())
-        }
+        })
     }
 
     pub fn get_device(&self) -> &Device {
@@ -80,19 +76,14 @@ impl IoQueue {
 
     pub fn retrieve_next_request(&self) -> NtResult<Request> {
         let mut request: WDFREQUEST = core::ptr::null_mut();
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoQueueRetrieveNextRequest,
                 self.as_ptr() as *mut _,
                 &mut request
             )
-        };
-
-        if NT_SUCCESS(status) {
-            Ok(unsafe { Request::from_raw(request) })
-        } else {
-            Err(status.into())
         }
+        .and_then(|| unsafe { Request::from_raw(request) })
     }
 }
 

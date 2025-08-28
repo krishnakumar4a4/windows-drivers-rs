@@ -1,12 +1,12 @@
 use core::{ptr::null_mut, sync::atomic::AtomicUsize, time::Duration};
 
 use wdf_macros::object_context_with_ref_count_check;
-use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFTIMER, WDF_TIMER_CONFIG};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFTIMER, WDF_TIMER_CONFIG};
 
 use super::{
     device::Device,
     object::{impl_ref_counted_handle, init_attributes, Handle},
-    result::NtResult,
+    result::{NtResult, StatusCodeExt},
     sync::Arc,
     wdf_struct_size,
 };
@@ -36,23 +36,20 @@ impl Timer {
         // SAFETY: The resulting ffi object is stored in a private member and not
         // accessible outside of this module, and this module guarantees that it is
         // always in a valid state.
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfTimerCreate,
                 &mut config,
                 &mut attributes,
                 &mut timer,
             )
-        };
-
-        if NT_SUCCESS(status) {
+        }
+        .and_then_try(|| {
             TimerContext::attach(unsafe { &*(timer as *mut _) }, context)?;
             let timer = unsafe { Arc::from_raw(timer as *mut _) };
 
             Ok(timer)
-        } else {
-            Err(status.into())
-        }
+        })
     }
 
     // TODO: takes &self instead of &mut self because right now

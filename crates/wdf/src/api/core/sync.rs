@@ -9,11 +9,11 @@ use core::{
 };
 
 use wdk::println;
-use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFOBJECT, WDFSPINLOCK};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFSPINLOCK};
 
 use super::{
     object::{bug_check, init_attributes, Handle, RefCountedHandle},
-    result::NtResult,
+    result::{NtResult, StatusCodeExt},
 };
 
 /// WDF Spin Lock
@@ -41,23 +41,18 @@ impl<T> SpinLock<T> {
         // SAFETY: The resulting ffi object is stored in a private member and not
         // accessible outside of this module, and this module guarantees that it is
         // always in a valid state.
-        let status = unsafe {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfSpinLockCreate,
                 &mut attributes,
                 &mut spin_lock.wdf_spin_lock,
             )
-        };
+        }
+        .and_then(|| spin_lock)
 
         // TODO: should we increment the ref count of the spin lock
         // to prevent it from being deleted while we are using it?
         // This is super important for soundness so look into it
-
-        if NT_SUCCESS(status) {
-            Ok(spin_lock)
-        } else {
-            Err(status.into())
-        }
     }
 
     /// Acquire the spinlock and return a guard that will release the spinlock
