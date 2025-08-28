@@ -71,15 +71,18 @@ macro_rules! impl_ref_counted_handle {
 pub(crate) use impl_handle;
 pub(crate) use impl_ref_counted_handle;
 
+/// A Rust wrapper over [WDF context type info](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfobject/ns-wdfobject-_wdf_object_context_type_info)
+/// which is used while setting up an object context.
 #[doc(hidden)]
 #[repr(transparent)]
 pub struct WdfObjectContextTypeInfo(WDF_OBJECT_CONTEXT_TYPE_INFO);
 
-/// SAFETY: This type is NOT safe to send across threads
-/// but it will never be used by the end user.
-/// It is used only to declare a static during the setup
-/// of WDF object contexts and is only internally used by
-/// WDF wherein proper locks are taken to ensure thread safety.
+
+/// SAFETY: This type is NOT safe to send or share
+/// across threads but still implements `Sync` because
+/// it is used to declare a static during the setup
+/// of WDF object contexts. It is not meant to be used
+/// by the end user so this is okay.
 unsafe impl Sync for WdfObjectContextTypeInfo {}
 
 impl WdfObjectContextTypeInfo {
@@ -96,9 +99,21 @@ impl WdfObjectContextTypeInfo {
         unsafe { *inner }.UniqueType
     }
 }
-
-/// Marker trait that must be implemented by
-/// any types that are to be used as context objects
+/// A trait indicating that this type is an object
+/// context.
+///
+/// # Safety
+/// 
+/// This trait is unsafe because implementing it involves
+/// inherently unsafe and error-prone operations like
+/// declaring a static variable, correctly storing its
+/// address in an `WDF_OBJECT_CONTEXT_TYPE_INFO` object
+/// in a specific way and so on.
+/// 
+/// Typically you should not have to implement it by hand.
+/// It is implemented automatically by the attributes
+/// `object_context` and `object_context_with_ref_count_check`.
+#[doc(hidden)]
 pub unsafe trait ObjectContext: Sync {
     fn get_type_info() -> &'static WdfObjectContextTypeInfo;
 }
@@ -108,20 +123,20 @@ pub unsafe trait ObjectContext: Sync {
 // or HeapAlloc which are the two functions used by WDF.
 const MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT: usize = 16;
 
-pub unsafe fn attach_context<T: Handle, U: ObjectContext>(
-    fw_obj: &T,
-    context: U,
+pub unsafe fn attach_context<H: Handle, C: ObjectContext>(
+    handle: &H,
+    context: C,
     cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
     destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>,
 ) -> NtResult<()> {
-    set_up_context::<T, U>(
+    set_up_context::<H, C>(
         context,
         |mut attributes| {
-            let mut wdf_context: *mut U = core::ptr::null_mut();
+            let mut wdf_context: *mut C = core::ptr::null_mut();
             let status = unsafe {
                 call_unsafe_wdf_function_binding!(
                     WdfObjectAllocateContext,
-                    fw_obj.as_ptr(),
+                    handle.as_ptr(),
                     &mut attributes,
                     core::mem::transmute(&mut wdf_context),
                 )
@@ -165,27 +180,27 @@ pub unsafe fn create_with_context<T: Handle, U: ObjectContext>(
     Ok(created_obj.unwrap()) // The object is guaranteed to be valid here
 }
 
-fn set_up_context<T: Handle, U: ObjectContext>(
-    context: U,
-    mut create_wdf_context: impl FnMut(WDF_OBJECT_ATTRIBUTES) -> NtResult<*mut U>,
+fn set_up_context<H: Handle, C: ObjectContext>(
+    context: C,
+    mut create_wdf_context: impl FnMut(WDF_OBJECT_ATTRIBUTES) -> NtResult<*mut C>,
     cleanup_callback: unsafe extern "C" fn(WDFOBJECT),
     destroy_callback: Option<unsafe extern "C" fn(WDFOBJECT)>,
 ) -> NtResult<()> {
     // Make sure the alignment requirement of the object struct
     // does not exceed the minimum possible alignment of allocations
     // made by the framework.
-    if core::mem::align_of::<U>() > MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT {
+    if core::mem::align_of::<C>() > MIN_FRAMEWORK_ALIGNMENT_ON_64_BIT {
         return Err(STATUS_INVALID_PARAMETER.into());
     }
 
     let mut attributes = init_attributes();
-    attributes.ContextTypeInfo = U::get_type_info().get_unique_type();
+    attributes.ContextTypeInfo = C::get_type_info().get_unique_type();
     attributes.EvtCleanupCallback = Some(cleanup_callback);
     if destroy_callback.is_some() {
         attributes.EvtDestroyCallback = destroy_callback;
     }
 
-    let wdf_context: *mut U = create_wdf_context(attributes)?;
+    let wdf_context: *mut C = create_wdf_context(attributes)?;
 
     // SAFETY: The required alignment of the Rust context type
     // is guaranteed to not conflict with the alignment of the
@@ -198,11 +213,11 @@ fn set_up_context<T: Handle, U: ObjectContext>(
     Ok(())
 }
 
-/// Gets context of type `U` for the given frameework object if it exists
-pub fn get_context<T: Handle, U: ObjectContext>(fw_obj: &T) -> Option<&U> {
-    // SAFETY: The pointer to framework object is obtained via as_ptr()
+/// Gets context of type `C` for the given framework handle if it exists
+pub fn get_context<H: Handle, C: ObjectContext>(handle: &H) -> Option<&C> {
+    // SAFETY: The pointer to framework handle is obtained via as_ptr()
     // which is guaranteed to be valid
-    let context = unsafe { get_context_raw::<U>(fw_obj.as_ptr()) };
+    let context = unsafe { get_context_raw::<C>(handle.as_ptr()) };
 
     if !context.is_null() {
         Some(unsafe { &*context })
@@ -211,12 +226,12 @@ pub fn get_context<T: Handle, U: ObjectContext>(fw_obj: &T) -> Option<&U> {
     }
 }
 
-/// Gets mutable context of type `U` for the given frameework object if it
+/// Gets mutable context of type `C` for the given framework handle if it
 /// exists
-pub fn get_context_mut<T: Handle, U: ObjectContext>(fw_obj: &mut T) -> Option<&mut U> {
-    // SAFETY: The pointer to framework object is obtained via as_ptr()
+pub fn get_context_mut<H: Handle, C: ObjectContext>(handle: &mut H) -> Option<&mut C> {
+    // SAFETY: The pointer to framework handle is obtained via as_ptr()
     // which is guaranteed to be valid
-    let context = unsafe { get_context_raw::<U>(fw_obj.as_ptr()) };
+    let context = unsafe { get_context_raw::<C>(handle.as_ptr()) };
 
     if !context.is_null() {
         Some(unsafe { &mut *context })
@@ -225,29 +240,29 @@ pub fn get_context_mut<T: Handle, U: ObjectContext>(fw_obj: &mut T) -> Option<&m
     }
 }
 
-/// Gets raw pointer to the context object for a given raw framework object.
+/// Gets raw pointer to the context object for a given raw framework handle.
 // SAFETY: The pointer to WDF object must point to a valid WDF object
-unsafe fn get_context_raw<U: ObjectContext>(fw_obj: WDFOBJECT) -> *mut U {
-    let context_metadata = U::get_type_info();
+unsafe fn get_context_raw<C: ObjectContext>(handle: WDFOBJECT) -> *mut C {
+    let context_metadata = C::get_type_info();
 
     unsafe {
         call_unsafe_wdf_function_binding!(
             WdfObjectGetTypedContextWorker,
-            fw_obj,
+            handle,
             &context_metadata.0
-        ) as *mut U
+        ) as *mut C
     }
 }
 
-pub unsafe fn drop_context<U: ObjectContext>(fw_obj: WDFOBJECT) {
-    let context_metadata = U::get_type_info();
+pub unsafe fn drop_context<C: ObjectContext>(handle: WDFOBJECT) {
+    let context_metadata = C::get_type_info();
 
     let context = unsafe {
         call_unsafe_wdf_function_binding!(
             WdfObjectGetTypedContextWorker,
-            fw_obj,
+            handle,
             &context_metadata.0
-        ) as *mut core::mem::ManuallyDrop<U>
+        ) as *mut core::mem::ManuallyDrop<C>
     };
 
     if !context.is_null() {
@@ -257,10 +272,10 @@ pub unsafe fn drop_context<U: ObjectContext>(fw_obj: WDFOBJECT) {
     }
 }
 
-pub(crate) fn bug_check_if_ref_count_not_zero<T: RefCountedHandle, U: ObjectContext>(
+pub(crate) fn bug_check_if_ref_count_not_zero<H: RefCountedHandle, C: ObjectContext>(
     obj: WDFOBJECT,
 ) {
-    let handle = unsafe { &*obj.cast::<T>() };
+    let handle = unsafe { &*obj.cast::<H>() };
     let ref_count = handle.get_ref_count().load(Ordering::Acquire);
     if ref_count > 0 {
         bug_check(0xDEADDEAD, obj, Some(ref_count));
