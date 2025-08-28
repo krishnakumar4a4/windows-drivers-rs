@@ -1,4 +1,4 @@
-use wdk_sys::{NT_ERROR, NT_INFORMATION, NT_WARNING};
+use wdk_sys::{NT_ERROR, NT_INFORMATION, NT_WARNING, NT_SUCCESS, NTSTATUS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NtStatus {
@@ -161,6 +161,14 @@ impl Into<i32> for NtStatusError {
 }
 
 pub type NtResult<T> = Result<T, NtStatusError>;
+
+pub fn to_result(code: NTSTATUS) -> NtResult<()> {
+    if NT_SUCCESS(code) {
+        Ok(())
+    } else {
+        Err(NtStatusError::from(code))
+    }
+}
 
 /// This module provides NTSTATUS codes as constants
 pub mod status_codes {

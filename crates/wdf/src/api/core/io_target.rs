@@ -18,7 +18,7 @@ use super::{
     memory::{Memory, MemoryOffset},
     object::{impl_ref_counted_handle, Handle},
     request::Request,
-    result::{NtResult, status_codes},
+    result::{NtResult, status_codes, to_result},
     sync::Arc,
 };
 
@@ -57,11 +57,8 @@ impl IoTarget {
     pub fn start(&self) -> NtResult<()> {
         let status =
             unsafe { call_unsafe_wdf_function_binding!(WdfIoTargetStart, self.as_ptr() as *mut _) };
-        if NT_SUCCESS(status) {
-            Ok(())
-        } else {
-            Err(status.into())
-        }
+
+        to_result(status)
     }
 
     // TODO: start and stop are not thread-safe. They
@@ -88,15 +85,13 @@ impl IoTarget {
         device_offset: Option<i64>,
     ) -> NtResult<()> {
         let mut buffer_offset = WDFMEMORY_OFFSET::default();
-        let (buffer_ptr, buffer_offset_ptr, device_offset_ptr) =
-            save_buffer_and_get_ptrs(
+        let (buffer_ptr, buffer_offset_ptr) =
+            to_buffer_ptrs(
                 request,
                 output_buffer,
                 &mut buffer_offset,
                 false,
-                device_offset,
             )?;
-
 
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
@@ -105,15 +100,11 @@ impl IoTarget {
                 request.as_ptr() as *mut _,
                 buffer_ptr as *mut _,
                 buffer_offset_ptr,
-                device_offset_ptr
+                to_device_offset_ptr(device_offset)
             )
         };
 
-        if NT_SUCCESS(status) {
-            Ok(())
-        } else {
-            Err(status.into())
-        }
+        to_result(status)
     }
 
     pub fn format_request_for_write(
@@ -123,13 +114,12 @@ impl IoTarget {
         device_offset: Option<i64>,
     ) -> NtResult<()> {
         let mut buffer_offset = WDFMEMORY_OFFSET::default();
-        let (buffer_ptr, buffer_offset_ptr, device_offset_ptr) =
-            save_buffer_and_get_ptrs(
+        let (buffer_ptr, buffer_offset_ptr) =
+            to_buffer_ptrs(
                 request,
                 input_buffer,
                 &mut buffer_offset,
                 true,
-                device_offset,
             )?;
 
         let status = unsafe {
@@ -139,25 +129,20 @@ impl IoTarget {
                 request.as_ptr() as *mut _,
                 buffer_ptr as *mut _,
                 buffer_offset_ptr,
-                device_offset_ptr
+                to_device_offset_ptr(device_offset)
             )
         };
 
-        if NT_SUCCESS(status) {
-            Ok(())
-        } else {
-            Err(status.into())
-        }
+        to_result(status)
     }
 }
 
-fn save_buffer_and_get_ptrs(
+pub(crate) fn to_buffer_ptrs(
     request: &mut Request,
     buffer: RequestFormatBuffer,
     c_buffer_offset: &mut WDFMEMORY_OFFSET,
     is_input_buffer: bool,
-    device_offset: Option<i64>,
-) -> NtResult<(WDFMEMORY, PWDFMEMORY_OFFSET, *mut i64)> {
+) -> NtResult<(WDFMEMORY, PWDFMEMORY_OFFSET)> {
     let (buffer_ptr, buffer_len, buffer_offset) = match buffer {
         RequestFormatBuffer::None => (ptr::null_mut(), 0, None),
         RequestFormatBuffer::RequestBuffer(offset) => {
@@ -187,12 +172,15 @@ fn save_buffer_and_get_ptrs(
         ptr::null_mut()
     };
 
-    let device_offset_ptr = device_offset
-        .map(|mut offset| &mut offset as *mut _)
-        .unwrap_or(ptr::null_mut());
-    
-    Ok((buffer_ptr as *mut _, c_buffer_offset_ptr, device_offset_ptr))
+    Ok((buffer_ptr as *mut _, c_buffer_offset_ptr))
 }
+
+fn to_device_offset_ptr(device_offset: Option<i64>) -> *mut i64 {
+    device_offset
+        .map(|mut offset| &mut offset as *mut _)
+        .unwrap_or(ptr::null_mut())
+}
+
 
 fn set_request_user_buffer(request: &mut Request, buffer: Memory, is_input_buffer: bool) -> NtResult<()> {
     if is_input_buffer {
