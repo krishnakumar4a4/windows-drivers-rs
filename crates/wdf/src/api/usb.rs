@@ -11,6 +11,7 @@ use wdk_sys::{
     USBD_VERSION_INFORMATION,
     WDFCONTEXT,
     WDFMEMORY,
+    WDFMEMORY_OFFSET,
     WDFUSBDEVICE,
     WDFUSBPIPE,
     WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
@@ -27,9 +28,10 @@ use wdk_sys::{
 use super::core::{
     device::{Device, DevicePowerPolicyIdleSettings, DevicePowerPolicyWakeSettings},
     enum_mapping,
-    io_target::IoTarget,
+    io_target::{IoTarget, RequestFormatBuffer, to_buffer_ptrs},
     memory::Memory,
     object::{impl_handle, impl_ref_counted_handle, Handle},
+    request::Request,
     result::{NtResult, NtStatus, StatusCodeExt},
     sync::Arc,
     wdf_struct_size,
@@ -288,6 +290,48 @@ impl UsbPipe {
                 &mut config
             )
         }.ok()
+    }
+
+    pub fn format_request_for_read(
+        &self,
+        request: &mut Request,
+        output_buffer: RequestFormatBuffer,
+    ) -> NtResult<()> {
+        let mut buffer_offset = WDFMEMORY_OFFSET::default();
+        let (buffer_ptr, buffer_offset_ptr) =
+            to_buffer_ptrs(request, output_buffer, &mut buffer_offset, false)?;
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbTargetPipeFormatRequestForRead,
+                self.as_ptr() as *mut _,
+                request.as_ptr() as *mut _,
+                buffer_ptr as *mut _,
+                buffer_offset_ptr,
+            )
+        }
+        .ok()
+    }
+
+    pub fn format_request_for_write(
+        &self,
+        request: &mut Request,
+        input_buffer: RequestFormatBuffer,
+    ) -> NtResult<()> {
+        let mut buffer_offset = WDFMEMORY_OFFSET::default();
+        let (buffer_ptr, buffer_offset_ptr) =
+            to_buffer_ptrs(request, input_buffer, &mut buffer_offset, true)?;
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbTargetPipeFormatRequestForRead,
+                self.as_ptr() as *mut _,
+                request.as_ptr() as *mut _,
+                buffer_ptr as *mut _,
+                buffer_offset_ptr,
+            )
+        }
+        .ok()
     }
 }
 
