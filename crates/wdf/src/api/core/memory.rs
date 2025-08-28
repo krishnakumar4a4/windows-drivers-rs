@@ -2,7 +2,7 @@ use wdk_sys::{call_unsafe_wdf_function_binding, NT_SUCCESS, WDFMEMORY_OFFSET};
 
 use super::{
     object::{impl_handle, Handle},
-    result::{status_codes, NtResult},
+    result::NtResult,
 };
 
 impl_handle!(Memory);
@@ -69,46 +69,6 @@ impl Memory {
             )
         };
         (buffer as *mut _, buf_size)
-    }
-}
-
-#[derive(Debug)]
-pub struct MemoryWithOffset {
-    memory: Memory,
-    offset: MemoryOffset,
-}
-
-impl MemoryWithOffset {
-    pub fn try_new(memory: Memory, offset: MemoryOffset) -> NtResult<Self> {
-        if !Self::is_valid_offset(&memory, &offset) {
-            return Err(status_codes::STATUS_INVALID_PARAMETER.into());
-        }
-
-        Ok(Self { memory, offset })
-    }
-
-    #[inline(always)]
-    pub fn memory(&self) -> &Memory {
-        &self.memory
-    }
-
-    #[inline(always)]
-    pub fn offset(&self) -> &MemoryOffset {
-        &self.offset
-    }
-
-    #[inline(always)]
-    pub fn into_memory(self) -> Memory {
-        self.memory
-    }
-
-    fn is_valid_offset(memory: &Memory, offset: &MemoryOffset) -> bool {
-        let buf_len = memory.buffer_len();
-        let end = offset.buffer_offset.checked_add(offset.buffer_length);
-        match end {
-            Some(end) if end <= buf_len => true,
-            _ => false,
-        }
     }
 }
 
