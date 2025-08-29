@@ -33,13 +33,12 @@ use wdf::{
     Guid,
     IoQueue,
     IoQueueConfig,
-    NtError,
     NtResult,
-    NtStatus,
     PnpPowerEventCallbacks,
     Request,
     RequestCancellationToken,
     SpinLock,
+    status_codes,
     Timer,
     TimerConfig,
 };
@@ -93,7 +92,7 @@ struct TimerContext {
 /// The function driver can use the path to store driver related data between
 /// reboots. The path does not store hardware instance specific data.
 #[driver_entry(tracing_control_guid = "cb94defb-592a-4509-8f2e-54f204929669")]
-fn driver_entry(driver: &mut Driver, _registry_path: &str) -> Result<(), NtError> {
+fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     if cfg!(debug_assertions) {
         print_driver_version(driver)?;
     }
@@ -113,7 +112,7 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> Result<(), NtError
 /// # Arguments
 ///
 /// * `device_init` - Reference to a framework-allocated `DeviceInit` structure.
-fn evt_device_add(device_init: &mut DeviceInit) -> Result<(), NtError> {
+fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     println!("Enter evt_device_add");
 
     device_create(device_init)
@@ -256,7 +255,7 @@ fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 
     let Some(context) = QueueContext::get(&queue) else {
         println!("evt_io_write failed to get queue context");
-        request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
+        request.complete(status_codes::STATUS_UNSUCCESSFUL.into()); // TODO: decide on the status code here
         return;
     };
 
@@ -279,7 +278,7 @@ fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
         let buffer = context.buffer.lock();
         let Some(buffer) = buffer.as_ref() else {
             println!("evt_io_read called but no request buffer is set");
-            request.complete_with_information(NtStatus::Success, 0);
+            request.complete_with_information(status_codes::STATUS_SUCCESS.into(), 0);
             return;
         };
 
@@ -303,7 +302,7 @@ fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
         Ok(request) => request,
         Err((e, request)) => {
             println!("evt_io_write failed to mark request cancellable: {e:?}");
-            request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
+            request.complete(status_codes::STATUS_UNSUCCESSFUL.into()); // TODO: decide on the status code here
             return;
         }
     };
@@ -331,7 +330,7 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
 
     if length > MAX_WRITE_LENGTH {
         println!("evt_io_write buffer length too big {length}. Max is {MAX_WRITE_LENGTH}");
-        request.complete_with_information(NtStatus::buffer_overflow(), 0);
+        request.complete_with_information(status_codes::STATUS_BUFFER_OVERFLOW.into(), 0);
         return;
     }
 
@@ -354,7 +353,7 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
 
     let Some(context) = QueueContext::get(&queue) else {
         println!("evt_io_write failed to get queue context");
-        request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
+        request.complete(status_codes::STATUS_UNSUCCESSFUL.into());
         return;
     };
 
@@ -366,7 +365,7 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
         Ok(request) => request,
         Err((e, request)) => {
             println!("evt_io_write failed to mark request cancellable: {e:?}");
-            request.complete(NtStatus::Error(NtError::from(1))); // TODO: decide on the status code here
+            request.complete(status_codes::STATUS_UNSUCCESSFUL.into());
             return;
         }
     };
@@ -389,7 +388,7 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
     if let Some(context) = QueueContext::get(&queue) {
         let mut req = context.request.lock();
         if let Some(req) = req.take() {
-            req.complete(NtStatus::cancelled());
+            req.complete(status_codes::STATUS_CANCELLED.into());
             println!("Request cancelled");
         } else {
             println!("Request already completed");
@@ -416,7 +415,7 @@ fn evt_timer(timer: &Timer) {
     let req = QueueContext::get(queue).and_then(|context| context.request.lock().take());
 
     if let Some(req) = req {
-        req.complete(NtStatus::Success);
+        req.complete(status_codes::STATUS_SUCCESS.into());
         println!("Request completed");
     } else {
         println!("No request pending");
