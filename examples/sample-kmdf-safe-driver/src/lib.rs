@@ -191,8 +191,8 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
     Ok(())
 }
 
-// This callback is called by the Framework when the device is started
-// or restarted after a suspend operation.
+/// This callback is called by the Framework when the device is started
+/// or restarted after a suspend operation.
 /// # Arguments
 ///
 /// * `device` - Handle to the device
