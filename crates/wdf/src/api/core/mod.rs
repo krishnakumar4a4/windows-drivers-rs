@@ -111,8 +111,8 @@ macro_rules! enum_mapping {
     // Helper for enum definition
     (@enumdef
         $(#[$enum_meta:meta])*
-        $vis:vis enum $safe_name:ident : $c_type:ident {
-            $( $variant:ident = $c_variant:ident ),* $(,)?
+        $vis:vis enum $safe_name:ident : $raw_type:ident {
+            $( $variant:ident = $raw_variant:ident ),* $(,)?
         }
     ) => {
         paste::paste! {
@@ -123,15 +123,15 @@ macro_rules! enum_mapping {
             }
         }
     };
-    // Helper for From<$safe_name> for $c_type
+    // Helper for From<$safe_name> for $raw_type
     (@from_safe_to_c
-        $safe_name:ident, $c_type:ident, $( $variant:ident = $c_variant:ident ),*
+        $safe_name:ident, $raw_type:ident, $( $variant:ident = $raw_variant:ident ),*
     ) => {
         paste::paste! {
-            impl From<$safe_name> for $c_type {
+            impl From<$safe_name> for $raw_type {
                 fn from(value: $safe_name) -> Self {
                     match value {
-                        $( $safe_name::$variant => wdk_sys::[<_ $c_type>]::$c_variant ),*
+                        $( $safe_name::$variant => wdk_sys::[<_ $raw_type>]::$raw_variant ),*
                     }
                 }
             }
@@ -141,17 +141,17 @@ macro_rules! enum_mapping {
     (
         infallible;
         $(#[$enum_meta:meta])*
-        $vis:vis enum $safe_name:ident : $c_type:ident {
-            $( $variant:ident = $c_variant:ident ),* $(,)?
+        $vis:vis enum $safe_name:ident : $raw_type:ident {
+            $( $variant:ident = $raw_variant:ident ),* $(,)?
         }
     ) => {
-        enum_mapping!(@enumdef $(#[$enum_meta])* $vis enum $safe_name : $c_type { $( $variant = $c_variant ),* });
-        enum_mapping!(@from_safe_to_c $safe_name, $c_type, $( $variant = $c_variant ),*);
+        enum_mapping!(@enumdef $(#[$enum_meta])* $vis enum $safe_name : $raw_type { $( $variant = $raw_variant ),* });
+        enum_mapping!(@from_safe_to_c $safe_name, $raw_type, $( $variant = $raw_variant ),*);
         paste::paste! {
-            impl From<$c_type> for $safe_name {
-                fn from(value: $c_type) -> Self {
+            impl From<$raw_type> for $safe_name {
+                fn from(value: $raw_type) -> Self {
                     match value {
-                        $( v if v == wdk_sys::[<_ $c_type>]::$c_variant => $safe_name::$variant, )*
+                        $( v if v == wdk_sys::[<_ $raw_type>]::$raw_variant => $safe_name::$variant, )*
                         _ => unreachable!("Invalid value for {}", stringify!($safe_name)),
                     }
                 }
@@ -161,18 +161,18 @@ macro_rules! enum_mapping {
     // Fallible conversion (default)
     (
         $(#[$enum_meta:meta])*
-        $vis:vis enum $safe_name:ident : $c_type:ident {
-            $( $variant:ident = $c_variant:ident ),* $(,)?
+        $vis:vis enum $safe_name:ident : $raw_type:ident {
+            $( $variant:ident = $raw_variant:ident ),* $(,)?
         }
     ) => {
-        enum_mapping!(@enumdef $(#[$enum_meta])* $vis enum $safe_name : $c_type { $( $variant = $c_variant ),* });
-        enum_mapping!(@from_safe_to_c $safe_name, $c_type, $( $variant = $c_variant ),*);
+        enum_mapping!(@enumdef $(#[$enum_meta])* $vis enum $safe_name : $raw_type { $( $variant = $raw_variant ),* });
+        enum_mapping!(@from_safe_to_c $safe_name, $raw_type, $( $variant = $raw_variant ),*);
         paste::paste! {
-            impl TryFrom<$c_type> for $safe_name {
+            impl TryFrom<$raw_type> for $safe_name {
                 type Error = ();
-                fn try_from(value: $c_type) -> Result<Self, Self::Error> {
+                fn try_from(value: $raw_type) -> Result<Self, Self::Error> {
                     match value {
-                        $( v if v == wdk_sys::[<_ $c_type>]::$c_variant => Ok($safe_name::$variant), )*
+                        $( v if v == wdk_sys::[<_ $raw_type>]::$raw_variant => Ok($safe_name::$variant), )*
                         _ => Err(()),
                     }
                 }

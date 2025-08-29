@@ -125,7 +125,7 @@ impl IoTarget {
 pub(crate) fn to_buffer_ptrs(
     request: &mut Request,
     buffer: RequestFormatBuffer,
-    c_buffer_offset: &mut WDFMEMORY_OFFSET,
+    raw_buffer_offset: &mut WDFMEMORY_OFFSET,
     is_input_buffer: bool,
 ) -> NtResult<(WDFMEMORY, PWDFMEMORY_OFFSET)> {
     let (buffer_ptr, buffer_len, buffer_offset) = match buffer {
@@ -150,14 +150,14 @@ pub(crate) fn to_buffer_ptrs(
         return Err(status_codes::STATUS_INVALID_PARAMETER.into());
     }
 
-    let c_buffer_offset_ptr = if let Some(ref offset) = buffer_offset {
-        *c_buffer_offset = offset.into();
-        c_buffer_offset as PWDFMEMORY_OFFSET
+    let raw_buffer_offset_ptr = if let Some(ref offset) = buffer_offset {
+        *raw_buffer_offset = offset.into();
+        raw_buffer_offset as PWDFMEMORY_OFFSET
     } else {
         ptr::null_mut()
     };
 
-    Ok((buffer_ptr as *mut _, c_buffer_offset_ptr))
+    Ok((buffer_ptr as *mut _, raw_buffer_offset_ptr))
 }
 
 fn to_device_offset_ptr(device_offset: Option<i64>) -> *mut i64 {
