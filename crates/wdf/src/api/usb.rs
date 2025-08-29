@@ -61,7 +61,7 @@ impl UsbDevice {
 
             let usb_device = unsafe { Arc::from_raw(usb_device as *mut _) };
             Ok(usb_device)
-        }) 
+        })
     }
 
     pub fn retrieve_information(&self) -> NtResult<UsbDeviceInformation> {
@@ -90,17 +90,15 @@ impl UsbDevice {
                 ptr::null_mut(),
                 &mut config
             )
-        }.and_then_try(|| {
-            let info = UsbSingleInterfaceInformation {
-                number_of_configured_pipes: unsafe {
-                    config.Types.SingleInterface.NumberConfiguredPipes
-                },
-                configured_usb_interface: unsafe {
-                    &*(config.Types.SingleInterface.ConfiguredUsbInterface as *const _)
-                },
-            };
-            Ok(info)
-        }) 
+        }
+        .and_then(|| UsbSingleInterfaceInformation {
+            number_of_configured_pipes: unsafe {
+                config.Types.SingleInterface.NumberConfiguredPipes
+            },
+            configured_usb_interface: unsafe {
+                &*(config.Types.SingleInterface.ConfiguredUsbInterface as *const _)
+            },
+        })
     }
 
     pub fn assign_s0_idle_settings(&self) -> NtResult<DevicePowerPolicyIdleSettings> {
@@ -124,8 +122,8 @@ impl UsbDevice {
                 &mut settings
             )
         }.and_then(|| settings.into())
+        }
     }
-}
 
 #[object_context_with_ref_count_check(UsbDevice)]
 struct UsbDeviceContext {
