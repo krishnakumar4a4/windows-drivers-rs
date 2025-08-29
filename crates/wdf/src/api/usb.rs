@@ -28,7 +28,7 @@ use wdk_sys::{
 use super::core::{
     device::{Device, DevicePowerPolicyIdleSettings, DevicePowerPolicyWakeSettings},
     enum_mapping,
-    io_target::{IoTarget, RequestFormatBuffer, to_buffer_ptrs},
+    io_target::{to_buffer_ptrs, IoTarget, RequestFormatBuffer},
     memory::Memory,
     object::{impl_handle, impl_ref_counted_handle, Handle},
     request::Request,
@@ -52,7 +52,8 @@ impl UsbDevice {
                 WDF_NO_OBJECT_ATTRIBUTES,
                 &mut usb_device
             )
-        }.and_then_try(|| {
+        }
+        .and_then_try(|| {
             let ctxt = UsbDeviceContext {
                 ref_count: AtomicUsize::new(0),
             };
@@ -72,7 +73,8 @@ impl UsbDevice {
                 self.as_ptr() as *mut _,
                 &mut information
             )
-        }.and_then(|| information.into())
+        }
+        .and_then(|| information.into())
     }
 
     pub fn select_config_single_interface<'a>(
@@ -109,7 +111,8 @@ impl UsbDevice {
                 self.as_ptr() as *mut _,
                 &mut settings
             )
-        }.and_then(|| settings.into())
+        }
+        .and_then(|| settings.into())
     }
 
     pub fn assign_sx_wake_settings(&self) -> NtResult<DevicePowerPolicyWakeSettings> {
@@ -121,9 +124,10 @@ impl UsbDevice {
                 self.as_ptr() as *mut _,
                 &mut settings
             )
-        }.and_then(|| settings.into())
         }
+        .and_then(|| settings.into())
     }
+}
 
 #[object_context_with_ref_count_check(UsbDevice)]
 struct UsbDeviceContext {
@@ -287,7 +291,8 @@ impl UsbPipe {
                 self.as_ptr() as *mut _,
                 &mut config
             )
-        }.ok()
+        }
+        .ok()
     }
 
     pub fn format_request_for_read(

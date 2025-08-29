@@ -248,39 +248,27 @@ impl From<&PnpPowerEventCallbacks> for WDF_PNPPOWER_EVENT_CALLBACKS {
             raw_callbacks.EvtDeviceReleaseHardware = Some(__evt_device_release_hardware);
         }
 
-        if callbacks
-            .evt_device_self_managed_io_cleanup
-            .is_some()
-        {
-            raw_callbacks.EvtDeviceSelfManagedIoCleanup = Some(__evt_device_self_managed_io_cleanup);
+        if callbacks.evt_device_self_managed_io_cleanup.is_some() {
+            raw_callbacks.EvtDeviceSelfManagedIoCleanup =
+                Some(__evt_device_self_managed_io_cleanup);
         }
 
-        if callbacks
-            .evt_device_self_managed_io_flush
-            .is_some()
-        {
+        if callbacks.evt_device_self_managed_io_flush.is_some() {
             raw_callbacks.EvtDeviceSelfManagedIoFlush = Some(__evt_device_self_managed_io_flush);
         }
 
-        if callbacks
-            .evt_device_self_managed_io_init
-            .is_some()
-        {
+        if callbacks.evt_device_self_managed_io_init.is_some() {
             raw_callbacks.EvtDeviceSelfManagedIoInit = Some(__evt_device_self_managed_io_init);
         }
 
-        if callbacks
-            .evt_device_self_managed_io_suspend
-            .is_some()
-        {
-            raw_callbacks.EvtDeviceSelfManagedIoSuspend = Some(__evt_device_self_managed_io_suspend);
+        if callbacks.evt_device_self_managed_io_suspend.is_some() {
+            raw_callbacks.EvtDeviceSelfManagedIoSuspend =
+                Some(__evt_device_self_managed_io_suspend);
         }
 
-        if callbacks
-            .evt_device_self_managed_io_restart
-            .is_some()
-        {
-            raw_callbacks.EvtDeviceSelfManagedIoRestart = Some(__evt_device_self_managed_io_restart);
+        if callbacks.evt_device_self_managed_io_restart.is_some() {
+            raw_callbacks.EvtDeviceSelfManagedIoRestart =
+                Some(__evt_device_self_managed_io_restart);
         }
 
         if callbacks.evt_device_surprise_removal.is_some() {
@@ -303,10 +291,7 @@ impl From<&PnpPowerEventCallbacks> for WDF_PNPPOWER_EVENT_CALLBACKS {
             raw_callbacks.EvtDeviceRelationsQuery = Some(__evt_device_relations_query);
         }
 
-        if callbacks
-            .evt_device_usage_notification_ex
-            .is_some()
-        {
+        if callbacks.evt_device_usage_notification_ex.is_some() {
             raw_callbacks.EvtDeviceUsageNotificationEx = Some(__evt_device_usage_notification_ex);
         }
 

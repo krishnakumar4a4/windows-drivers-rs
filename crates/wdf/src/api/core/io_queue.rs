@@ -168,7 +168,8 @@ impl From<&IoQueueConfig> for WDF_IO_QUEUE_CONFIG {
             presented_requests_limit,
         } = config.dispatch_type
         {
-            raw_config.Settings.Parallel.NumberOfPresentedRequests = match presented_requests_limit {
+            raw_config.Settings.Parallel.NumberOfPresentedRequests = match presented_requests_limit
+            {
                 Some(limit) => limit,
                 None => u32::MAX,
             };
