@@ -178,9 +178,8 @@ pub(crate) fn iter_manifest_paths(metadata: Metadata) -> impl IntoIterator<Item 
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use crate::metadata::TryFromCargoMetadataError;
-
     use super::Wdk;
+    use crate::{metadata::TryFromCargoMetadataError, DriverConfig, KmdfConfig};
 
     #[test]
     fn exactly_one_wdk_configuration() {
@@ -200,6 +199,14 @@ mod tests {
 
         let wdk = Wdk::try_from(&cargo_toml_metadata);
         assert!(wdk.is_ok());
+        assert!(matches!(
+            wdk.unwrap().driver_model,
+            DriverConfig::Kmdf(KmdfConfig {
+                kmdf_version_major: 1,
+                target_kmdf_version_minor: 33,
+                minimum_kmdf_version_minor: None
+            })
+        ));
     }
 
     #[test]
@@ -228,7 +235,7 @@ mod tests {
 
         let wdk = Wdk::try_from(&cargo_toml_metadata);
         assert!(matches!(
-            wdk.expect_err("error is expected"),
+            wdk.expect_err("expected an error"),
             TryFromCargoMetadataError::MultipleWdkConfigurationsDetected {
                 wdk_metadata_configurations: _
             }
@@ -238,7 +245,6 @@ mod tests {
     #[test]
     fn no_wdk_configuration_detected() {
         let cwd = PathBuf::from("C:\\tmp");
-        let driver_type = "KMDF";
         let driver_name = "sample-kmdf";
         let driver_version = "0.0.1";
         let (workspace_member, package) =
@@ -252,7 +258,7 @@ mod tests {
 
         let wdk = Wdk::try_from(&cargo_toml_metadata);
         assert!(matches!(
-            wdk.expect_err("error expected"),
+            wdk.expect_err("expected an error"),
             TryFromCargoMetadataError::NoWdkConfigurationsDetected
         ));
     }
@@ -262,17 +268,18 @@ mod tests {
         let cwd = PathBuf::from("C:\\tmp");
         let driver_name = "sample-kmdf";
         let driver_version = "0.0.1";
-        let wdk_metadata = TestWdkMetadata(format!(
+        let wdk_metadata = TestWdkMetadata(
             r#"
-        {{
-            "wdk": {{
-                "driver-model": {{
-                    "random-key": "random-value"
+                {{
+                    "wdk": {{
+                        "driver-model": {{
+                            "random-key": "random-value"
+                        }}
+                    }}
                 }}
-            }}
-        }}
-    "#
-        ));
+            "#
+            .to_string(),
+        );
         let (workspace_member, package) =
             get_cargo_metadata_package(&cwd, driver_name, driver_version, Some(wdk_metadata));
 
@@ -284,7 +291,7 @@ mod tests {
 
         let wdk = Wdk::try_from(&cargo_toml_metadata);
         assert!(matches!(
-            wdk.expect_err("error is expected"),
+            wdk.expect_err("expected an error"),
             TryFromCargoMetadataError::WdkMetadataDeserialization {
                 metadata_source: _,
                 error_source: _
