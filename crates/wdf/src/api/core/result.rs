@@ -58,6 +58,18 @@ impl NtStatus {
     }
 }
 
+impl From<NtStatusNonError> for NtStatus {
+    fn from(non_error: NtStatusNonError) -> Self {
+        Self::NonError(non_error)
+    }
+}
+
+impl From<NtStatusError> for NtStatus {
+    fn from(error: NtStatusError) -> Self {
+        Self::Error(error)
+    }
+}
+
 impl From<i32> for NtStatus {
     fn from(code: i32) -> Self {
         Self::from(code)
