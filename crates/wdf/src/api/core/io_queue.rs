@@ -25,7 +25,7 @@ impl_ref_counted_handle!(IoQueue, IoQueueContext);
 
 impl IoQueue {
     pub fn create(device: &Device, queue_config: &IoQueueConfig) -> NtResult<Arc<Self>> {
-        let mut config = to_unsafe_config(&queue_config);
+        let mut config = queue_config.into();
         let mut queue: WDFQUEUE = core::ptr::null_mut();
 
         unsafe {
@@ -136,44 +136,46 @@ impl Default for IoQueueConfig {
     }
 }
 
-fn to_unsafe_config(safe_config: &IoQueueConfig) -> WDF_IO_QUEUE_CONFIG {
-    let mut config = WDF_IO_QUEUE_CONFIG::default();
+impl From<&IoQueueConfig> for WDF_IO_QUEUE_CONFIG {
+    fn from(config: &IoQueueConfig) -> Self {
+        let mut raw_config = WDF_IO_QUEUE_CONFIG::default();
 
-    let size = wdf_struct_size!(WDF_IO_QUEUE_CONFIG);
+        let size = wdf_struct_size!(WDF_IO_QUEUE_CONFIG);
 
-    config.Size = size as u32;
-    config.PowerManaged = safe_config.power_managed as i32;
-    config.DispatchType = safe_config.dispatch_type.into();
-    config.AllowZeroLengthRequests = safe_config.allow_zero_length_requests as u8;
-    config.DefaultQueue = safe_config.default_queue as u8;
+        raw_config.Size = size as u32;
+        raw_config.PowerManaged = config.power_managed as i32;
+        raw_config.DispatchType = config.dispatch_type.into();
+        raw_config.AllowZeroLengthRequests = config.allow_zero_length_requests as u8;
+        raw_config.DefaultQueue = config.default_queue as u8;
 
-    if safe_config.evt_io_default.is_some() {
-        config.EvtIoDefault = Some(__evt_io_default);
+        if config.evt_io_default.is_some() {
+            raw_config.EvtIoDefault = Some(__evt_io_default);
+        }
+
+        if config.evt_io_read.is_some() {
+            raw_config.EvtIoRead = Some(__evt_io_read);
+        }
+
+        if config.evt_io_write.is_some() {
+            raw_config.EvtIoWrite = Some(__evt_io_write);
+        }
+
+        if config.evt_io_device_control.is_some() {
+            raw_config.EvtIoDeviceControl = Some(__evt_io_device_control);
+        }
+
+        if let IoQueueDispatchType::Parallel {
+            presented_requests_limit,
+        } = config.dispatch_type
+        {
+            raw_config.Settings.Parallel.NumberOfPresentedRequests = match presented_requests_limit {
+                Some(limit) => limit,
+                None => u32::MAX,
+            };
+        }
+
+        raw_config
     }
-
-    if safe_config.evt_io_read.is_some() {
-        config.EvtIoRead = Some(__evt_io_read);
-    }
-
-    if safe_config.evt_io_write.is_some() {
-        config.EvtIoWrite = Some(__evt_io_write);
-    }
-
-    if safe_config.evt_io_device_control.is_some() {
-        config.EvtIoDeviceControl = Some(__evt_io_device_control);
-    }
-
-    if let IoQueueDispatchType::Parallel {
-        presented_requests_limit,
-    } = safe_config.dispatch_type
-    {
-        config.Settings.Parallel.NumberOfPresentedRequests = match presented_requests_limit {
-            Some(limit) => limit,
-            None => u32::MAX,
-        };
-    }
-
-    config
 }
 
 #[object_context_with_ref_count_check(IoQueue)]

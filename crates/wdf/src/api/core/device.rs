@@ -43,7 +43,7 @@ impl Device {
         pnp_power_callbacks: Option<PnpPowerEventCallbacks>,
     ) -> NtResult<&Self> {
         if let Some(ref pnp_power_callbacks) = pnp_power_callbacks {
-            let mut pnp_power_callbacks = to_unsafe_pnp_power_callbacks(pnp_power_callbacks);
+            let mut pnp_power_callbacks = pnp_power_callbacks.into();
 
             unsafe {
                 call_unsafe_wdf_function_binding!(
@@ -211,107 +211,107 @@ enum_mapping! {
     }
 }
 
-fn to_unsafe_pnp_power_callbacks(
-    pnp_power_callbacks: &PnpPowerEventCallbacks,
-) -> WDF_PNPPOWER_EVENT_CALLBACKS {
-    let mut unsafe_callbacks = WDF_PNPPOWER_EVENT_CALLBACKS::default();
-    unsafe_callbacks.Size = wdf_struct_size!(WDF_PNPPOWER_EVENT_CALLBACKS);
+impl From<&PnpPowerEventCallbacks> for WDF_PNPPOWER_EVENT_CALLBACKS {
+    fn from(callbacks: &PnpPowerEventCallbacks) -> Self {
+        let mut raw_callbacks = WDF_PNPPOWER_EVENT_CALLBACKS::default();
+        raw_callbacks.Size = wdf_struct_size!(WDF_PNPPOWER_EVENT_CALLBACKS);
 
-    if pnp_power_callbacks.evt_device_d0_entry.is_some() {
-        unsafe_callbacks.EvtDeviceD0Entry = Some(__evt_device_d0_entry);
+        if callbacks.evt_device_d0_entry.is_some() {
+            raw_callbacks.EvtDeviceD0Entry = Some(__evt_device_d0_entry);
+        }
+
+        if callbacks
+            .evt_device_d0_entry_post_interrupts_enabled
+            .is_some()
+        {
+            raw_callbacks.EvtDeviceD0EntryPostInterruptsEnabled =
+                Some(__evt_device_d0_entry_post_interrupts_enabled);
+        }
+
+        if callbacks.evt_device_d0_exit.is_some() {
+            raw_callbacks.EvtDeviceD0Exit = Some(__evt_device_d0_exit);
+        }
+
+        if callbacks
+            .evt_device_d0_exit_pre_interrupts_disabled
+            .is_some()
+        {
+            raw_callbacks.EvtDeviceD0ExitPreInterruptsDisabled =
+                Some(__evt_device_d0_exit_pre_interrupts_disabled);
+        }
+
+        if callbacks.evt_device_prepare_hardware.is_some() {
+            raw_callbacks.EvtDevicePrepareHardware = Some(__evt_device_prepare_hardware);
+        }
+
+        if callbacks.evt_device_release_hardware.is_some() {
+            raw_callbacks.EvtDeviceReleaseHardware = Some(__evt_device_release_hardware);
+        }
+
+        if callbacks
+            .evt_device_self_managed_io_cleanup
+            .is_some()
+        {
+            raw_callbacks.EvtDeviceSelfManagedIoCleanup = Some(__evt_device_self_managed_io_cleanup);
+        }
+
+        if callbacks
+            .evt_device_self_managed_io_flush
+            .is_some()
+        {
+            raw_callbacks.EvtDeviceSelfManagedIoFlush = Some(__evt_device_self_managed_io_flush);
+        }
+
+        if callbacks
+            .evt_device_self_managed_io_init
+            .is_some()
+        {
+            raw_callbacks.EvtDeviceSelfManagedIoInit = Some(__evt_device_self_managed_io_init);
+        }
+
+        if callbacks
+            .evt_device_self_managed_io_suspend
+            .is_some()
+        {
+            raw_callbacks.EvtDeviceSelfManagedIoSuspend = Some(__evt_device_self_managed_io_suspend);
+        }
+
+        if callbacks
+            .evt_device_self_managed_io_restart
+            .is_some()
+        {
+            raw_callbacks.EvtDeviceSelfManagedIoRestart = Some(__evt_device_self_managed_io_restart);
+        }
+
+        if callbacks.evt_device_surprise_removal.is_some() {
+            raw_callbacks.EvtDeviceSurpriseRemoval = Some(__evt_device_surprise_removal);
+        }
+
+        if callbacks.evt_device_query_remove.is_some() {
+            raw_callbacks.EvtDeviceQueryRemove = Some(__evt_device_query_remove);
+        }
+
+        if callbacks.evt_device_query_stop.is_some() {
+            raw_callbacks.EvtDeviceQueryStop = Some(__evt_device_query_stop);
+        }
+
+        if callbacks.evt_device_usage_notification.is_some() {
+            raw_callbacks.EvtDeviceUsageNotification = Some(__evt_device_usage_notification);
+        }
+
+        if callbacks.evt_device_relations_query.is_some() {
+            raw_callbacks.EvtDeviceRelationsQuery = Some(__evt_device_relations_query);
+        }
+
+        if callbacks
+            .evt_device_usage_notification_ex
+            .is_some()
+        {
+            raw_callbacks.EvtDeviceUsageNotificationEx = Some(__evt_device_usage_notification_ex);
+        }
+
+        raw_callbacks
     }
-
-    if pnp_power_callbacks
-        .evt_device_d0_entry_post_interrupts_enabled
-        .is_some()
-    {
-        unsafe_callbacks.EvtDeviceD0EntryPostInterruptsEnabled =
-            Some(__evt_device_d0_entry_post_interrupts_enabled);
-    }
-
-    if pnp_power_callbacks.evt_device_d0_exit.is_some() {
-        unsafe_callbacks.EvtDeviceD0Exit = Some(__evt_device_d0_exit);
-    }
-
-    if pnp_power_callbacks
-        .evt_device_d0_exit_pre_interrupts_disabled
-        .is_some()
-    {
-        unsafe_callbacks.EvtDeviceD0ExitPreInterruptsDisabled =
-            Some(__evt_device_d0_exit_pre_interrupts_disabled);
-    }
-
-    if pnp_power_callbacks.evt_device_prepare_hardware.is_some() {
-        unsafe_callbacks.EvtDevicePrepareHardware = Some(__evt_device_prepare_hardware);
-    }
-
-    if pnp_power_callbacks.evt_device_release_hardware.is_some() {
-        unsafe_callbacks.EvtDeviceReleaseHardware = Some(__evt_device_release_hardware);
-    }
-
-    if pnp_power_callbacks
-        .evt_device_self_managed_io_cleanup
-        .is_some()
-    {
-        unsafe_callbacks.EvtDeviceSelfManagedIoCleanup = Some(__evt_device_self_managed_io_cleanup);
-    }
-
-    if pnp_power_callbacks
-        .evt_device_self_managed_io_flush
-        .is_some()
-    {
-        unsafe_callbacks.EvtDeviceSelfManagedIoFlush = Some(__evt_device_self_managed_io_flush);
-    }
-
-    if pnp_power_callbacks
-        .evt_device_self_managed_io_init
-        .is_some()
-    {
-        unsafe_callbacks.EvtDeviceSelfManagedIoInit = Some(__evt_device_self_managed_io_init);
-    }
-
-    if pnp_power_callbacks
-        .evt_device_self_managed_io_suspend
-        .is_some()
-    {
-        unsafe_callbacks.EvtDeviceSelfManagedIoSuspend = Some(__evt_device_self_managed_io_suspend);
-    }
-
-    if pnp_power_callbacks
-        .evt_device_self_managed_io_restart
-        .is_some()
-    {
-        unsafe_callbacks.EvtDeviceSelfManagedIoRestart = Some(__evt_device_self_managed_io_restart);
-    }
-
-    if pnp_power_callbacks.evt_device_surprise_removal.is_some() {
-        unsafe_callbacks.EvtDeviceSurpriseRemoval = Some(__evt_device_surprise_removal);
-    }
-
-    if pnp_power_callbacks.evt_device_query_remove.is_some() {
-        unsafe_callbacks.EvtDeviceQueryRemove = Some(__evt_device_query_remove);
-    }
-
-    if pnp_power_callbacks.evt_device_query_stop.is_some() {
-        unsafe_callbacks.EvtDeviceQueryStop = Some(__evt_device_query_stop);
-    }
-
-    if pnp_power_callbacks.evt_device_usage_notification.is_some() {
-        unsafe_callbacks.EvtDeviceUsageNotification = Some(__evt_device_usage_notification);
-    }
-
-    if pnp_power_callbacks.evt_device_relations_query.is_some() {
-        unsafe_callbacks.EvtDeviceRelationsQuery = Some(__evt_device_relations_query);
-    }
-
-    if pnp_power_callbacks
-        .evt_device_usage_notification_ex
-        .is_some()
-    {
-        unsafe_callbacks.EvtDeviceUsageNotificationEx = Some(__evt_device_usage_notification_ex);
-    }
-
-    unsafe_callbacks
 }
 
 macro_rules! unsafe_pnp_power_callback {
