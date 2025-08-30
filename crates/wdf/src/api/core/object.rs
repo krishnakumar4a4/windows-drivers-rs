@@ -93,10 +93,6 @@ impl<T: Handle> Owned<T> {
             _marker: PhantomData,
         }
     }
-
-    pub fn as_ptr(&self) -> WDFOBJECT {
-        self.inner
-    }
 }
 
 impl<T: Handle> Deref for Owned<T> {
