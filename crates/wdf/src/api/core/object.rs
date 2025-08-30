@@ -1,5 +1,9 @@
 use alloc::string::String;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
@@ -71,6 +75,40 @@ macro_rules! impl_ref_counted_handle {
 
 pub(crate) use impl_handle;
 pub(crate) use impl_ref_counted_handle;
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct Owned<T: Handle> {
+    inner: WDFOBJECT,
+    _marker: core::marker::PhantomData<T>,
+}
+
+impl<T: Handle> Owned<T> {
+    pub fn new(inner: WDFOBJECT) -> Self {
+        Self {
+            inner,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn as_ptr(&self) -> WDFOBJECT {
+        self.inner
+    }
+}
+
+impl<T: Handle> Deref for Owned<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*(self.inner as *const _ as *const Self::Target) }
+    }
+}
+
+impl<T: Handle> DerefMut for Owned<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *(self.inner as *mut _ as *mut Self::Target) }
+    }
+}
 
 /// A Rust wrapper over [WDF context type info](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfobject/ns-wdfobject-_wdf_object_context_type_info)
 /// which is used while setting up an object context.
