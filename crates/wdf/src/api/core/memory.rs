@@ -7,7 +7,7 @@ use super::{
     result::{NtResult, StatusCodeExt},
 };
 
-impl_handle!{
+impl_handle! {
     /// A memory handle that only be accessed as a
     /// reference (`&Memory`) or a ref counted value
     /// (`Arc<Memory>`)
