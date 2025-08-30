@@ -26,8 +26,9 @@ pub trait RefCountedHandle: Handle {
 }
 
 macro_rules! impl_handle {
-    ($obj:ident) => {
+    ($(#[$meta:meta])* $obj:ident) => {
         #[repr(C)]
+        $(#[$meta])*
         pub struct $obj {
             _private: [u8; 0], // Prevents instantiation of the struct from driver code
         }

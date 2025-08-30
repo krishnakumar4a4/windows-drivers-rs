@@ -7,14 +7,16 @@ use super::{
     result::{NtResult, StatusCodeExt},
 };
 
-/// A memory handle that only be accessed as a
-/// reference (`&Memory`) or a ref counted value
-/// (`Arc<Memory>`)
-///
-/// `Memory` is the dual to `OwnedMemory` in the
-/// same way as `str` is to `String` and `Path`
-/// to `PathBuf`
-impl_handle!(Memory);
+impl_handle!{
+    /// A memory handle that only be accessed as a
+    /// reference (`&Memory`) or a ref counted value
+    /// (`Arc<Memory>`)
+    ///
+    /// `Memory` is the dual to `OwnedMemory` in the
+    /// same way as `str` is to `String` and `Path`
+    /// to `PathBuf`
+    Memory
+}
 
 impl Memory {
     pub fn get_buffer(&self) -> &[u8] {
