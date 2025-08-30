@@ -7,6 +7,13 @@ use super::{
     result::{NtResult, StatusCodeExt},
 };
 
+/// A memory handle that only be accessed as a
+/// reference (`&Memory`) or a ref counted value
+/// (`Arc<Memory>`)
+///
+/// `Memory` is the dual to `OwnedMemory` in the
+/// same way as `str` is to `String` and `Path`
+/// to `PathBuf`
 impl_handle!(Memory);
 
 impl Memory {
@@ -64,7 +71,11 @@ impl Memory {
     }
 }
 
-/// Represents a memory handle that can be owned
+/// A memory handle that is onwned
+///
+/// `OwnedMemory` is the dual to `Memory` in the
+/// same way as `String` is to `str` and `Path`
+/// to `PathBuf`
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct OwnedMemory(WDFMEMORY);
