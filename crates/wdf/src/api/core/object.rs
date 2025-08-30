@@ -80,8 +80,11 @@ pub(crate) use impl_ref_counted_handle;
 #[repr(transparent)]
 pub struct Owned<T: Handle> {
     inner: WDFOBJECT,
-    _marker: core::marker::PhantomData<T>,
+    _marker: PhantomData<T>,
 }
+
+unsafe impl<T: Handle + Sync> Sync for Owned<T> {}
+unsafe impl<T: Handle + Send> Send for Owned<T> {}
 
 impl<T: Handle> Owned<T> {
     pub fn new(inner: WDFOBJECT) -> Self {
