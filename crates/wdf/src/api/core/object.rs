@@ -87,7 +87,7 @@ unsafe impl<T: Handle + Sync> Sync for Owned<T> {}
 unsafe impl<T: Handle + Send> Send for Owned<T> {}
 
 impl<T: Handle> Owned<T> {
-    pub fn new(inner: WDFOBJECT) -> Self {
+    pub(crate) fn new(inner: WDFOBJECT) -> Self {
         Self {
             inner,
             _marker: PhantomData,
