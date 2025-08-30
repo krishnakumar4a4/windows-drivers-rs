@@ -15,7 +15,7 @@ use wdk_sys::{
 use super::{
     device::Device,
     enum_mapping,
-    memory::{Memory, MemoryOffset},
+    memory::{Memory, MemoryOffset, OwnedMemory},
     object::{impl_ref_counted_handle, Handle},
     request::Request,
     result::{status_codes, NtResult, StatusCodeExt},
@@ -168,7 +168,7 @@ fn to_device_offset_ptr(device_offset: Option<i64>) -> *mut i64 {
 
 fn set_request_user_buffer(
     request: &mut Request,
-    buffer: Memory,
+    buffer: OwnedMemory,
     is_input_buffer: bool,
 ) -> NtResult<()> {
     if is_input_buffer {
@@ -219,7 +219,7 @@ pub enum RequestFormatBuffer {
     RequestBuffer(Option<MemoryOffset>),
 
     /// An independent buffer provided by user
-    UserBuffer(Memory, Option<MemoryOffset>),
+    UserBuffer(OwnedMemory, Option<MemoryOffset>),
 }
 
 #[object_context_with_ref_count_check(IoTarget)]

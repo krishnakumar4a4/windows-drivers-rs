@@ -5,7 +5,7 @@ use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFOBJECT, WDFREQUEST
 
 use super::{
     io_queue::IoQueue,
-    memory::Memory,
+    memory::{Memory, OwnedMemory},
     object::Handle,
     result::{NtResult, NtStatus, NtStatusError, StatusCodeExt},
 };
@@ -180,16 +180,16 @@ macro_rules! define_user_memory_context {
     (@impl $ctx_name:ident, $retrieve_fn:ident, $set_fn:ident) => {
         #[object_context(Request)]
         struct $ctx_name {
-            memory: Option<Memory>,
+            memory: Option<OwnedMemory>,
         }
 
         impl Request {
-            pub(crate) fn $retrieve_fn(&mut self) -> Option<Memory> {
+            pub(crate) fn $retrieve_fn(&mut self) -> Option<OwnedMemory> {
                 let context = $ctx_name::get_mut(self)?;
                 context.memory.take()
             }
 
-            pub(crate) fn $set_fn(&mut self, memory: Memory) -> NtResult<()> {
+            pub(crate) fn $set_fn(&mut self, memory: OwnedMemory) -> NtResult<()> {
                 match $ctx_name::get_mut(self) {
                     Some(context) => {
                         context.memory = Some(memory);

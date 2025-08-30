@@ -1,4 +1,6 @@
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY_OFFSET};
+use core::ops::{Deref, DerefMut};
+
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFMEMORY_OFFSET};
 
 use super::{
     object::{impl_handle, Handle},
@@ -59,6 +61,36 @@ impl Memory {
             )
         };
         (buffer as *mut _, buf_size)
+    }
+}
+
+/// Represents a memory handle that can be owned
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct OwnedMemory(WDFMEMORY);
+
+/// Although `OwnedMemory` carries a raw pointer it
+/// is still `Sync` because sharing it across thread
+/// will allow just readonly access to the pointer
+/// as `&[u8]`
+unsafe impl Sync for OwnedMemory {}
+
+/// Although `OwnedMemory` carries a raw pointer it
+/// is still `Send` because it uniquely owns the
+/// pointer.
+unsafe impl Send for OwnedMemory {}
+
+impl Deref for OwnedMemory {
+    type Target = Memory;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*(self.0 as *const Memory) }
+    }
+}
+
+impl DerefMut for OwnedMemory {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *(self.0 as *mut Memory) }
     }
 }
 
