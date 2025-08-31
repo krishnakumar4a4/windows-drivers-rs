@@ -4,11 +4,13 @@ use bitflags::bitflags;
 use wdf_macros::{object_context, object_context_with_ref_count_check};
 use wdk_sys::{
     _WdfUsbTargetDeviceSelectConfigType,
+    _WdfUsbTargetDeviceSelectSettingType,
     call_unsafe_wdf_function_binding,
     BOOLEAN,
     NTSTATUS,
     USBD_STATUS,
     USBD_VERSION_INFORMATION,
+    USB_INTERFACE_DESCRIPTOR,
     WDFCONTEXT,
     WDFMEMORY,
     WDFMEMORY_OFFSET,
@@ -21,6 +23,7 @@ use wdk_sys::{
     WDF_USB_DEVICE_CREATE_CONFIG,
     WDF_USB_DEVICE_INFORMATION,
     WDF_USB_DEVICE_SELECT_CONFIG_PARAMS,
+    WDF_USB_INTERFACE_SELECT_SETTING_PARAMS,
     WDF_USB_PIPE_INFORMATION,
     WDF_USB_PIPE_TYPE,
 };
@@ -78,7 +81,11 @@ impl UsbDevice {
     }
 
     pub fn select_config_single_interface<'a>(
-        &self,
+        // `&mut self` ensures there are no outstanding references to
+        // any `UsbPipe`s of this device while we are selecting a config
+        // because the change in config could internally delete them
+        // causing those references to dangle
+        &mut self,
     ) -> NtResult<UsbSingleInterfaceInformation<'a>> {
         let mut config = init_wdf_struct!(WDF_USB_DEVICE_SELECT_CONFIG_PARAMS);
         config.Type =
@@ -116,7 +123,7 @@ impl UsbDevice {
     }
 
     pub fn assign_sx_wake_settings(&self) -> NtResult<DevicePowerPolicyWakeSettings> {
-        let mut settings = WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS::default();
+        let mut settings = init_wdf_struct!(WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS);
 
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -193,10 +200,6 @@ pub struct UsbSingleInterfaceInformation<'a> {
 impl_handle!(UsbInterface);
 
 impl UsbInterface {
-    // TODO - UNSOUNDNESS: the framework can delete the pipe returned here
-    // while the caller has got a hold hold of it. it happens if the
-    // alternate settings of this interface are changed.
-    // Need to plug this soundness hole.
     pub fn get_configured_pipe<'a>(&self, pipe_index: u8) -> Option<&'a UsbPipe> {
         self.get_configured_pipe_impl(pipe_index, false)
             .map(|(pipe, _)| pipe)
@@ -215,7 +218,42 @@ impl UsbInterface {
             })
     }
 
-    pub fn get_configured_pipe_impl<'a>(
+    pub fn select_setting(
+        // `&mut self` ensures there are no outstanding references to
+        // any `UsbPipe`s of this interface while we are selecting a config
+        // because the change in config could internally delete them
+        // causing those references to dangle
+        &mut self,
+        params: &UsbInterfaceSelectSettingParams,
+    ) -> NtResult<()> {
+        let mut raw_params = init_wdf_struct!(WDF_USB_INTERFACE_SELECT_SETTING_PARAMS);
+        let mut raw_descriptor: USB_INTERFACE_DESCRIPTOR;
+
+        match params {
+            UsbInterfaceSelectSettingParams::Descriptor(descriptor) => {
+                raw_params.Type = _WdfUsbTargetDeviceSelectSettingType:: WdfUsbInterfaceSelectSettingTypeDescriptor;
+                raw_descriptor = descriptor.into();
+                raw_params.Types.Descriptor.InterfaceDescriptor = &mut raw_descriptor;
+            }
+            UsbInterfaceSelectSettingParams::SettingIndex(index) => {
+                raw_params.Type =
+                    _WdfUsbTargetDeviceSelectSettingType::WdfUsbInterfaceSelectSettingTypeSetting;
+                raw_params.Types.Interface.SettingIndex = *index;
+            }
+        }
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbInterfaceSelectSetting,
+                self.as_ptr() as *mut _,
+                ptr::null_mut(),
+                &mut raw_params
+            )
+        }
+        .ok()
+    }
+
+    fn get_configured_pipe_impl<'a>(
         &self,
         pipe_index: u8,
         get_info: bool,
@@ -247,6 +285,50 @@ impl UsbInterface {
             };
 
             Some(tuple)
+        }
+    }
+}
+
+pub enum UsbInterfaceSelectSettingParams {
+    Descriptor(UsbInterfaceDescriptor),
+    SettingIndex(u8),
+    // TODO: implement all the types needed
+    // to enable this variant
+    // Urb(Urb)
+}
+
+// impl From<&UsbInterfaceSelectSettingParams> for
+// WDF_USB_INTERFACE_SELECT_SETTING_PARAMS {     fn from(params:
+// &UsbInterfaceSelectSettingParams) -> Self {
+
+//         raw_params
+//     }
+// }
+
+pub struct UsbInterfaceDescriptor {
+    length: u8,
+    descriptor_type: u8,
+    interface_number: u8,
+    alternate_setting: u8,
+    num_endpoints: u8,
+    interface_class: u8,
+    interface_sub_class: u8,
+    interface_protocol: u8,
+    interface: u8,
+}
+
+impl From<&UsbInterfaceDescriptor> for USB_INTERFACE_DESCRIPTOR {
+    fn from(descriptor: &UsbInterfaceDescriptor) -> Self {
+        Self {
+            bLength: descriptor.length,
+            bDescriptorType: descriptor.descriptor_type,
+            bInterfaceNumber: descriptor.interface_number,
+            bAlternateSetting: descriptor.alternate_setting,
+            bNumEndpoints: descriptor.num_endpoints,
+            bInterfaceClass: descriptor.interface_class,
+            bInterfaceSubClass: descriptor.interface_sub_class,
+            bInterfaceProtocol: descriptor.interface_protocol,
+            iInterface: descriptor.interface,
         }
     }
 }
