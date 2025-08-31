@@ -66,7 +66,7 @@ impl UsbDevice {
     }
 
     pub fn retrieve_information(&self) -> NtResult<UsbDeviceInformation> {
-        let mut information = WDF_USB_DEVICE_INFORMATION::default();
+        let mut information = init_wdf_struct!(WDF_USB_DEVICE_INFORMATION);
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceRetrieveInformation,
@@ -103,7 +103,8 @@ impl UsbDevice {
     }
 
     pub fn assign_s0_idle_settings(&self) -> NtResult<DevicePowerPolicyIdleSettings> {
-        let mut settings = WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS::default();
+        let mut settings = init_wdf_struct!(WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS);
+
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceAssignS0IdleSettings,
