@@ -24,11 +24,11 @@ pub use wdk_sys::{
 use super::{
     device::DeviceInit,
     guid::Guid,
+    init_wdf_struct,
     object::Handle,
     result::{status_codes, NtResult},
     string::{to_rust_str, WString},
     tracing::TraceWriter,
-    wdf_struct_size,
 };
 use crate::println;
 
@@ -61,11 +61,9 @@ impl Driver {
     }
 
     pub fn is_version_available(&self, major_version: u32, minor_version: u32) -> bool {
-        let mut params = WDF_DRIVER_VERSION_AVAILABLE_PARAMS {
-            Size: wdf_struct_size!(WDF_DRIVER_VERSION_AVAILABLE_PARAMS),
-            MajorVersion: major_version,
-            MinorVersion: minor_version,
-        };
+        let mut params = init_wdf_struct!(WDF_DRIVER_VERSION_AVAILABLE_PARAMS);
+        params.MajorVersion = major_version;
+        params.MinorVersion = minor_version;
 
         let res = unsafe {
             call_unsafe_wdf_function_binding!(
@@ -201,11 +199,8 @@ pub fn call_safe_driver_entry(
 ) -> NTSTATUS {
     wdm_driver.DriverUnload = Some(driver_unload);
 
-    let mut driver_config = WDF_DRIVER_CONFIG {
-        Size: wdf_struct_size!(WDF_DRIVER_CONFIG),
-        EvtDriverDeviceAdd: Some(evt_driver_device_add),
-        ..WDF_DRIVER_CONFIG::default()
-    };
+    let mut driver_config = init_wdf_struct!(WDF_DRIVER_CONFIG);
+    driver_config.EvtDriverDeviceAdd = Some(evt_driver_device_add);
 
     let mut wdf_driver: WDFDRIVER = ptr::null_mut();
 

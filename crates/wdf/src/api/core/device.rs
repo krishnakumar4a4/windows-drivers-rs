@@ -26,12 +26,12 @@ use wdk_sys::{
 use super::{
     enum_mapping,
     guid::Guid,
+    init_wdf_struct,
     io_queue::IoQueue,
     object::{impl_ref_counted_handle, Handle},
     resource::CmResList,
     result::{NtResult, StatusCodeExt},
     string::{to_unicode_string, to_utf16_buf},
-    wdf_struct_size,
     TriState,
 };
 
@@ -213,8 +213,7 @@ enum_mapping! {
 
 impl From<&PnpPowerEventCallbacks> for WDF_PNPPOWER_EVENT_CALLBACKS {
     fn from(callbacks: &PnpPowerEventCallbacks) -> Self {
-        let mut raw_callbacks = WDF_PNPPOWER_EVENT_CALLBACKS::default();
-        raw_callbacks.Size = wdf_struct_size!(WDF_PNPPOWER_EVENT_CALLBACKS);
+        let mut raw_callbacks = init_wdf_struct!(WDF_PNPPOWER_EVENT_CALLBACKS);
 
         if callbacks.evt_device_d0_entry.is_some() {
             raw_callbacks.EvtDeviceD0Entry = Some(__evt_device_d0_entry);

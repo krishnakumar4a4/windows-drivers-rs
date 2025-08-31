@@ -13,11 +13,11 @@ use wdk_sys::{
 
 use super::{
     device::Device,
+    init_wdf_struct,
     object::{impl_ref_counted_handle, Handle},
     request::Request,
     result::{NtResult, NtStatusError, StatusCodeExt},
     sync::Arc,
-    wdf_struct_size,
     TriState,
 };
 
@@ -138,11 +138,7 @@ impl Default for IoQueueConfig {
 
 impl From<&IoQueueConfig> for WDF_IO_QUEUE_CONFIG {
     fn from(config: &IoQueueConfig) -> Self {
-        let mut raw_config = WDF_IO_QUEUE_CONFIG::default();
-
-        let size = wdf_struct_size!(WDF_IO_QUEUE_CONFIG);
-
-        raw_config.Size = size as u32;
+        let mut raw_config = init_wdf_struct!(WDF_IO_QUEUE_CONFIG);
         raw_config.PowerManaged = config.power_managed as i32;
         raw_config.DispatchType = config.dispatch_type.into();
         raw_config.AllowZeroLengthRequests = config.allow_zero_length_requests as u8;

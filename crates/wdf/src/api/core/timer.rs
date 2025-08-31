@@ -5,10 +5,10 @@ use wdk_sys::{call_unsafe_wdf_function_binding, WDFTIMER, WDF_TIMER_CONFIG};
 
 use super::{
     device::Device,
+    init_wdf_struct,
     object::{impl_ref_counted_handle, init_attributes, Handle},
     result::{NtResult, StatusCodeExt},
     sync::Arc,
-    wdf_struct_size,
 };
 
 // TODO: Make timer more ergonomic and safer. It's
@@ -127,9 +127,7 @@ impl<'a, P: Handle> TimerConfig<'a, P> {
 
 impl<'a, P: Handle> From<&TimerConfig<'a, P>> for WDF_TIMER_CONFIG {
     fn from(config: &TimerConfig<'a, P>) -> Self {
-        let mut wdf_config = WDF_TIMER_CONFIG::default();
-
-        wdf_config.Size = wdf_struct_size!(WDF_TIMER_CONFIG);
+        let mut wdf_config = init_wdf_struct!(WDF_TIMER_CONFIG);
         wdf_config.Period = config.period;
         wdf_config.AutomaticSerialization = 0;
         wdf_config.TolerableDelay = config.tolerable_delay;

@@ -38,6 +38,14 @@ enum_mapping! {
     }
 }
 
+macro_rules! init_wdf_struct {
+    ($StructName:ty) => {{
+        let mut raw_struct = <$StructName>::default();
+        raw_struct.Size = crate::wdf_struct_size!($StructName);
+        raw_struct
+    }};
+}
+
 macro_rules! wdf_struct_size {
     ($StructName:ty) => {{
         paste::paste! {
@@ -55,6 +63,7 @@ macro_rules! wdf_struct_size {
     }};
 }
 
+pub(crate) use init_wdf_struct;
 pub(crate) use wdf_struct_size;
 
 /// A macro to declare a Rust enum that maps one-to-one to a C enum.

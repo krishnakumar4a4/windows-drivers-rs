@@ -18,7 +18,7 @@ use wdk_sys::{
     _WDF_SYNCHRONIZATION_SCOPE,
 };
 
-use super::{result::NtResult, wdf_struct_size};
+use super::{init_wdf_struct, result::NtResult};
 
 pub trait Handle {
     fn as_ptr(&self) -> WDFOBJECT;
@@ -88,7 +88,7 @@ unsafe impl<T: Handle + Send> Send for Owned<T> {}
 
 impl<T: Handle> Owned<T> {
     /// Creates a new `Owned<T>` instance.
-    /// 
+    ///
     /// # Safety
     ///
     /// The provided `WDFOBJECT` pointer must be valid and of
@@ -335,9 +335,7 @@ pub(crate) fn bug_check(code: u32, obj: WDFOBJECT, ref_count: Option<usize>) {
 }
 
 pub(crate) fn init_attributes() -> WDF_OBJECT_ATTRIBUTES {
-    let mut attributes = WDF_OBJECT_ATTRIBUTES::default();
-
-    attributes.Size = wdf_struct_size!(WDF_OBJECT_ATTRIBUTES);
+    let mut attributes = init_wdf_struct!(WDF_OBJECT_ATTRIBUTES);
     attributes.ExecutionLevel = _WDF_EXECUTION_LEVEL::WdfExecutionLevelInheritFromParent;
     attributes.SynchronizationScope =
         _WDF_SYNCHRONIZATION_SCOPE::WdfSynchronizationScopeInheritFromParent;

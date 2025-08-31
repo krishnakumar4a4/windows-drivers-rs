@@ -28,13 +28,13 @@ use wdk_sys::{
 use super::core::{
     device::{Device, DevicePowerPolicyIdleSettings, DevicePowerPolicyWakeSettings},
     enum_mapping,
+    init_wdf_struct,
     io_target::{to_buffer_ptrs, IoTarget, RequestFormatBuffer},
     memory::Memory,
     object::{impl_handle, impl_ref_counted_handle, Handle},
     request::Request,
     result::{NtResult, NtStatus, StatusCodeExt},
     sync::Arc,
-    wdf_struct_size,
 };
 
 impl_ref_counted_handle!(UsbDevice, UsbDeviceContext);
@@ -80,8 +80,7 @@ impl UsbDevice {
     pub fn select_config_single_interface<'a>(
         &self,
     ) -> NtResult<UsbSingleInterfaceInformation<'a>> {
-        let mut config = WDF_USB_DEVICE_SELECT_CONFIG_PARAMS::default();
-        config.Size = wdf_struct_size!(WDF_USB_DEVICE_SELECT_CONFIG_PARAMS);
+        let mut config = init_wdf_struct!(WDF_USB_DEVICE_SELECT_CONFIG_PARAMS);
         config.Type =
             _WdfUsbTargetDeviceSelectConfigType::WdfUsbTargetDeviceSelectConfigTypeSingleInterface;
 
@@ -178,8 +177,7 @@ bitflags! {
 
 impl From<&UsbDeviceCreateConfig> for WDF_USB_DEVICE_CREATE_CONFIG {
     fn from(safe_config: &UsbDeviceCreateConfig) -> Self {
-        let mut config = WDF_USB_DEVICE_CREATE_CONFIG::default();
-        config.Size = wdf_struct_size!(WDF_USB_DEVICE_CREATE_CONFIG);
+        let mut config = init_wdf_struct!(WDF_USB_DEVICE_CREATE_CONFIG);
         config.USBDClientContractVersion = safe_config.usbd_client_contract_version;
 
         config
@@ -394,8 +392,7 @@ pub struct UsbContinuousReaderConfig {
 
 impl From<&UsbContinuousReaderConfig> for WDF_USB_CONTINUOUS_READER_CONFIG {
     fn from(safe_config: &UsbContinuousReaderConfig) -> Self {
-        let mut unsafe_config = WDF_USB_CONTINUOUS_READER_CONFIG::default();
-        unsafe_config.Size = wdf_struct_size!(WDF_USB_CONTINUOUS_READER_CONFIG);
+        let mut unsafe_config = init_wdf_struct!(WDF_USB_CONTINUOUS_READER_CONFIG);
         unsafe_config.TransferLength = safe_config.transfer_length;
         unsafe_config.HeaderLength = safe_config.header_length;
         unsafe_config.TrailerLength = safe_config.trailer_length;
