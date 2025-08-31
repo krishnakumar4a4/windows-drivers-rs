@@ -104,12 +104,14 @@ impl<T: Handle> Owned<T> {
 impl<T: Handle> Deref for Owned<T> {
     type Target = T;
 
+    #[inline(always)]
     fn deref(&self) -> &Self::Target {
         unsafe { &*(self.inner as *const _ as *const Self::Target) }
     }
 }
 
 impl<T: Handle> DerefMut for Owned<T> {
+    #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *(self.inner as *mut _ as *mut Self::Target) }
     }
