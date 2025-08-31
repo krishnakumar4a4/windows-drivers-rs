@@ -384,23 +384,48 @@ pub struct DevicePowerPolicyIdleSettings {
     pub exclude_d3_cold: TriState,
 }
 
-impl From<WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS> for DevicePowerPolicyIdleSettings {
-    fn from(settings: WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS) -> Self {
+impl DevicePowerPolicyIdleSettings {
+    pub fn from_caps(caps: &PowerPolicyS0IdleCapabilities) -> Self {
+        let mut obj = Self::default();
+        obj.idle_caps = *caps;
+
+        obj.dx_state = match caps {
+            PowerPolicyS0IdleCapabilities::CanWakeFromS0
+            | PowerPolicyS0IdleCapabilities::UsbSelectiveSuspend => DevicePowerState::Maximum,
+            PowerPolicyS0IdleCapabilities::CannotWakeFromS0 => DevicePowerState::D3,
+        };
+        obj
+    }
+}
+
+impl From<&DevicePowerPolicyIdleSettings> for WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS {
+    fn from(settings: &DevicePowerPolicyIdleSettings) -> Self {
+        let mut raw_settings = init_wdf_struct!(WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS);
+        raw_settings.IdleCaps = settings.idle_caps.into();
+        raw_settings.DxState = settings.dx_state.into();
+        raw_settings.IdleTimeout = settings.idle_timeout;
+        raw_settings.UserControlOfIdleSettings = settings.user_control_of_idle_settings.into();
+        raw_settings.Enabled = settings.enabled.into();
+        raw_settings.PowerUpIdleDeviceOnSystemWake =
+            settings.power_up_idle_device_on_system_wake.into();
+        raw_settings.IdleTimeoutType = settings.idle_timeout_type.into();
+        raw_settings.ExcludeD3Cold = settings.exclude_d3_cold.into();
+
+        raw_settings
+    }
+}
+
+impl Default for DevicePowerPolicyIdleSettings {
+    fn default() -> Self {
         Self {
-            idle_caps: settings.IdleCaps.try_into().expect("invalid IdleCaps"),
-            dx_state: settings.DxState.try_into().expect("invalid DxState"),
-            idle_timeout: settings.IdleTimeout,
-            user_control_of_idle_settings: settings
-                .UserControlOfIdleSettings
-                .try_into()
-                .expect("invalid UserControlOfIdleSettings"),
-            enabled: settings.Enabled.into(),
-            power_up_idle_device_on_system_wake: settings.PowerUpIdleDeviceOnSystemWake.into(),
-            idle_timeout_type: settings
-                .IdleTimeoutType
-                .try_into()
-                .expect("invalid IdleTimeoutType"),
-            exclude_d3_cold: settings.ExcludeD3Cold.into(),
+            idle_caps: PowerPolicyS0IdleCapabilities::CannotWakeFromS0,
+            dx_state: DevicePowerState::Maximum,
+            idle_timeout: 0,
+            user_control_of_idle_settings: PowerPolicyS0IdleUserControl::AllowUserControl,
+            enabled: TriState::default(),
+            power_up_idle_device_on_system_wake: TriState::default(),
+            idle_timeout_type: PowerPolicyIdleTimeoutType::DriverManagedIdleTimeout,
+            exclude_d3_cold: TriState::default(),
         }
     }
 }
@@ -420,6 +445,7 @@ enum_mapping! {
         D1 = PowerDeviceD1,
         D2 = PowerDeviceD2,
         D3 = PowerDeviceD3,
+        Maximum = PowerDeviceMaximum
     }
 }
 
@@ -447,19 +473,29 @@ pub struct DevicePowerPolicyWakeSettings {
     pub indicate_child_wake_on_parent_wake: bool,
 }
 
-impl From<WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS> for DevicePowerPolicyWakeSettings {
-    fn from(settings: WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS) -> Self {
+impl From<&DevicePowerPolicyWakeSettings> for WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS {
+    fn from(settings: &DevicePowerPolicyWakeSettings) -> Self {
+        let mut raw_settings = init_wdf_struct!(WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS);
+        raw_settings.DxState = settings.dx_state.into();
+        raw_settings.UserControlOfWakeSettings = settings.user_control_of_wake_settings.into();
+        raw_settings.Enabled = settings.enabled.into();
+        raw_settings.ArmForWakeIfChildrenAreArmedForWake =
+            settings.arm_for_wake_if_children_are_armed_for_wake.into();
+        raw_settings.IndicateChildWakeOnParentWake =
+            settings.indicate_child_wake_on_parent_wake.into();
+
+        raw_settings
+    }
+}
+
+impl Default for DevicePowerPolicyWakeSettings {
+    fn default() -> Self {
         Self {
-            dx_state: settings.DxState.try_into().expect("invalid DxState"),
-            user_control_of_wake_settings: settings
-                .UserControlOfWakeSettings
-                .try_into()
-                .expect("invalid UserControlOfWakeSettings"),
-            enabled: settings.Enabled.into(),
-            arm_for_wake_if_children_are_armed_for_wake: settings
-                .ArmForWakeIfChildrenAreArmedForWake
-                != 0,
-            indicate_child_wake_on_parent_wake: settings.IndicateChildWakeOnParentWake != 0,
+            dx_state: DevicePowerState::Maximum,
+            user_control_of_wake_settings: PowerPolicySxWakeUserControl::AllowUserControl,
+            enabled: TriState::default(),
+            arm_for_wake_if_children_are_armed_for_wake: false,
+            indicate_child_wake_on_parent_wake: false,
         }
     }
 }

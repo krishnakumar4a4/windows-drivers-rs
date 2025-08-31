@@ -38,6 +38,12 @@ enum_mapping! {
     }
 }
 
+impl Default for TriState {
+    fn default() -> Self {
+        TriState::UseDefault
+    }
+}
+
 macro_rules! init_wdf_struct {
     ($StructName:ty) => {{
         let mut raw_struct = <$StructName>::default();

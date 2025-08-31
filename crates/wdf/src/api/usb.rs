@@ -109,8 +109,11 @@ impl UsbDevice {
         })
     }
 
-    pub fn assign_s0_idle_settings(&self) -> NtResult<DevicePowerPolicyIdleSettings> {
-        let mut settings = init_wdf_struct!(WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS);
+    pub fn assign_s0_idle_settings(
+        &self,
+        settings: &DevicePowerPolicyIdleSettings,
+    ) -> NtResult<()> {
+        let mut settings = settings.into();
 
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -119,11 +122,14 @@ impl UsbDevice {
                 &mut settings
             )
         }
-        .and_then(|| settings.into())
+        .ok()
     }
 
-    pub fn assign_sx_wake_settings(&self) -> NtResult<DevicePowerPolicyWakeSettings> {
-        let mut settings = init_wdf_struct!(WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS);
+    pub fn assign_sx_wake_settings(
+        &self,
+        settings: &DevicePowerPolicyWakeSettings,
+    ) -> NtResult<()> {
+        let mut settings = settings.into();
 
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -132,7 +138,7 @@ impl UsbDevice {
                 &mut settings
             )
         }
-        .and_then(|| settings.into())
+        .ok()
     }
 }
 
