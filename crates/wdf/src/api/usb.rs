@@ -303,14 +303,6 @@ pub enum UsbInterfaceSelectSettingParams {
     // Urb(Urb)
 }
 
-// impl From<&UsbInterfaceSelectSettingParams> for
-// WDF_USB_INTERFACE_SELECT_SETTING_PARAMS {     fn from(params:
-// &UsbInterfaceSelectSettingParams) -> Self {
-
-//         raw_params
-//     }
-// }
-
 pub struct UsbInterfaceDescriptor {
     length: u8,
     descriptor_type: u8,
