@@ -87,7 +87,13 @@ unsafe impl<T: Handle + Sync> Sync for Owned<T> {}
 unsafe impl<T: Handle + Send> Send for Owned<T> {}
 
 impl<T: Handle> Owned<T> {
-    pub(crate) fn new(inner: WDFOBJECT) -> Self {
+    /// Creates a new `Owned<T>` instance.
+    /// 
+    /// # Safety
+    ///
+    /// The provided `WDFOBJECT` pointer must be valid and of
+    /// the raw WDF type corresponding to `T` and properly aligned.
+    pub(crate) unsafe fn new(inner: WDFOBJECT) -> Self {
         Self {
             inner,
             _marker: PhantomData,
