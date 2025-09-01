@@ -1,6 +1,5 @@
 use wdk_sys::{NT_ERROR, NT_INFORMATION, NT_SUCCESS, NT_WARNING};
 
-
 // TODO: Needs redesign. Currently we are treating
 // warnings as success (see `NtSStatusNonError` and the
 // methods in the `StatusCodeExt` trait -- they check
@@ -202,6 +201,12 @@ pub trait StatusCodeExt {
     fn and_then<T, F>(self, f: F) -> NtResult<T>
     where
         F: FnOnce() -> NtResult<T>;
+
+    /// If status is error, run closure and return its value wrapped in
+    /// `Err`. Otherwise return `Ok(())`.
+    fn map_err<F>(self, f: F) -> NtResult<()>
+    where
+        F: FnOnce() -> NtStatusError;
 }
 
 impl StatusCodeExt for i32 {
@@ -236,6 +241,17 @@ impl StatusCodeExt for i32 {
             f()
         } else {
             Err(NtStatusError::from(self))
+        }
+    }
+
+    fn map_err<F>(self, f: F) -> NtResult<()>
+    where
+        F: FnOnce() -> NtStatusError,
+    {
+        if !NT_ERROR(self) {
+            Ok(())
+        } else {
+            Err(f())
         }
     }
 }

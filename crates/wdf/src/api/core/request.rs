@@ -8,6 +8,7 @@ use super::{
     memory::{Memory, OwnedMemory},
     object::Handle,
     result::{NtResult, NtStatus, NtStatusError, StatusCodeExt},
+    sync::SpinLock,
 };
 
 #[derive(Debug)]
@@ -23,8 +24,8 @@ impl Request {
         Self(inner)
     }
 
-    pub fn id(&self) -> usize {
-        self.0 as usize
+    pub fn id(&self) -> RequestId {
+        RequestId(self.0 as usize)
     }
 
     pub fn complete(self, status: NtStatus) {
@@ -58,36 +59,61 @@ impl Request {
         };
     }
 
-    pub fn mark_cancellable(
+    pub fn mark_cancellable<S: CancellableRequestStore>(
         mut self,
         cancel_fn: fn(&RequestCancellationToken),
-    ) -> Result<CancellableMarkedRequest, (NtStatusError, Request)> {
-        if let Some(context) = RequestContext::get_mut(&mut self) {
-            context.evt_request_cancel = cancel_fn;
-        } else {
-            if let Err(e) = RequestContext::attach(
-                &mut self,
-                RequestContext {
-                    evt_request_cancel: cancel_fn,
-                },
-            ) {
-                return Err((e, self));
-            }
+        cancellable_request_store: &SpinLock<S>,
+    ) -> Result<(), (NtStatusError, Request)> {
+        if let Err(e) = self.set_cancel_callback_in_context(cancel_fn) {
+            return Err((e, self));
         }
+
+        let req_ptr = self.as_ptr() as WDFREQUEST;
+
+        // Save cancellable request in store before
+        // we set the cancel callback to avoid
+        // race condition
+        let request_id = self.id();
+        let mut store = cancellable_request_store.lock();
+        store.add(CancellableMarkedRequest(self));
 
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestMarkCancelableEx,
-                self.as_ptr() as *mut _,
+                req_ptr,
                 Some(__evt_request_cancel)
             )
         };
 
         if !status.is_success() {
-            return Err((NtStatusError::from(status), self));
+            // Remove cancellable request from store
+            // since we failed to set cancellable
+            let _ = store
+                .take(request_id)
+                .expect("CancellableRequest not found although it was just added");
+            Err((NtStatusError::from(status), unsafe {
+                Request::from_raw(req_ptr)
+            }))
+        } else {
+            Ok(())
         }
+    }
 
-        Ok(CancellableMarkedRequest(self))
+    fn set_cancel_callback_in_context(
+        &mut self,
+        cancel_fn: fn(&RequestCancellationToken),
+    ) -> NtResult<()> {
+        if let Some(context) = RequestContext::get_mut(self) {
+            context.evt_request_cancel = cancel_fn;
+            Ok(())
+        } else {
+            RequestContext::attach(
+                self,
+                RequestContext {
+                    evt_request_cancel: cancel_fn,
+                },
+            )
+        }
     }
 
     pub fn get_io_queue(&self) -> &IoQueue {
@@ -166,6 +192,28 @@ unsafe impl Sync for Request {}
 /// pointer
 unsafe impl Send for Request {}
 
+pub trait CancellableRequestStore {
+    fn add(&mut self, request: CancellableMarkedRequest);
+    fn take(&mut self, id: RequestId) -> Option<CancellableMarkedRequest>;
+}
+
+impl CancellableRequestStore for Option<CancellableMarkedRequest> {
+    fn add(&mut self, request: CancellableMarkedRequest) {
+        *self = Some(request);
+    }
+
+    fn take(&mut self, id: RequestId) -> Option<CancellableMarkedRequest> {
+        if let Some(request) = self.take() {
+            if request.id() == id {
+                return Some(request);
+            } else {
+                *self = Some(request);
+            }
+        }
+        None
+    }
+}
+
 #[object_context(Request)]
 struct RequestContext {
     evt_request_cancel: fn(&RequestCancellationToken),
@@ -219,6 +267,10 @@ pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
 pub struct CancellableMarkedRequest(Request);
 
 impl CancellableMarkedRequest {
+    pub fn id(&self) -> RequestId {
+        self.0.id()
+    }
+
     pub fn complete(self, status: NtStatus) {
         // Ignoring the return value because the call to this method can
         // come from both the request cancellation, event where unmarking
@@ -267,7 +319,7 @@ impl RequestCancellationToken {
         Self(unsafe { Request::from_raw(inner) })
     }
 
-    pub fn RequestId(&self) -> usize {
+    pub fn request_id(&self) -> RequestId {
         self.0.id()
     }
 
@@ -282,3 +334,7 @@ impl RequestCancellationToken {
 /// also thread-safe.
 unsafe impl Send for RequestCancellationToken {}
 unsafe impl Sync for RequestCancellationToken {}
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RequestId(usize);
