@@ -62,25 +62,30 @@ impl Request {
         mut self,
         cancel_fn: fn(&RequestCancellationToken),
     ) -> Result<CancellableMarkedRequest, (NtStatusError, Request)> {
-        if let Err(e) = RequestContext::attach(
-            &mut self,
-            RequestContext {
-                evt_request_cancel: cancel_fn,
-            },
-        ) {
-            return Err((e, self));
+        if let Some(context) = RequestContext::get_mut(&mut self) {
+            context.evt_request_cancel = cancel_fn;
+        } else {
+            if let Err(e) = RequestContext::attach(
+                &mut self,
+                RequestContext {
+                    evt_request_cancel: cancel_fn,
+                },
+            ) {
+                return Err((e, self));
+            }
         }
 
-        // TODO: we are ignoring the status returned by this function
-        // because we feel we are fine for all the reasons it can fail
-        // However, this needs to be looked into carefully.
-        unsafe {
+        let status = unsafe {
             call_unsafe_wdf_function_binding!(
-                WdfRequestMarkCancelable,
+                WdfRequestMarkCancelableEx,
                 self.as_ptr() as *mut _,
                 Some(__evt_request_cancel)
-            );
+            )
         };
+
+        if !status.is_success() {
+            return Err((NtStatusError::from(status), self));
+        }
 
         Ok(CancellableMarkedRequest(self))
     }
