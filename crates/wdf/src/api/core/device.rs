@@ -32,6 +32,7 @@ use super::{
     init_wdf_struct,
     io_queue::IoQueue,
     object::{impl_ref_counted_handle, Handle},
+    request::RequestType,
     resource::CmResList,
     result::{NtResult, StatusCodeExt},
     string::{to_unicode_string, to_utf16_buf},
@@ -116,6 +117,23 @@ impl Device {
         } else {
             None
         }
+    }
+
+    pub fn configure_request_dispatching(&self, queue: &IoQueue, request_type: RequestType) -> NtResult<()> {
+        // TODO: is this function safe to call from anywhere?
+        // Is it thread safe? If not we may have to do some design 
+        // to make it safe.
+        let request_type = request_type.into();
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceConfigureRequestDispatching,
+                self.as_ptr() as *mut _,
+                queue.as_ptr() as *mut _,
+                request_type
+            )
+        }
+        .ok()
     }
 
     fn set_pnp_capabilities(&mut self, capabilities: &DevicePnpCapabilities) {

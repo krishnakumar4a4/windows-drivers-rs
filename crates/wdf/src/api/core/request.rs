@@ -1,9 +1,10 @@
 use alloc::{string::String, vec::Vec};
 
 use wdf_macros::object_context;
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFOBJECT, WDFREQUEST};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFOBJECT, WDFREQUEST, WDF_REQUEST_TYPE};
 
 use super::{
+    enum_mapping,
     io_queue::IoQueue,
     memory::{Memory, OwnedMemory},
     object::Handle,
@@ -352,3 +353,41 @@ unsafe impl Sync for RequestCancellationToken {}
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RequestId(usize);
+
+enum_mapping!{
+    infallible;
+    pub enum RequestType: WDF_REQUEST_TYPE {
+        Create = WdfRequestTypeCreate,
+        CreateNamedPipe = WdfRequestTypeCreateNamedPipe,
+        Close = WdfRequestTypeClose,
+        Read = WdfRequestTypeRead,
+        Write = WdfRequestTypeWrite,
+        QueryInformation = WdfRequestTypeQueryInformation,
+        SetInformation = WdfRequestTypeSetInformation,
+        QueryEA = WdfRequestTypeQueryEA,
+        SetEA = WdfRequestTypeSetEA,
+        FlushBuffers = WdfRequestTypeFlushBuffers,
+        QueryVolumeInformation = WdfRequestTypeQueryVolumeInformation,
+        SetVolumeInformation = WdfRequestTypeSetVolumeInformation,
+        DirectoryControl = WdfRequestTypeDirectoryControl,
+        FileSystemControl = WdfRequestTypeFileSystemControl,
+        DeviceControl = WdfRequestTypeDeviceControl,
+        DeviceControlInternal = WdfRequestTypeDeviceControlInternal,
+        Shutdown = WdfRequestTypeShutdown,
+        LockControl = WdfRequestTypeLockControl,
+        Cleanup = WdfRequestTypeCleanup,
+        CreateMailSlot = WdfRequestTypeCreateMailSlot,
+        QuerySecurity = WdfRequestTypeQuerySecurity,
+        SetSecurity = WdfRequestTypeSetSecurity,
+        Power = WdfRequestTypePower,
+        SystemControl = WdfRequestTypeSystemControl,
+        DeviceChange = WdfRequestTypeDeviceChange,
+        QueryQuota = WdfRequestTypeQueryQuota,
+        SetQuota = WdfRequestTypeSetQuota,
+        Pnp = WdfRequestTypePnp,
+        Other = WdfRequestTypeOther,
+        Usb = WdfRequestTypeUsb,
+        NoFormat = WdfRequestTypeNoFormat,
+        Max = WdfRequestTypeMax
+    }
+}
