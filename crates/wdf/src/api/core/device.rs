@@ -11,6 +11,7 @@ use wdk_sys::{
     WDFDEVICE,
     WDFDEVICE_INIT,
     WDF_DEVICE_IO_TYPE,
+    WDF_DEVICE_PNP_CAPABILITIES,
     WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
     WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS,
     WDF_IO_TYPE_CONFIG,
@@ -40,10 +41,11 @@ use super::{
 impl_ref_counted_handle!(Device, DeviceContext);
 
 impl Device {
-    pub fn create(
-        device_init: &mut DeviceInit,
+    pub fn create<'a>(
+        device_init: &'a mut DeviceInit,
         pnp_power_callbacks: Option<PnpPowerEventCallbacks>,
-    ) -> NtResult<&Self> {
+        pnp_capabilities: Option<&DevicePnpCapabilities>,
+    ) -> NtResult<&'a Self> {
         if let Some(ref pnp_power_callbacks) = pnp_power_callbacks {
             let mut pnp_power_callbacks = pnp_power_callbacks.into();
 
@@ -68,7 +70,12 @@ impl Device {
             )
         }
         .and_then(|| {
-            let device = unsafe { &*(device as *mut _) };
+            let device: &mut Device = unsafe { &mut *(device as *mut _) };
+
+            if let Some(caps) = pnp_capabilities {
+                device.set_pnp_capabilities(caps);
+            }
+
             DeviceContext::attach(
                 device,
                 DeviceContext {
@@ -76,7 +83,7 @@ impl Device {
                     pnp_power_callbacks,
                 },
             )?;
-            Ok(device)
+            Ok(device as &Device)
         })
     }
 
@@ -108,6 +115,17 @@ impl Device {
             Some(unsafe { &*(queue as *mut IoQueue) })
         } else {
             None
+        }
+    }
+
+    fn set_pnp_capabilities(&mut self, capabilities: &DevicePnpCapabilities) {
+        let mut caps = capabilities.into();
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceSetPnpCapabilities,
+                self.as_ptr() as *mut _,
+                &mut caps
+            );
         }
     }
 }
@@ -168,6 +186,58 @@ enum_mapping! {
         Buffered = WdfDeviceIoBuffered,
         Direct = WdfDeviceIoDirect,
         BufferedOrDirect = WdfDeviceIoBufferedOrDirect,
+    }
+}
+
+
+pub struct DevicePnpCapabilities {
+    pub lock_supported: TriState,
+    pub eject_supported: TriState,
+    pub removable: TriState,
+    pub dock_device: TriState,
+    pub unique_id: TriState,
+    pub silent_install: TriState,
+    pub surprise_removal_ok: TriState,
+    pub hardware_disabled: TriState,
+    pub no_display_in_ui: TriState,
+    pub address: u32,
+    pub ui_number: u32,
+}
+
+impl From<&DevicePnpCapabilities> for WDF_DEVICE_PNP_CAPABILITIES {
+    fn from(caps: &DevicePnpCapabilities) -> Self {
+        let mut raw_caps = init_wdf_struct!(WDF_DEVICE_PNP_CAPABILITIES);
+        raw_caps.LockSupported = caps.lock_supported.into();
+        raw_caps.EjectSupported = caps.eject_supported.into();
+        raw_caps.Removable = caps.removable.into();
+        raw_caps.DockDevice = caps.dock_device.into();
+        raw_caps.UniqueID = caps.unique_id.into();
+        raw_caps.SilentInstall = caps.silent_install.into();
+        raw_caps.SurpriseRemovalOK = caps.surprise_removal_ok.into();
+        raw_caps.HardwareDisabled = caps.hardware_disabled.into();
+        raw_caps.NoDisplayInUI = caps.no_display_in_ui.into();
+        raw_caps.Address = caps.address;
+        raw_caps.UINumber = caps.ui_number;
+
+        raw_caps
+    }
+}
+
+impl Default for DevicePnpCapabilities {
+    fn default() -> Self {
+        Self {
+            lock_supported: TriState::default(),
+            eject_supported: TriState::default(),
+            removable: TriState::default(),
+            dock_device: TriState::default(),
+            unique_id: TriState::default(),
+            silent_install: TriState::default(),
+            surprise_removal_ok: TriState::default(),
+            hardware_disabled: TriState::default(),
+            no_display_in_ui: TriState::default(),
+            address: -1_i32 as u32,
+            ui_number: -1_i32 as u32,
+        }
     }
 }
 

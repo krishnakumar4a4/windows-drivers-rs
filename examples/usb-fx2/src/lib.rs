@@ -8,6 +8,7 @@ use wdf::{
     Device,
     DeviceInit,
     DeviceIoType,
+    DevicePnpCapabilities,
     Driver,
     IoTypeConfig,
     NtResult,
@@ -17,6 +18,7 @@ use wdf::{
     driver_entry,
     object_context,
     trace,
+    TriState,
     usb::{UsbDevice, UsbDeviceCreateConfig},
 };
 
@@ -73,7 +75,12 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     device_init.set_io_type(&io_type);
 
-    let device = Device::create(device_init, Some(pnp_power_callbacks))?;
+    let pnp_caps = DevicePnpCapabilities {
+        surprise_removal_ok: TriState::True,
+        ..Default::default()
+    };
+
+    let device = Device::create(device_init, Some(pnp_power_callbacks), Some(&pnp_caps))?;
 
     let context = DeviceContext {
         usb_device: SpinLock::create(None)?,
