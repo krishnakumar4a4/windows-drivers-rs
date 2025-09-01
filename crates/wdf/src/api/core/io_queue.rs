@@ -37,7 +37,7 @@ impl IoQueue {
                 &mut queue,
             )
         }
-        .and_then_try(|| {
+        .and_then(|| {
             let ctxt = IoQueueContext {
                 ref_count: AtomicUsize::new(0),
                 evt_io_default: queue_config.evt_io_default,
@@ -83,7 +83,7 @@ impl IoQueue {
                 &mut request
             )
         }
-        .and_then(|| unsafe { Request::from_raw(request) })
+        .map(|| unsafe { Request::from_raw(request) })
     }
 }
 

@@ -108,7 +108,7 @@ impl Request {
                 &mut raw_memory
             )
         }
-        .and_then(|| unsafe { &*(raw_memory as *const Memory) })
+        .map(|| unsafe { &*(raw_memory as *const Memory) })
     }
 
     pub fn retrieve_output_memory(&mut self) -> NtResult<&mut Memory> {
@@ -121,7 +121,7 @@ impl Request {
                 &mut raw_memory
             )
         }
-        .and_then(|| unsafe { &mut *(raw_memory as *mut Memory) })
+        .map(|| unsafe { &mut *(raw_memory as *mut Memory) })
     }
 
     pub fn stop_acknowledge_requeue(self) {

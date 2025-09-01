@@ -44,7 +44,7 @@ impl Timer {
                 &mut timer,
             )
         }
-        .and_then_try(|| {
+        .and_then(|| {
             TimerContext::attach(unsafe { &*(timer as *mut _) }, context)?;
             let timer = unsafe { Arc::from_raw(timer as *mut _) };
 

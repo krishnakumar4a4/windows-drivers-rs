@@ -58,7 +58,7 @@ impl UsbDevice {
                 &mut usb_device
             )
         }
-        .and_then_try(|| {
+        .and_then(|| {
             let ctxt = UsbDeviceContext {
                 ref_count: AtomicUsize::new(0),
             };
@@ -83,7 +83,7 @@ impl UsbDevice {
                 &mut information
             )
         }
-        .and_then(|| information.into())
+        .map(|| information.into())
     }
 
     pub fn select_config_single_interface<'a>(
@@ -105,7 +105,7 @@ impl UsbDevice {
                 &mut config
             )
         }
-        .and_then(|| UsbSingleInterfaceInformation {
+        .map(|| UsbSingleInterfaceInformation {
             number_of_configured_pipes: unsafe {
                 config.Types.SingleInterface.NumberConfiguredPipes
             },

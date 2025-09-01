@@ -48,7 +48,7 @@ impl<T> SpinLock<T> {
                 &mut spin_lock.wdf_spin_lock,
             )
         }
-        .and_then(|| spin_lock)
+        .map(|| spin_lock)
 
         // TODO: should we increment the ref count of the spin lock
         // to prevent it from being deleted while we are using it?

@@ -65,7 +65,7 @@ impl Device {
                 &mut device,
             )
         }
-        .and_then_try(|| {
+        .and_then(|| {
             let device = unsafe { &*(device as *mut _) };
             DeviceContext::attach(
                 device,

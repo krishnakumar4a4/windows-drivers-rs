@@ -182,13 +182,13 @@ pub trait StatusCodeExt {
 
     /// If status is non-error, run closure and return its value wrapped in
     /// `Ok`. Otherwise return Err(NtStatusError).
-    fn and_then<T, F>(self, f: F) -> NtResult<T>
+    fn map<T, F>(self, f: F) -> NtResult<T>
     where
         F: FnOnce() -> T;
 
     /// If status is non-error, run closure which may return an NtResult and
     /// return it. Otherwise immediately return Err(NtStatusError).
-    fn and_then_try<T, F>(self, f: F) -> NtResult<T>
+    fn and_then<T, F>(self, f: F) -> NtResult<T>
     where
         F: FnOnce() -> NtResult<T>;
 }
@@ -206,7 +206,7 @@ impl StatusCodeExt for i32 {
         }
     }
 
-    fn and_then<T, F>(self, f: F) -> NtResult<T>
+    fn map<T, F>(self, f: F) -> NtResult<T>
     where
         F: FnOnce() -> T,
     {
@@ -217,7 +217,7 @@ impl StatusCodeExt for i32 {
         }
     }
 
-    fn and_then_try<T, F>(self, f: F) -> NtResult<T>
+    fn and_then<T, F>(self, f: F) -> NtResult<T>
     where
         F: FnOnce() -> NtResult<T>,
     {
