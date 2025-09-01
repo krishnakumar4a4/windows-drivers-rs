@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 
 use wdf_macros::object_context;
 use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFOBJECT, WDFREQUEST};
@@ -211,6 +211,20 @@ impl CancellableRequestStore for Option<CancellableRequest> {
             }
         }
         None
+    }
+}
+
+impl CancellableRequestStore for Vec<CancellableRequest> {
+    fn add(&mut self, request: CancellableRequest) {
+        self.push(request);
+    }
+
+    fn take(&mut self, id: RequestId) -> Option<CancellableRequest> {
+        if let Some(position) = self.iter().position(|r| r.id() == id) {
+            Some(self.remove(position))
+        } else {
+            None
+        }
     }
 }
 
