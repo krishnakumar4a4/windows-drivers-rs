@@ -75,7 +75,7 @@ impl Request {
         // race condition
         let request_id = self.id();
         let mut store = cancellable_request_store.lock();
-        store.add(CancellableMarkedRequest(self));
+        store.add(CancellableRequest(self));
 
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
@@ -193,16 +193,16 @@ unsafe impl Sync for Request {}
 unsafe impl Send for Request {}
 
 pub trait CancellableRequestStore {
-    fn add(&mut self, request: CancellableMarkedRequest);
-    fn take(&mut self, id: RequestId) -> Option<CancellableMarkedRequest>;
+    fn add(&mut self, request: CancellableRequest);
+    fn take(&mut self, id: RequestId) -> Option<CancellableRequest>;
 }
 
-impl CancellableRequestStore for Option<CancellableMarkedRequest> {
-    fn add(&mut self, request: CancellableMarkedRequest) {
+impl CancellableRequestStore for Option<CancellableRequest> {
+    fn add(&mut self, request: CancellableRequest) {
         *self = Some(request);
     }
 
-    fn take(&mut self, id: RequestId) -> Option<CancellableMarkedRequest> {
+    fn take(&mut self, id: RequestId) -> Option<CancellableRequest> {
         if let Some(request) = self.take() {
             if request.id() == id {
                 return Some(request);
@@ -264,9 +264,9 @@ pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     }
 }
 
-pub struct CancellableMarkedRequest(Request);
+pub struct CancellableRequest(Request);
 
-impl CancellableMarkedRequest {
+impl CancellableRequest {
     pub fn id(&self) -> RequestId {
         self.0.id()
     }
@@ -296,13 +296,13 @@ impl CancellableMarkedRequest {
     }
 }
 
-impl Handle for CancellableMarkedRequest {
+impl Handle for CancellableRequest {
     fn as_ptr(&self) -> WDFOBJECT {
         self.0.as_ptr()
     }
 
     fn type_name() -> String {
-        String::from("CancellableMarkedRequest")
+        String::from("CancellableRequest")
     }
 }
 
@@ -310,7 +310,7 @@ impl Handle for CancellableMarkedRequest {
 /// that operate on WDFREQUEST do so in a thread-safe manner.
 /// As a result, all the Rust methods on this struct are
 /// also thread-safe.
-unsafe impl Send for CancellableMarkedRequest {}
+unsafe impl Send for CancellableRequest {}
 
 pub struct RequestCancellationToken(Request);
 
