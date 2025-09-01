@@ -74,7 +74,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 }
 
 fn evt_device_prepare_hardware(
-    device: &Device,
+    device: &mut Device,
     _resources_raw: &CmResList,
     _resources_translated: &CmResList,
 ) -> NtResult<()> {

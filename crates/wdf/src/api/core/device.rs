@@ -135,8 +135,8 @@ pub struct PnpPowerEventCallbacks {
     pub evt_device_d0_exit: Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
     pub evt_device_d0_exit_pre_interrupts_disabled:
         Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
-    pub evt_device_prepare_hardware: Option<fn(&Device, &CmResList, &CmResList) -> NtResult<()>>,
-    pub evt_device_release_hardware: Option<fn(&Device, &CmResList) -> NtResult<()>>,
+    pub evt_device_prepare_hardware: Option<fn(&mut Device, &CmResList, &CmResList) -> NtResult<()>>,
+    pub evt_device_release_hardware: Option<fn(&mut Device, &CmResList) -> NtResult<()>>,
     pub evt_device_self_managed_io_cleanup: Option<fn(&Device)>,
     pub evt_device_self_managed_io_flush: Option<fn(&Device)>,
     pub evt_device_self_managed_io_init: Option<fn(&Device) -> NtResult<()>>,
@@ -299,37 +299,57 @@ impl From<&PnpPowerEventCallbacks> for WDF_PNPPOWER_EVENT_CALLBACKS {
 }
 
 macro_rules! unsafe_pnp_power_callback {
-    // Main rule: params and optional return type (default to ())
+    // Both public arms forward to the same internal implementation (@impl) to deduplicate
+    (mut $callback_name:ident($($param_name:ident: $param_type:ty => $conversion:expr),*) $(-> $return_type:tt)?) => {
+        unsafe_pnp_power_callback!(@impl $callback_name, ($($param_name: $param_type => $conversion),*), ($($return_type)?));
+    };
+
     ($callback_name:ident($($param_name:ident: $param_type:ty => $conversion:expr),*) $(-> $return_type:tt)?) => {
+        unsafe_pnp_power_callback!(@impl $callback_name, ($($param_name: $param_type => $conversion),*), ($($return_type)?));
+    };
+
+    // internal implementation
+    (@impl $callback_name:ident, ($($param_name:ident: $param_type:ty => $conversion:expr),*), ($($return_type:tt)?)) => {
         paste::paste! {
             pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE $(, $param_name: $param_type)*) -> unsafe_pnp_power_callback!(@ret_type $($return_type)*) {
-                let device = unsafe { &*(device as *const Device) };
-                if let Some(ctxt) = DeviceContext::get(&device) {
+                // raw pointer to the Device; will be converted as needed
+                let __device_raw = device as *mut Device;
+                // always provide a mutable borrow
+                let __device_arg: &mut Device = unsafe { &mut *(__device_raw) };
+
+                // common body: lookup context and invoke callback with __device_arg
+                if let Some(ctxt) = DeviceContext::get(unsafe { &*(__device_raw as *const Device) }) {
                     if let Some(callbacks) = &ctxt.pnp_power_callbacks {
                         if let Some(callback) = callbacks.$callback_name {
-                            return unsafe_pnp_power_callback!(@call_and_return $($return_type)*, callback(device $(, $conversion)*));
+                            return unsafe_pnp_power_callback_call_and_return!($($return_type)*, callback(__device_arg $(, $conversion)*));
                         }
                     }
                 }
+
                 panic!("User did not provide callback {} but we subscribed to it", stringify!($callback_name));
             }
         }
     };
-    // Helper: resolve return type, default to ()
+
+    // Return type helpers
     (@ret_type) => { () };
     (@ret_type $return_type:tt) => { $return_type };
-    // Helper: call and return for NTSTATUS
-    (@call_and_return NTSTATUS, $call:expr) => {
+}
+
+// Helper macro: convert Result-returning Rust callbacks into the C return value.
+macro_rules! unsafe_pnp_power_callback_call_and_return {
+    (NTSTATUS, $call:expr) => {
         match $call {
             Ok(_) => 0,
             Err(err) => err.code(),
         }
     };
-    // Helper: call and return for ()
-    (@call_and_return, $call:expr) => {
+
+    (, $call:expr) => {
         $call
     };
-    (@call_and_return (), $call:expr) => {
+
+    ((), $call:expr) => {
         $call
     };
 }
@@ -338,11 +358,11 @@ unsafe_pnp_power_callback!(evt_device_d0_entry(previous_state: WDF_POWER_DEVICE_
 unsafe_pnp_power_callback!(evt_device_d0_entry_post_interrupts_enabled(previous_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(previous_state)) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_d0_exit(target_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(target_state)) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_d0_exit_pre_interrupts_disabled(target_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(target_state)) -> NTSTATUS);
-unsafe_pnp_power_callback!(evt_device_prepare_hardware(
+unsafe_pnp_power_callback!(mut evt_device_prepare_hardware(
     resources_raw: WDFCMRESLIST => unsafe { &*(resources_raw as *const CmResList) },
     resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated as *const CmResList) }
 ) -> NTSTATUS);
-unsafe_pnp_power_callback!(evt_device_release_hardware(
+unsafe_pnp_power_callback!(mut evt_device_release_hardware(
     resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated as *const CmResList) }
 ) -> NTSTATUS);
 
