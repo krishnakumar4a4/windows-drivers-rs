@@ -86,6 +86,7 @@ fn evt_device_prepare_hardware(
             &UsbDeviceCreateConfig {
                 usbd_client_contract_version: 0x0100_0000,
             },
+            |_usb_device| {}
         )?;
 
         {
