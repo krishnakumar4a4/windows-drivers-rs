@@ -176,6 +176,8 @@ pub type NtResult<T> = Result<T, NtStatusError>;
 
 /// Extension trait to convert an NTSTATUS (i32) into NtResult combinators
 pub trait StatusCodeExt {
+    fn is_success(&self) -> bool;
+
     fn ok(self) -> NtResult<()>;
 
     /// If status is non-error, run closure and return its value wrapped in
@@ -192,6 +194,10 @@ pub trait StatusCodeExt {
 }
 
 impl StatusCodeExt for i32 {
+    fn is_success(&self) -> bool {
+        NtStatus::from(*self).is_success()
+    }
+
     fn ok(self) -> NtResult<()> {
         if NT_SUCCESS(self) {
             Ok(())
