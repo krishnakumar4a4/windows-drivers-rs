@@ -312,16 +312,12 @@ macro_rules! unsafe_pnp_power_callback {
     (@impl $callback_name:ident, ($($param_name:ident: $param_type:ty => $conversion:expr),*), ($($return_type:tt)?)) => {
         paste::paste! {
             pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE $(, $param_name: $param_type)*) -> unsafe_pnp_power_callback!(@ret_type $($return_type)*) {
-                // raw pointer to the Device; will be converted as needed
-                let __device_raw = device as *mut Device;
-                // always provide a mutable borrow
-                let __device_arg: &mut Device = unsafe { &mut *(__device_raw) };
+                let device: &mut Device = unsafe { &mut *(device as *mut Device) };
 
-                // common body: lookup context and invoke callback with __device_arg
-                if let Some(ctxt) = DeviceContext::get(unsafe { &*(__device_raw as *const Device) }) {
+                if let Some(ctxt) = DeviceContext::get(device) {
                     if let Some(callbacks) = &ctxt.pnp_power_callbacks {
                         if let Some(callback) = callbacks.$callback_name {
-                            return unsafe_pnp_power_callback_call_and_return!($($return_type)*, callback(__device_arg $(, $conversion)*));
+                            return unsafe_pnp_power_callback_call_and_return!($($return_type)*, callback(device $(, $conversion)*));
                         }
                     }
                 }
