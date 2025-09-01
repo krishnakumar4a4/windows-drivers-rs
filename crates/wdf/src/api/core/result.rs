@@ -1,5 +1,16 @@
 use wdk_sys::{NT_ERROR, NT_INFORMATION, NT_SUCCESS, NT_WARNING};
 
+
+// TODO: Needs redesign. Currently we are treating
+// warnings as success (see `NtSStatusNonError` and the
+// methods in the `StatusCodeExt` trait -- they check
+// `!NT_ERROR` instead of `NT_SUCCESS` which differs
+// from what is typically done in C drivers).
+// We need a way to convey the tri-state nature of
+// NTSTATUS in our API return values which is easy to
+// use with the `?` operator and does not cause
+// any surprises.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NtStatus {
     NonError(NtStatusNonError),
