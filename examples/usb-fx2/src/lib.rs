@@ -7,7 +7,9 @@ use wdf::{
     CmResList,
     Device,
     DeviceInit,
+    DeviceIoType,
     Driver,
+    IoTypeConfig,
     NtResult,
     PnpPowerEventCallbacks,
     PowerDeviceState,
@@ -59,8 +61,17 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         evt_device_prepare_hardware: Some(evt_device_prepare_hardware),
         evt_device_d0_entry: Some(evt_device_d0_entry),
         evt_device_d0_exit: Some(evt_device_d0_exit),
+        evt_device_self_managed_io_flush: Some(evt_device_self_managed_io_flush),
         ..PnpPowerEventCallbacks::default()
     };
+
+
+    let io_type = IoTypeConfig {
+        read_write_io_type: DeviceIoType::Buffered,
+        ..Default::default()
+    };
+
+    device_init.set_io_type(&io_type);
 
     let device = Device::create(device_init, Some(pnp_power_callbacks))?;
 
@@ -110,4 +121,8 @@ fn evt_device_d0_exit(_device: &Device, _next_state: PowerDeviceState) -> NtResu
     trace("Device D0 exit callback called");
 
     Ok(())
+}
+
+fn evt_device_self_managed_io_flush(_device: &Device) {
+    trace("Device self-managed I/O flush callback called");
 }

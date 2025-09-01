@@ -10,8 +10,10 @@ use wdk_sys::{
     WDFCMRESLIST,
     WDFDEVICE,
     WDFDEVICE_INIT,
+    WDF_DEVICE_IO_TYPE,
     WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
     WDF_DEVICE_POWER_POLICY_WAKE_SETTINGS,
+    WDF_IO_TYPE_CONFIG,
     WDF_NO_HANDLE,
     WDF_NO_OBJECT_ATTRIBUTES,
     WDF_PNPPOWER_EVENT_CALLBACKS,
@@ -119,6 +121,53 @@ impl DeviceInit {
 
     pub fn as_ptr_mut(&self) -> *mut WDFDEVICE_INIT {
         self.0
+    }
+
+    pub fn set_io_type(&mut self, io_type_config: &IoTypeConfig) {
+        let mut io_type_config = io_type_config.into();
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceInitSetIoTypeEx,
+                self.as_ptr_mut(),
+                &mut io_type_config
+            );
+        }
+    }
+}
+
+pub struct IoTypeConfig {
+    pub read_write_io_type: DeviceIoType,
+    pub device_control_io_type: DeviceIoType,
+    pub direct_transfer_threshold: u32,
+}
+
+impl From<&IoTypeConfig> for WDF_IO_TYPE_CONFIG {
+    fn from(config: &IoTypeConfig) -> Self {
+        let mut raw_config = init_wdf_struct!(WDF_IO_TYPE_CONFIG);
+        raw_config.ReadWriteIoType = config.read_write_io_type.into();
+        raw_config.DeviceControlIoType = config.device_control_io_type.into();
+        raw_config.DirectTransferThreshold = config.direct_transfer_threshold;
+
+        raw_config
+    }
+}
+
+impl Default for IoTypeConfig {
+    fn default() -> Self {
+        Self {
+            read_write_io_type: DeviceIoType::Buffered,
+            device_control_io_type: DeviceIoType::Buffered,
+            direct_transfer_threshold: 0,
+        }
+    }
+}
+
+enum_mapping! {
+    pub enum DeviceIoType: WDF_DEVICE_IO_TYPE {
+        Neither = WdfDeviceIoNeither,
+        Buffered = WdfDeviceIoBuffered,
+        Direct = WdfDeviceIoDirect,
+        BufferedOrDirect = WdfDeviceIoBufferedOrDirect,
     }
 }
 
