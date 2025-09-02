@@ -1,6 +1,8 @@
 use alloc::{string::String, vec::Vec};
+use bitflags::bitflags;
 
 use wdf_macros::object_context;
+
 use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFOBJECT, WDFREQUEST, WDF_REQUEST_TYPE};
 
 use super::{
@@ -389,5 +391,15 @@ enum_mapping!{
         Usb = WdfRequestTypeUsb,
         NoFormat = WdfRequestTypeNoFormat,
         Max = WdfRequestTypeMax
+    }
+}
+
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct RequestStopActionFlags: u32 {
+        const SUSPEND = 0x00000001;
+        const PURGE = 0x00000002;
+        const CANCELABLE = 0x1000_0000;
     }
 }

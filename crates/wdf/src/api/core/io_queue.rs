@@ -15,7 +15,7 @@ use super::{
     device::Device,
     init_wdf_struct,
     object::{impl_ref_counted_handle, Handle},
-    request::Request,
+    request::{Request, RequestId},
     result::{NtResult, NtStatusError, StatusCodeExt},
     sync::Arc,
     TriState,
@@ -44,6 +44,7 @@ impl IoQueue {
                 evt_io_read: queue_config.evt_io_read,
                 evt_io_write: queue_config.evt_io_write,
                 evt_io_device_control: queue_config.evt_io_device_control,
+                evt_io_stop: queue_config.evt_io_stop,
             };
 
             IoQueueContext::attach(unsafe { &*(queue as *mut _) }, ctxt)?;
@@ -119,6 +120,7 @@ pub struct IoQueueConfig {
     pub evt_io_read: Option<fn(&IoQueue, Request, usize)>,
     pub evt_io_write: Option<fn(&IoQueue, Request, usize)>,
     pub evt_io_device_control: Option<fn(&IoQueue, Request, usize, usize, u32)>,
+    pub evt_io_stop: Option<fn(&IoQueue, RequestId, u32)>,
 }
 
 impl Default for IoQueueConfig {
@@ -132,6 +134,7 @@ impl Default for IoQueueConfig {
             evt_io_read: None,
             evt_io_write: None,
             evt_io_device_control: None,
+            evt_io_stop: None,
         }
     }
 }
@@ -160,6 +163,10 @@ impl From<&IoQueueConfig> for WDF_IO_QUEUE_CONFIG {
             raw_config.EvtIoDeviceControl = Some(__evt_io_device_control);
         }
 
+        if config.evt_io_stop.is_some() {
+            raw_config.EvtIoStop = Some(__evt_io_stop);
+        }
+
         if let IoQueueDispatchType::Parallel {
             presented_requests_limit,
         } = config.dispatch_type
@@ -182,17 +189,29 @@ struct IoQueueContext {
     evt_io_read: Option<fn(&IoQueue, Request, usize)>,
     evt_io_write: Option<fn(&IoQueue, Request, usize)>,
     evt_io_device_control: Option<fn(&IoQueue, Request, usize, usize, u32)>,
+    evt_io_stop: Option<fn(&IoQueue, RequestId, u32)>,
 }
 
 macro_rules! unsafe_request_handler {
+    // Default variant
     ($handler_name:ident $(, $arg_name:ident: $arg_type:ty)*) => {
+        unsafe_request_handler!(@impl $handler_name, |r| r, ($( $arg_name: $arg_type ),*));
+    };
+
+    // Variant with explicit request transformation closure
+    ($handler_name:ident, $req_transform:expr $(, $arg_name:ident: $arg_type:ty)*) => {
+        unsafe_request_handler!(@impl $handler_name, $req_transform, ($( $arg_name: $arg_type ),*));
+    };
+
+    // Implementation
+    (@impl $handler_name:ident, $req_transform:expr, ($($arg_name:ident: $arg_type:ty),*)) => {
         paste::paste! {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
                 let queue = unsafe { &*queue.cast::<IoQueue>() };
                 let request = unsafe { Request::from_raw(request as WDFREQUEST) };
                 if let Some(handlers) = IoQueueContext::get(&queue) {
                     if let Some(handler) = handlers.$handler_name {
-                        handler(queue, request $(, $arg_name)*);
+                        handler(queue, ($req_transform)(request) $(, $arg_name)*);
                         return;
                     }
                 }
@@ -207,3 +226,4 @@ unsafe_request_handler!(evt_io_default);
 unsafe_request_handler!(evt_io_read, length: usize);
 unsafe_request_handler!(evt_io_write, length: usize);
 unsafe_request_handler!(evt_io_device_control,  OutputBufferLength: usize, InputBufferLength: usize, IoControlCode: u32);
+unsafe_request_handler!(evt_io_stop, |r: Request| r.id(), ActionFlags: u32);

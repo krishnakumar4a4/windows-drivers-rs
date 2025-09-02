@@ -11,9 +11,15 @@ use wdf::{
     DevicePnpCapabilities,
     Driver,
     IoTypeConfig,
+    IoQueue,
+    IoQueueConfig,
+    IoQueueDispatchType,
     NtResult,
     PnpPowerEventCallbacks,
     PowerDeviceState,
+    Request,
+    RequestId,
+    RequestType,
     driver_entry,
     object_context,
     status_codes,
@@ -88,6 +94,47 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     DeviceContext::attach(&device, context)?;
 
+    let queue_config = IoQueueConfig {
+        dispatch_type: IoQueueDispatchType::Parallel {
+            presented_requests_limit: None,
+        },
+        evt_io_device_control: Some(evt_io_device_control),
+        ..Default::default()
+    };
+
+    let _ = IoQueue::create(
+        &device,
+        &queue_config,
+    )?;
+
+    let queue_config = IoQueueConfig {
+        dispatch_type: IoQueueDispatchType::Sequential,
+        evt_io_read: Some(evt_io_read),
+        evt_io_stop: Some(evt_io_stop),
+        ..Default::default()
+    };
+
+    let read_queue = IoQueue::create(
+        &device,
+        &queue_config,
+    )?;
+
+    device.configure_request_dispatching(&read_queue, RequestType::Read)?;
+
+    let queue_config = IoQueueConfig {
+        dispatch_type: IoQueueDispatchType::Sequential,
+        evt_io_write: Some(evt_io_write),
+        evt_io_stop: Some(evt_io_stop),
+        ..Default::default()
+    };
+
+    let write_queue = IoQueue::create(
+        &device,
+        &queue_config,
+    )?;
+
+    device.configure_request_dispatching(&write_queue, RequestType::Write)?;
+
     Ok(())
 }
 
@@ -134,3 +181,20 @@ fn evt_device_d0_exit(_device: &Device, _next_state: PowerDeviceState) -> NtResu
 fn evt_device_self_managed_io_flush(_device: &Device) {
     trace("Device self-managed I/O flush callback called");
 }
+
+fn evt_io_device_control(_queue: &IoQueue, _request: Request, _output_buffer_length: usize, _input_buffer_length: usize, _control_code: u32) {
+    trace("I/O device control callback called");
+}
+
+fn evt_io_read(_queue: &IoQueue, _request: Request, _length: usize) {
+    trace("I/O read callback called");
+}
+
+fn evt_io_write(_queue: &IoQueue, _request: Request, _length: usize) {
+    trace("I/O write callback called");
+}
+
+fn evt_io_stop(_queue: &IoQueue, _request_id: RequestId, _action_flags: u32) {
+    trace("I/O stop callback called");
+}
+
