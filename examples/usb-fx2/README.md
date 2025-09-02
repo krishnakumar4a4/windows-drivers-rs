@@ -1,4 +1,4 @@
-# Sample KMDF Safe Rust Driver
+# Sample USB-FX2 Rust Driver
 
 A safe Rust implementation of the [USB-FX2 sample KMDF driver](https://github.com/microsoft/windows-driver-samples/tree/main/usb/kmdf_fx2).
 
