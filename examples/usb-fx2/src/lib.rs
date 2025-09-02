@@ -20,6 +20,7 @@ use wdf::{
     Request,
     RequestId,
     RequestType,
+    RequestStopActionFlags,
     driver_entry,
     object_context,
     status_codes,
@@ -194,7 +195,7 @@ fn evt_io_write(_queue: &IoQueue, _request: Request, _length: usize) {
     trace("I/O write callback called");
 }
 
-fn evt_io_stop(_queue: &IoQueue, _request_id: RequestId, _action_flags: u32) {
+fn evt_io_stop(_queue: &IoQueue, _request_id: RequestId, _action_flags: RequestStopActionFlags) {
     trace("I/O stop callback called");
 }
 

@@ -15,8 +15,8 @@ use super::{
     device::Device,
     init_wdf_struct,
     object::{impl_ref_counted_handle, Handle},
-    request::{Request, RequestId},
-    result::{NtResult, NtStatusError, StatusCodeExt},
+    request::{Request, RequestId, RequestStopActionFlags},
+    result::{NtResult, status_codes, StatusCodeExt},
     sync::Arc,
     TriState,
 };
@@ -120,7 +120,7 @@ pub struct IoQueueConfig {
     pub evt_io_read: Option<fn(&IoQueue, Request, usize)>,
     pub evt_io_write: Option<fn(&IoQueue, Request, usize)>,
     pub evt_io_device_control: Option<fn(&IoQueue, Request, usize, usize, u32)>,
-    pub evt_io_stop: Option<fn(&IoQueue, RequestId, u32)>,
+    pub evt_io_stop: Option<fn(&IoQueue, RequestId, RequestStopActionFlags)>,
 }
 
 impl Default for IoQueueConfig {
@@ -189,41 +189,45 @@ struct IoQueueContext {
     evt_io_read: Option<fn(&IoQueue, Request, usize)>,
     evt_io_write: Option<fn(&IoQueue, Request, usize)>,
     evt_io_device_control: Option<fn(&IoQueue, Request, usize, usize, u32)>,
-    evt_io_stop: Option<fn(&IoQueue, RequestId, u32)>,
+    evt_io_stop: Option<fn(&IoQueue, RequestId, RequestStopActionFlags)>,
 }
 
 macro_rules! unsafe_request_handler {
     // Default variant
-    ($handler_name:ident $(, $arg_name:ident: $arg_type:ty)*) => {
-        unsafe_request_handler!(@impl $handler_name, |r| r, ($( $arg_name: $arg_type ),*));
+    ($handler_name:ident $(, $arg_name:ident: $arg_type:ty $(=> $arg_transform:expr)? )* ) => {
+        unsafe_request_handler!(@impl $handler_name, |r| r $(, $arg_name: $arg_type $(=> $arg_transform)? )* );
     };
 
-    // Variant with explicit request transformation closure
-    ($handler_name:ident, $req_transform:expr $(, $arg_name:ident: $arg_type:ty)*) => {
-        unsafe_request_handler!(@impl $handler_name, $req_transform, ($( $arg_name: $arg_type ),*));
+    // Variant to allow transforming request
+    ($handler_name:ident, $req_name:ident => $req_transform:expr $(, $arg_name:ident: $arg_type:ty $(=> $arg_transform:expr)? )* ) => {
+        unsafe_request_handler!(@impl $handler_name, |request: Request| { let $req_name = request; $req_transform } $(, $arg_name: $arg_type $(=> $arg_transform)? )* );
     };
 
-    // Implementation
-    (@impl $handler_name:ident, $req_transform:expr, ($($arg_name:ident: $arg_type:ty),*)) => {
+    // Internal implementation
+    (@impl $handler_name:ident, $req_transform:expr $(, $arg_name:ident: $arg_type:ty $(=> $arg_transform:expr)? )* ) => {
         paste::paste! {
-            pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type)*) {
+            pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type )* ) {
                 let queue = unsafe { &*queue.cast::<IoQueue>() };
                 let request = unsafe { Request::from_raw(request as WDFREQUEST) };
                 if let Some(handlers) = IoQueueContext::get(&queue) {
                     if let Some(handler) = handlers.$handler_name {
-                        handler(queue, ($req_transform)(request) $(, $arg_name)*);
+                        handler(queue, ($req_transform)(request) $(, unsafe_request_handler!(@transform $arg_name $(=> $arg_transform)? ) )*);
                         return;
                     }
                 }
 
-                request.complete(super::NtStatus::Error(NtStatusError::from(1))); // TODO: pass proper error status e.g. unsupported request
+                request.complete(status_codes::STATUS_ABANDONED.into());
             }
         }
     };
+
+    // Helpers: if caller provided a conversion, use it; otherwise pass the original arg
+    (@transform $arg_name:ident => $arg_transform:expr) => { $arg_transform };
+    (@transform $arg_name:ident) => { $arg_name };
 }
 
 unsafe_request_handler!(evt_io_default);
 unsafe_request_handler!(evt_io_read, length: usize);
 unsafe_request_handler!(evt_io_write, length: usize);
 unsafe_request_handler!(evt_io_device_control,  OutputBufferLength: usize, InputBufferLength: usize, IoControlCode: u32);
-unsafe_request_handler!(evt_io_stop, |r: Request| r.id(), ActionFlags: u32);
+unsafe_request_handler!(evt_io_stop, req => req.id(), ActionFlags: u32 => RequestStopActionFlags::from_bits_retain(ActionFlags));
