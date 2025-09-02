@@ -14,9 +14,9 @@ use wdf::{
     NtResult,
     PnpPowerEventCallbacks,
     PowerDeviceState,
-    SpinLock,
     driver_entry,
     object_context,
+    status_codes,
     trace,
     TriState,
     usb::{UsbDevice, UsbDeviceCreateConfig},
@@ -24,7 +24,7 @@ use wdf::{
 
 #[object_context(Device)]
 struct DeviceContext {
-    usb_device: SpinLock<Option<Arc<UsbDevice>>>,
+    usb_device: Option<Arc<UsbDevice>>,
 }
 
 /// The entry point for the driver. It initializes the driver and is the first
@@ -83,7 +83,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     let device = Device::create(device_init, Some(pnp_power_callbacks), Some(&pnp_caps))?;
 
     let context = DeviceContext {
-        usb_device: SpinLock::create(None)?,
+        usb_device: None,
     };
 
     DeviceContext::attach(&device, context)?;
@@ -98,22 +98,23 @@ fn evt_device_prepare_hardware(
 ) -> NtResult<()> {
     trace("Device prepare hardware callback called");
 
-    if let Some(device_context) = DeviceContext::get(device) {
-        let usb_device = UsbDevice::create(
-            device,
-            &UsbDeviceCreateConfig {
-                usbd_client_contract_version: 0x0100_0000,
-            },
-            |_usb_device| {},
-        )?;
+    // Check if a UsbDevice has already exists
+    let device_ctxt = DeviceContext::get(device).expect("device context should exist");
 
-        {
-            let mut usb_device_in_ctxt = device_context.usb_device.lock();
-            if usb_device_in_ctxt.is_none() {
-                *usb_device_in_ctxt = Some(usb_device);
-            }
-        }
+    if device_ctxt.usb_device.is_some() {
+        return Ok(());
     }
+
+    // No UsbDevice created so create a new one and store it context
+    let usb_device = UsbDevice::create(
+        device,
+        &UsbDeviceCreateConfig { usbd_client_contract_version: 0x0100_0000 },
+    |_usb_device| {})?;
+
+    let Some(device_context) = DeviceContext::get_mut(device) else { 
+        return Err(status_codes::STATUS_INTERNAL_ERROR.into());
+    };
+    device_context.usb_device = Some(usb_device);
 
     Ok(())
 }
