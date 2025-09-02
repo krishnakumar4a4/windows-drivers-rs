@@ -7,7 +7,7 @@ A safe Rust implementation of the [USB-FX2 sample KMDF driver](https://github.co
 
 * WDK environment (either via eWDK or installed WDK)
 * LLVM
-* cargo-wdk: our Rust driver build too which you can install by running `cargo install --git https://github.com/microsoft/windows-drivers-rs.git cargo-wdk --locked`
+* cargo-wdk: our Rust driver build tool which you can install by running `cargo install --git https://github.com/microsoft/windows-drivers-rs.git cargo-wdk --locked`
 
 Once prerequests are installed, run `cargo wdk build --sample` in this directory to build and package the driver.
 
