@@ -34,7 +34,7 @@ Once prerequests are installed, run `cargo wdk build --sample` in this directory
 
 ## Test
 
-<TBD>
+TBD
 
 ### Capturing Print Lines
 To capture prints:
