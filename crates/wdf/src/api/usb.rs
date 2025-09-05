@@ -115,6 +115,22 @@ impl UsbDevice {
         })
     }
 
+    pub fn get_interface(&self, interface_index: u8) -> Option<&UsbInterface> {
+        let interface = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbTargetDeviceGetInterface,
+                self.as_ptr() as *mut _,
+                interface_index
+            )
+        };
+
+        if interface.is_null() {
+            None
+        } else {
+            Some(unsafe { &*(interface as *const UsbInterface) })
+        }
+    }
+
     pub fn assign_s0_idle_settings(
         &self,
         settings: &DevicePowerPolicyIdleSettings,
@@ -420,6 +436,24 @@ impl UsbPipe {
             )
         }
         .ok()
+    }
+
+    pub fn is_in_endpoint(&self) -> bool {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbTargetPipeIsInEndpoint,
+                self.as_ptr() as *mut _
+            ) != 0
+        }
+    }
+
+    pub fn is_out_endpoint(&self) -> bool {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbTargetPipeIsOutEndpoint,
+                self.as_ptr() as *mut _
+            ) != 0
+        } 
     }
 }
 
