@@ -16,6 +16,7 @@ use wdk_sys::{
     WDFMEMORY_OFFSET,
     WDFUSBDEVICE,
     WDFUSBPIPE,
+    WDFUSBINTERFACE,
     WDF_NO_OBJECT_ATTRIBUTES,
     WDF_USB_CONTINUOUS_READER_CONFIG,
     WDF_USB_DEVICE_CREATE_CONFIG,
@@ -116,18 +117,22 @@ impl UsbDevice {
     }
 
     pub fn get_interface(&self, interface_index: u8) -> Option<&UsbInterface> {
-        let interface = unsafe {
+        let interface = self.get_interface_ptr(interface_index);
+        unsafe { (interface as *const UsbInterface).as_ref() }
+    }
+
+    pub fn get_interface_mut(&mut self, interface_index: u8) -> Option<&mut UsbInterface> {
+        let interface = self.get_interface_ptr(interface_index);
+        unsafe { (interface as *mut UsbInterface).as_mut() }
+    }
+
+    fn get_interface_ptr(&self, interface_index: u8) -> WDFUSBINTERFACE {
+        unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceGetInterface,
                 self.as_ptr() as *mut _,
                 interface_index
             )
-        };
-
-        if interface.is_null() {
-            None
-        } else {
-            Some(unsafe { &*(interface as *const UsbInterface) })
         }
     }
 
@@ -230,7 +235,7 @@ impl_handle!(UsbInterface);
 impl UsbInterface {
     pub fn get_configured_pipe<'a>(&self, pipe_index: u8) -> Option<&'a UsbPipe> {
         self.get_configured_pipe_impl(pipe_index, false)
-            .map(|(pipe, _)| pipe)
+            .map(|(pipe, _)| unsafe { &*(pipe as *const UsbPipe) })
     }
 
     pub fn get_configured_pipe_with_information<'a>(
@@ -240,7 +245,25 @@ impl UsbInterface {
         self.get_configured_pipe_impl(pipe_index, true)
             .map(|(pipe, info)| {
                 (
-                    pipe,
+                    unsafe { &*(pipe as *const UsbPipe) },
+                    info.expect("framework should return pipe information if pipe exists"),
+                )
+            })
+    }
+
+    pub fn get_configured_pipe_mut<'a>(&mut self, pipe_index: u8) -> Option<&'a mut UsbPipe> {
+        self.get_configured_pipe_impl(pipe_index, false)
+            .map(|(pipe, _)| unsafe { &mut *(pipe as *mut UsbPipe) })
+    }
+
+    pub fn get_configured_pipe_with_information_mut<'a>(
+        &mut self,
+        pipe_index: u8,
+    ) -> Option<(&'a mut UsbPipe, UsbPipeInformation)> {
+        self.get_configured_pipe_impl(pipe_index, true)
+            .map(|(pipe, info)| {
+                (
+                    unsafe { &mut *(pipe as *mut UsbPipe) },
                     info.expect("framework should return pipe information if pipe exists"),
                 )
             })
@@ -285,7 +308,7 @@ impl UsbInterface {
         &self,
         pipe_index: u8,
         get_info: bool,
-    ) -> Option<(&'a UsbPipe, Option<UsbPipeInformation>)> {
+    ) -> Option<(*mut UsbPipe, Option<UsbPipeInformation>)> {
         let mut pipe_info = WDF_USB_PIPE_INFORMATION::default();
         let pipe_info_ptr = if get_info {
             &raw mut pipe_info
@@ -305,11 +328,11 @@ impl UsbInterface {
         if pipe.is_null() {
             None
         } else {
-            let pipe_ref = unsafe { &*(pipe as *const UsbPipe) };
+            let pipe_ptr = pipe as *mut UsbPipe;
             let tuple = if get_info {
-                (pipe_ref, Some(pipe_info.into()))
+                (pipe_ptr, Some(pipe_info.into()))
             } else {
-                (pipe_ref, None)
+                (pipe_ptr, None)
             };
 
             Some(tuple)
@@ -371,7 +394,7 @@ impl UsbPipe {
         }
     }
 
-    pub fn config_continuous_reader(&self, config: &UsbContinuousReaderConfig) -> NtResult<()> {
+    pub fn config_continuous_reader(&mut self, config: &UsbContinuousReaderConfig) -> NtResult<()> {
         if let Some(ctxt) = UsbPipeContinuousReaderContext::get_mut(self) {
             ctxt.read_complete_callback = config.read_complete_callback;
             ctxt.readers_failed_callback = config.readers_failed_callback;
