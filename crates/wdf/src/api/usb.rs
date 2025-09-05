@@ -41,7 +41,7 @@ use super::core::{
 impl_ref_counted_handle!(UsbDevice, UsbDeviceContext);
 
 impl UsbDevice {
-    pub fn create<F: Fn(&mut Self)>(
+    pub fn create<F: Fn(&mut Self) -> NtResult<()>>(
         device: &Device,
         config: &UsbDeviceCreateConfig,
         configure: F,
@@ -66,7 +66,7 @@ impl UsbDevice {
             UsbDeviceContext::attach(unsafe { &*(usb_device as *mut _) }, ctxt)?;
 
             let usb_device_mut_ref = unsafe { &mut *(usb_device as *mut _) };
-            configure(usb_device_mut_ref);
+            configure(usb_device_mut_ref)?;
 
             let usb_device = unsafe { Arc::from_raw(usb_device as *mut _) };
 
