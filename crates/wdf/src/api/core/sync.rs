@@ -57,7 +57,7 @@ impl<T> SpinLock<T> {
 
     /// Acquire the spinlock and return a guard that will release the spinlock
     /// when dropped
-    pub fn lock(&self) -> SpinLockGuard<T> {
+    pub fn lock(&self) -> SpinLockGuard<'_, T> {
         // SAFETY: `wdf_spin_lock` is a private member of `SpinLock`, originally created
         // by WDF, and this module guarantees that it is always in a valid state.
         unsafe {
