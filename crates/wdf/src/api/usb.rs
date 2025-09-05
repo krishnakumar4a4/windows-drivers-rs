@@ -372,17 +372,17 @@ impl UsbPipe {
     }
 
     pub fn config_continuous_reader(&self, config: &UsbContinuousReaderConfig) -> NtResult<()> {
-        // TODO: if this function is called more than once, we need to handle
-        // the case where the context is already attached.
-        // Actually we plan to not have this function at all and in fact
-        // allow the user to set up the reader only once while creating
-        // the USB device. Then this problem will be removed entirely.
-        let ctxt = UsbPipeContinuousReaderContext {
-            read_complete_callback: config.read_complete_callback,
-            readers_failed_callback: config.readers_failed_callback,
-        };
+        if let Some(ctxt) = UsbPipeContinuousReaderContext::get_mut(self) {
+            ctxt.read_complete_callback = config.read_complete_callback;
+            ctxt.readers_failed_callback = config.readers_failed_callback;
+        } else {
+            let ctxt = UsbPipeContinuousReaderContext {
+                read_complete_callback: config.read_complete_callback,
+                readers_failed_callback: config.readers_failed_callback,
+            };
 
-        UsbPipeContinuousReaderContext::attach(self, ctxt)?;
+            UsbPipeContinuousReaderContext::attach(self, ctxt)?;
+        }
 
         let mut config = config.into();
 
