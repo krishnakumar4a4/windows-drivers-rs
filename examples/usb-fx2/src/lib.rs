@@ -15,8 +15,10 @@ use wdf::{
     IoQueueConfig,
     IoQueueDispatchType,
     NtResult,
+    NtStatusError,
     PnpPowerEventCallbacks,
     PowerDeviceState,
+    println,
     Request,
     RequestId,
     RequestType,
@@ -26,12 +28,20 @@ use wdf::{
     status_codes,
     trace,
     TriState,
-    usb::{UsbDevice, UsbDeviceCreateConfig},
+    usb::{UsbDevice, UsbDeviceCreateConfig, UsbDeviceTraits, UsbPipeType},
 };
 
 #[object_context(Device)]
 struct DeviceContext {
     usb_device: Option<Arc<UsbDevice>>,
+    usb_device_traits: UsbDeviceTraits,
+}
+
+#[object_context(UsbDevice)]
+struct UsbDeviceContext {
+    interrupt_pipe_index: u8,
+    bulk_read_pipe_index: u8,
+    bulk_write_pipe_index: u8,
 }
 
 /// The entry point for the driver. It initializes the driver and is the first
@@ -91,6 +101,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     let context = DeviceContext {
         usb_device: None,
+        usb_device_traits: UsbDeviceTraits::empty(),
     };
 
     DeviceContext::attach(&device, context)?;
@@ -157,12 +168,22 @@ fn evt_device_prepare_hardware(
     let usb_device = UsbDevice::create(
         device,
         &UsbDeviceCreateConfig { usbd_client_contract_version: 0x0100_0000 },
-    |_usb_device| {})?;
+        select_interface
+    )?;
 
-    let Some(device_context) = DeviceContext::get_mut(device) else { 
-        return Err(status_codes::STATUS_INTERNAL_ERROR.into());
+    let Some(device_context) = DeviceContext::get_mut(device) else {
+       println!("Failed to get device context");
+       return Err(status_codes::STATUS_INTERNAL_ERROR.into());
     };
+
+
+    let info = usb_device.retrieve_information()?;
+    println!("IsDeviceHighSpeed: {}", info.traits.contains(UsbDeviceTraits::AT_HIGH_SPEED));
+    println!("IsDeviceSelfPowered: {}", info.traits.contains(UsbDeviceTraits::SELF_POWERED));
+    println!("IsDeviceRemoteWakeable: {}", info.traits.contains(UsbDeviceTraits::REMOTE_WAKE_CAPABLE));
+
     device_context.usb_device = Some(usb_device);
+    device_context.usb_device_traits = info.traits;
 
     Ok(())
 }
@@ -197,5 +218,52 @@ fn evt_io_write(_queue: &IoQueue, _request: Request, _length: usize) {
 
 fn evt_io_stop(_queue: &IoQueue, _request_id: RequestId, _action_flags: RequestStopActionFlags) {
     trace("I/O stop callback called");
+}
+
+fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
+    let interface_info = usb_device.select_config_single_interface()?;
+
+    let mut interrupt_pipe_index = None;
+    let mut bulk_read_pipe_index = None;
+    let mut bulk_write_pipe_index = None;
+
+    for i in 0..interface_info.number_of_configured_pipes {
+        let (pipe, pipe_info) = interface_info.configured_usb_interface.get_configured_pipe_with_information(i).ok_or_else(|| {
+            println!("Failed to get pipe information for pipe index {}", i);
+            NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR)
+        })?;
+
+        match pipe_info.pipe_type {
+            UsbPipeType::Interrupt => {
+                println!("Interrupt Pipe is 0x{:x}", i);
+                interrupt_pipe_index = Some(i);
+            },
+            UsbPipeType::Bulk => {
+                if pipe.is_in_endpoint()  {
+                    println!("BulkInput Pipe is 0x{:x}", i);
+                    bulk_read_pipe_index = Some(i);
+                } else if pipe.is_out_endpoint() {
+                    println!("BulkOutput Pipe is 0x{:x}", i);
+                    bulk_write_pipe_index = Some(i);
+                }
+            },
+            _ => {}
+        }
+    }
+
+    if interrupt_pipe_index.is_none() || bulk_read_pipe_index.is_none() || bulk_write_pipe_index.is_none() {
+        println!("Device is not configured properly");
+        return Err(NtStatusError::from(status_codes::STATUS_INVALID_DEVICE_STATE));
+    }
+
+    let context = UsbDeviceContext {
+        interrupt_pipe_index: interrupt_pipe_index.expect("interrupt_pipe_index should be Some"),
+        bulk_read_pipe_index: bulk_read_pipe_index.expect("bulk_read_pipe_index should be Some"),
+        bulk_write_pipe_index: bulk_write_pipe_index.expect("bulk_write_pipe_index should be Some"),
+    };
+
+    UsbDeviceContext::attach(usb_device, context)?;
+
+    Ok(())
 }
 
