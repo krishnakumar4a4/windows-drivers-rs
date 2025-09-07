@@ -34,6 +34,7 @@ use wdf::{
 };
 
 mod interrupt;
+mod ioctl;
 
 use interrupt::cont_reader_for_interrupt_endpoint;
 
@@ -41,6 +42,7 @@ use interrupt::cont_reader_for_interrupt_endpoint;
 struct DeviceContext {
     usb_device: Slot<Arc<UsbDevice>>,
     usb_device_traits: SpinLock<UsbDeviceTraits>,
+    current_switch_state: SpinLock<u8>,
 }
 
 #[object_context(UsbDevice)]
@@ -108,6 +110,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     let context = DeviceContext {
         usb_device: Slot::try_new(None)?,
         usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
+        current_switch_state: SpinLock::create(0)?,
     };
 
     DeviceContext::attach(&device, context)?;
