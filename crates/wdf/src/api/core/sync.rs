@@ -349,4 +349,12 @@ impl<T: Clone> Slot<T> {
     pub fn set(&self, val: Option<T>) {
         *self.val.lock() = val;
     }
+
+    pub fn is_some(&self) -> bool {
+        self.val.lock().is_some()
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.val.lock().is_none()
+    }
 }

@@ -272,8 +272,8 @@ pub struct PnpPowerEventCallbacks {
     pub evt_device_d0_exit: Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
     pub evt_device_d0_exit_pre_interrupts_disabled:
         Option<fn(&Device, PowerDeviceState) -> NtResult<()>>,
-    pub evt_device_prepare_hardware: Option<fn(&mut Device, &CmResList, &CmResList) -> NtResult<()>>,
-    pub evt_device_release_hardware: Option<fn(&mut Device, &CmResList) -> NtResult<()>>,
+    pub evt_device_prepare_hardware: Option<fn(&Device, &CmResList, &CmResList) -> NtResult<()>>,
+    pub evt_device_release_hardware: Option<fn(&Device, &CmResList) -> NtResult<()>>,
     pub evt_device_self_managed_io_cleanup: Option<fn(&Device)>,
     pub evt_device_self_managed_io_flush: Option<fn(&Device)>,
     pub evt_device_self_managed_io_init: Option<fn(&Device) -> NtResult<()>>,
@@ -491,11 +491,11 @@ unsafe_pnp_power_callback!(evt_device_d0_entry(previous_state: WDF_POWER_DEVICE_
 unsafe_pnp_power_callback!(evt_device_d0_entry_post_interrupts_enabled(previous_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(previous_state)) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_d0_exit(target_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(target_state)) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_d0_exit_pre_interrupts_disabled(target_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(target_state)) -> NTSTATUS);
-unsafe_pnp_power_callback!(mut evt_device_prepare_hardware(
+unsafe_pnp_power_callback!(evt_device_prepare_hardware(
     resources_raw: WDFCMRESLIST => unsafe { &*(resources_raw as *const CmResList) },
     resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated as *const CmResList) }
 ) -> NTSTATUS);
-unsafe_pnp_power_callback!(mut evt_device_release_hardware(
+unsafe_pnp_power_callback!(evt_device_release_hardware(
     resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated as *const CmResList) }
 ) -> NTSTATUS);
 

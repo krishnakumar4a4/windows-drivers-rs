@@ -25,16 +25,22 @@ use wdf::{
     RequestStopActionFlags,
     driver_entry,
     object_context,
+    Slot,
+    SpinLock,
     status_codes,
     trace,
     TriState,
     usb::{UsbDevice, UsbDeviceCreateConfig, UsbDeviceTraits, UsbPipeType},
 };
 
+mod interrupt;
+
+use interrupt::cont_reader_for_interrupt_endpoint;
+
 #[object_context(Device)]
 struct DeviceContext {
-    usb_device: Option<Arc<UsbDevice>>,
-    usb_device_traits: UsbDeviceTraits,
+    usb_device: Slot<Arc<UsbDevice>>,
+    usb_device_traits: SpinLock<UsbDeviceTraits>,
 }
 
 #[object_context(UsbDevice)]
@@ -100,8 +106,8 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     let device = Device::create(device_init, Some(pnp_power_callbacks), Some(&pnp_caps))?;
 
     let context = DeviceContext {
-        usb_device: None,
-        usb_device_traits: UsbDeviceTraits::empty(),
+        usb_device: Slot::try_new(None)?,
+        usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
     };
 
     DeviceContext::attach(&device, context)?;
@@ -151,15 +157,15 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 }
 
 fn evt_device_prepare_hardware(
-    device: &mut Device,
+    device: &Device,
     _resources_raw: &CmResList,
     _resources_translated: &CmResList,
 ) -> NtResult<()> {
     trace("Device prepare hardware callback called");
 
-    // Check if a UsbDevice has already exists
     let device_ctxt = DeviceContext::get(device).expect("device context should exist");
 
+    // Create a UsbDevice only if it does not already exist
     if device_ctxt.usb_device.is_some() {
         return Ok(());
     }
@@ -171,19 +177,13 @@ fn evt_device_prepare_hardware(
         select_interface
     )?;
 
-    let Some(device_context) = DeviceContext::get_mut(device) else {
-       println!("Failed to get device context");
-       return Err(status_codes::STATUS_INTERNAL_ERROR.into());
-    };
-
-
     let info = usb_device.retrieve_information()?;
     println!("IsDeviceHighSpeed: {}", info.traits.contains(UsbDeviceTraits::AT_HIGH_SPEED));
     println!("IsDeviceSelfPowered: {}", info.traits.contains(UsbDeviceTraits::SELF_POWERED));
     println!("IsDeviceRemoteWakeable: {}", info.traits.contains(UsbDeviceTraits::REMOTE_WAKE_CAPABLE));
 
-    device_context.usb_device = Some(usb_device);
-    device_context.usb_device_traits = info.traits;
+    device_ctxt.usb_device.set(Some(usb_device));
+    *device_ctxt.usb_device_traits.lock() = info.traits;
 
     Ok(())
 }
