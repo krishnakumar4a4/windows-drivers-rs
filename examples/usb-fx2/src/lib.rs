@@ -228,11 +228,16 @@ fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
     let mut bulk_write_pipe_index = None;
 
     for i in 0..interface_info.number_of_configured_pipes {
-        let (pipe, pipe_info) = interface_info.configured_usb_interface.get_configured_pipe_with_information(i).ok_or_else(|| {
+        let Some((pipe, pipe_info)) = interface_info.configured_usb_interface.get_configured_pipe_with_information(i) else {
             println!("Failed to get pipe information for pipe index {}", i);
-            NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR)
-        })?;
+            return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
+        };
 
+
+        // let Some(interface) = usb_device.get_interface_mut(0) else {
+        //     println!("Failed to get interface 0");
+        //     return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
+        // };
         match pipe_info.pipe_type {
             UsbPipeType::Interrupt => {
                 println!("Interrupt Pipe is 0x{:x}", i);
@@ -263,6 +268,18 @@ fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
     };
 
     UsbDeviceContext::attach(usb_device, context)?;
+
+    let Some(interface) = usb_device.get_interface_mut(0) else {
+        println!("Failed to get interface 0");
+        return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
+    };
+
+    let Some(interrupt_pipe) = interface.get_configured_pipe_mut(interrupt_pipe_index.unwrap()) else {
+        println!("Failed to get interrupt pipe");
+        return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
+    };
+
+    cont_reader_for_interrupt_endpoint(interrupt_pipe)?;
 
     Ok(())
 }

@@ -534,6 +534,20 @@ pub struct UsbContinuousReaderConfig {
     pub readers_failed_callback: Option<fn(&UsbPipe, NtStatus, UsbdStatus) -> bool>,
 }
 
+impl UsbContinuousReaderConfig {
+    pub fn new(transfer_length: usize, read_complete_callback: Option<fn(&UsbPipe, &Memory, usize)>) -> Self {
+        Self {
+            transfer_length,
+            header_length: 0,
+            trailer_length: 0,
+            num_pending_reads: 1,
+            read_complete_callback,
+            // read_complete_context: None,
+            readers_failed_callback: None,
+        }
+    }
+}
+
 impl From<&UsbContinuousReaderConfig> for WDF_USB_CONTINUOUS_READER_CONFIG {
     fn from(safe_config: &UsbContinuousReaderConfig) -> Self {
         let mut unsafe_config = init_wdf_struct!(WDF_USB_CONTINUOUS_READER_CONFIG);
