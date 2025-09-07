@@ -1,18 +1,16 @@
-use wdf::{
-    Device,
-    NtStatus,
-    println,
-    status_codes,
-};
+use wdf::{Device, NtStatus, println, status_codes};
 
 use crate::{DeviceContext, SwitchState};
 
 pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus) {
-    println!("usb_ioctl_get_interrupt_message called with status: {:?}", reader_status);
+    println!(
+        "usb_ioctl_get_interrupt_message called with status: {:?}",
+        reader_status
+    );
 
     let device_context = DeviceContext::get(device).expect("Device context should be set");
-    let interrupt_msg_queue = device_context.
-        interrupt_msg_queue
+    let interrupt_msg_queue = device_context
+        .interrupt_msg_queue
         .get()
         .expect("Interrupt message queue should be set");
 
@@ -21,7 +19,9 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
     loop {
         match interrupt_msg_queue.retrieve_next_request() {
             Ok(mut request) => {
-                let (request_status, bytes_returned) = match request.retrieve_output_buffer(size_of::<SwitchState>()) {
+                let (request_status, bytes_returned) = match request
+                    .retrieve_output_buffer(size_of::<SwitchState>())
+                {
                     Ok(output_buffer) => {
                         if reader_status.is_success() {
                             bytes_returned = size_of::<SwitchState>();
@@ -35,7 +35,7 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
                             reader_status
                         } else {
                             status_codes::STATUS_SUCCESS.into()
-                        };  
+                        };
 
                         (request_status, bytes_returned)
                     }
@@ -46,7 +46,6 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
                 };
 
                 request.complete_with_information(request_status, bytes_returned);
-
             }
             Err(e) if e.code() == status_codes::STATUS_NO_MORE_ENTRIES.into() => {
                 // No more requests to process
@@ -59,4 +58,3 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
         }
     }
 }
-

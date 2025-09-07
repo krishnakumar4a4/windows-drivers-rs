@@ -15,8 +15,8 @@ use wdk_sys::{
     WDFMEMORY,
     WDFMEMORY_OFFSET,
     WDFUSBDEVICE,
-    WDFUSBPIPE,
     WDFUSBINTERFACE,
+    WDFUSBPIPE,
     WDF_NO_OBJECT_ATTRIBUTES,
     WDF_USB_CONTINUOUS_READER_CONFIG,
     WDF_USB_DEVICE_CREATE_CONFIG,
@@ -463,10 +463,8 @@ impl UsbPipe {
 
     pub fn is_in_endpoint(&self) -> bool {
         unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfUsbTargetPipeIsInEndpoint,
-                self.as_ptr() as *mut _
-            ) != 0
+            call_unsafe_wdf_function_binding!(WdfUsbTargetPipeIsInEndpoint, self.as_ptr() as *mut _)
+                != 0
         }
     }
 
@@ -476,7 +474,7 @@ impl UsbPipe {
                 WdfUsbTargetPipeIsOutEndpoint,
                 self.as_ptr() as *mut _
             ) != 0
-        } 
+        }
     }
 }
 
@@ -535,7 +533,10 @@ pub struct UsbContinuousReaderConfig {
 }
 
 impl UsbContinuousReaderConfig {
-    pub fn new(transfer_length: usize, read_complete_callback: Option<fn(&UsbPipe, &Memory, usize)>) -> Self {
+    pub fn new(
+        transfer_length: usize,
+        read_complete_callback: Option<fn(&UsbPipe, &Memory, usize)>,
+    ) -> Self {
         Self {
             transfer_length,
             header_length: 0,

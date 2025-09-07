@@ -16,7 +16,7 @@ use super::{
     init_wdf_struct,
     object::{impl_ref_counted_handle, Handle},
     request::{Request, RequestId, RequestStopActionFlags},
-    result::{NtResult, status_codes, StatusCodeExt},
+    result::{status_codes, NtResult, StatusCodeExt},
     sync::Arc,
     TriState,
 };

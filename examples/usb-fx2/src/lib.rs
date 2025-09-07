@@ -10,26 +10,26 @@ use wdf::{
     DeviceIoType,
     DevicePnpCapabilities,
     Driver,
-    IoTypeConfig,
     IoQueue,
     IoQueueConfig,
     IoQueueDispatchType,
+    IoTypeConfig,
     NtResult,
     NtStatusError,
     PnpPowerEventCallbacks,
     PowerDeviceState,
-    println,
     Request,
     RequestId,
-    RequestType,
     RequestStopActionFlags,
-    driver_entry,
-    object_context,
+    RequestType,
     Slot,
     SpinLock,
+    TriState,
+    driver_entry,
+    object_context,
+    println,
     status_codes,
     trace,
-    TriState,
     usb::{UsbDevice, UsbDeviceCreateConfig, UsbDeviceTraits, UsbPipeType},
 };
 
@@ -37,7 +37,6 @@ mod interrupt;
 mod ioctl;
 
 use interrupt::cont_reader_for_interrupt_endpoint;
-
 
 bitflags::bitflags! {
     /// Represents the state of the 8 switches on the FX2 device
@@ -68,8 +67,6 @@ bitflags::bitflags! {
         const SWITCH8 = 1 << 7;
     }
 }
-
-
 
 #[object_context(Device)]
 struct DeviceContext {
@@ -126,7 +123,6 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..PnpPowerEventCallbacks::default()
     };
 
-
     let io_type = IoTypeConfig {
         read_write_io_type: DeviceIoType::Buffered,
         ..Default::default()
@@ -141,8 +137,6 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     let device = Device::create(device_init, Some(pnp_power_callbacks), Some(&pnp_caps))?;
 
-    
-
     let queue_config = IoQueueConfig {
         dispatch_type: IoQueueDispatchType::Parallel {
             presented_requests_limit: None,
@@ -151,10 +145,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let _ = IoQueue::create(
-        &device,
-        &queue_config,
-    )?;
+    let _ = IoQueue::create(&device, &queue_config)?;
 
     let queue_config = IoQueueConfig {
         dispatch_type: IoQueueDispatchType::Sequential,
@@ -163,10 +154,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let read_queue = IoQueue::create(
-        &device,
-        &queue_config,
-    )?;
+    let read_queue = IoQueue::create(&device, &queue_config)?;
 
     device.configure_request_dispatching(&read_queue, RequestType::Read)?;
 
@@ -177,10 +165,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let write_queue = IoQueue::create(
-        &device,
-        &queue_config,
-    )?;
+    let write_queue = IoQueue::create(&device, &queue_config)?;
 
     device.configure_request_dispatching(&write_queue, RequestType::Write)?;
 
@@ -190,10 +175,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let interrupt_msg_queue = IoQueue::create(
-        &device,
-        &queue_config,
-    )?;
+    let interrupt_msg_queue = IoQueue::create(&device, &queue_config)?;
 
     let context = DeviceContext {
         usb_device: Slot::try_new(None)?,
@@ -224,14 +206,25 @@ fn evt_device_prepare_hardware(
     // No UsbDevice created so create a new one and store it context
     let usb_device = UsbDevice::create(
         device,
-        &UsbDeviceCreateConfig { usbd_client_contract_version: 0x0100_0000 },
-        select_interface
+        &UsbDeviceCreateConfig {
+            usbd_client_contract_version: 0x0100_0000,
+        },
+        select_interface,
     )?;
 
     let info = usb_device.retrieve_information()?;
-    println!("IsDeviceHighSpeed: {}", info.traits.contains(UsbDeviceTraits::AT_HIGH_SPEED));
-    println!("IsDeviceSelfPowered: {}", info.traits.contains(UsbDeviceTraits::SELF_POWERED));
-    println!("IsDeviceRemoteWakeable: {}", info.traits.contains(UsbDeviceTraits::REMOTE_WAKE_CAPABLE));
+    println!(
+        "IsDeviceHighSpeed: {}",
+        info.traits.contains(UsbDeviceTraits::AT_HIGH_SPEED)
+    );
+    println!(
+        "IsDeviceSelfPowered: {}",
+        info.traits.contains(UsbDeviceTraits::SELF_POWERED)
+    );
+    println!(
+        "IsDeviceRemoteWakeable: {}",
+        info.traits.contains(UsbDeviceTraits::REMOTE_WAKE_CAPABLE)
+    );
 
     device_ctxt.usb_device.set(Some(usb_device));
     *device_ctxt.usb_device_traits.lock() = info.traits;
@@ -255,7 +248,13 @@ fn evt_device_self_managed_io_flush(_device: &Device) {
     trace("Device self-managed I/O flush callback called");
 }
 
-fn evt_io_device_control(_queue: &IoQueue, _request: Request, _output_buffer_length: usize, _input_buffer_length: usize, _control_code: u32) {
+fn evt_io_device_control(
+    _queue: &IoQueue,
+    _request: Request,
+    _output_buffer_length: usize,
+    _input_buffer_length: usize,
+    _control_code: u32,
+) {
     trace("I/O device control callback called");
 }
 
@@ -279,11 +278,13 @@ fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
     let mut bulk_write_pipe_index = None;
 
     for i in 0..interface_info.number_of_configured_pipes {
-        let Some((pipe, pipe_info)) = interface_info.configured_usb_interface.get_configured_pipe_with_information(i) else {
+        let Some((pipe, pipe_info)) = interface_info
+            .configured_usb_interface
+            .get_configured_pipe_with_information(i)
+        else {
             println!("Failed to get pipe information for pipe index {}", i);
             return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
         };
-
 
         // let Some(interface) = usb_device.get_interface_mut(0) else {
         //     println!("Failed to get interface 0");
@@ -293,23 +294,28 @@ fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
             UsbPipeType::Interrupt => {
                 println!("Interrupt Pipe is 0x{:x}", i);
                 interrupt_pipe_index = Some(i);
-            },
+            }
             UsbPipeType::Bulk => {
-                if pipe.is_in_endpoint()  {
+                if pipe.is_in_endpoint() {
                     println!("BulkInput Pipe is 0x{:x}", i);
                     bulk_read_pipe_index = Some(i);
                 } else if pipe.is_out_endpoint() {
                     println!("BulkOutput Pipe is 0x{:x}", i);
                     bulk_write_pipe_index = Some(i);
                 }
-            },
+            }
             _ => {}
         }
     }
 
-    if interrupt_pipe_index.is_none() || bulk_read_pipe_index.is_none() || bulk_write_pipe_index.is_none() {
+    if interrupt_pipe_index.is_none()
+        || bulk_read_pipe_index.is_none()
+        || bulk_write_pipe_index.is_none()
+    {
         println!("Device is not configured properly");
-        return Err(NtStatusError::from(status_codes::STATUS_INVALID_DEVICE_STATE));
+        return Err(NtStatusError::from(
+            status_codes::STATUS_INVALID_DEVICE_STATE,
+        ));
     }
 
     let context = UsbDeviceContext {
@@ -325,7 +331,8 @@ fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
         return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
     };
 
-    let Some(interrupt_pipe) = interface.get_configured_pipe_mut(interrupt_pipe_index.unwrap()) else {
+    let Some(interrupt_pipe) = interface.get_configured_pipe_mut(interrupt_pipe_index.unwrap())
+    else {
         println!("Failed to get interrupt pipe");
         return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
     };
@@ -334,4 +341,3 @@ fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
 
     Ok(())
 }
-

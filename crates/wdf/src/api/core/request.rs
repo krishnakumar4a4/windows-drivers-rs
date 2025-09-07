@@ -1,10 +1,15 @@
 use alloc::{string::String, vec::Vec};
 use core::{ffi::c_void, ptr, slice};
+
 use bitflags::bitflags;
-
 use wdf_macros::object_context;
-
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFOBJECT, WDFREQUEST, WDF_REQUEST_TYPE};
+use wdk_sys::{
+    call_unsafe_wdf_function_binding,
+    WDFMEMORY,
+    WDFOBJECT,
+    WDFREQUEST,
+    WDF_REQUEST_TYPE,
+};
 
 use super::{
     enum_mapping,
@@ -166,12 +171,7 @@ impl Request {
                 &mut buffer_ptr,
                 &mut buffer_size
             )
-            .and_then(|| {
-                Ok(slice::from_raw_parts(
-                    buffer_ptr as *const u8,
-                    buffer_size,
-                ))
-            })
+            .and_then(|| Ok(slice::from_raw_parts(buffer_ptr as *const u8, buffer_size)))
         }
     }
 
@@ -187,7 +187,7 @@ impl Request {
                 &mut buffer_ptr,
                 &mut buffer_size
             )
-            .and_then(|| {    
+            .and_then(|| {
                 Ok(slice::from_raw_parts_mut(
                     buffer_ptr as *mut u8,
                     buffer_size,
@@ -399,7 +399,7 @@ unsafe impl Sync for RequestCancellationToken {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RequestId(usize);
 
-enum_mapping!{
+enum_mapping! {
     infallible;
     pub enum RequestType: WDF_REQUEST_TYPE {
         Create = WdfRequestTypeCreate,

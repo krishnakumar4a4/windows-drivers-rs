@@ -119,9 +119,13 @@ impl Device {
         }
     }
 
-    pub fn configure_request_dispatching(&self, queue: &IoQueue, request_type: RequestType) -> NtResult<()> {
+    pub fn configure_request_dispatching(
+        &self,
+        queue: &IoQueue,
+        request_type: RequestType,
+    ) -> NtResult<()> {
         // TODO: is this function safe to call from anywhere?
-        // Is it thread safe? If not we may have to do some design 
+        // Is it thread safe? If not we may have to do some design
         // to make it safe.
         let request_type = request_type.into();
 
@@ -206,7 +210,6 @@ enum_mapping! {
         BufferedOrDirect = WdfDeviceIoBufferedOrDirect,
     }
 }
-
 
 pub struct DevicePnpCapabilities {
     pub lock_supported: TriState,
@@ -469,7 +472,8 @@ macro_rules! unsafe_pnp_power_callback {
     (@ret_type $return_type:tt) => { $return_type };
 }
 
-// Helper macro: convert Result-returning Rust callbacks into the C return value.
+// Helper macro: convert Result-returning Rust callbacks into the C return
+// value.
 macro_rules! unsafe_pnp_power_callback_call_and_return {
     (NTSTATUS, $call:expr) => {
         match $call {
