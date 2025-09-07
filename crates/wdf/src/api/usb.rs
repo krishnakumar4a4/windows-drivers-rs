@@ -92,7 +92,7 @@ impl UsbDevice {
         // any `UsbPipe`s of this device while we are selecting a config
         // because the change in config could internally delete them
         // causing those references to dangle
-        &mut self,
+        &'a mut self,
     ) -> NtResult<UsbSingleInterfaceInformation<'a>> {
         let mut config = init_wdf_struct!(WDF_USB_DEVICE_SELECT_CONFIG_PARAMS);
         config.Type =
