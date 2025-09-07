@@ -5,12 +5,13 @@ use wdf::{
     NtStatus,
     println,
     status_codes,
-    usb::{UsbContinuousReaderConfig, UsbDevice, UsbdStatus, UsbPipe},
+    usb::{UsbContinuousReaderConfig, UsbdStatus, UsbPipe},
 };
 
 use crate::{
     DeviceContext,
     ioctl::usb_ioctl_get_interrupt_message,
+    SwitchState,
 };
 
 pub fn cont_reader_for_interrupt_endpoint(pipe: &mut UsbPipe) -> NtResult<()> {
@@ -35,7 +36,7 @@ fn evt_usb_interrupt_pipe_read_complete(
 
     let device = pipe.get_io_target().get_device();
     let device_context = DeviceContext::get(&device).expect("Device context should be set");
-    *device_context.current_switch_state.lock() = buffer.get_buffer()[0];
+    *device_context.current_switch_state.lock() = SwitchState::from_bits_retain(buffer.get_buffer()[0]);
 
     usb_ioctl_get_interrupt_message(&device, status_codes::STATUS_SUCCESS.into());
 }
@@ -50,7 +51,7 @@ fn evt_usb_target_pipe_readers_failed(
     let device = pipe.get_io_target().get_device();
     let device_context = DeviceContext::get(&device).expect("Device context should be set");
 
-    *device_context.current_switch_state.lock() = 0;
+    *device_context.current_switch_state.lock() = SwitchState::empty();
 
     usb_ioctl_get_interrupt_message(&device, status);
 

@@ -1,4 +1,5 @@
 use alloc::{string::String, vec::Vec};
+use core::{ffi::c_void, ptr, slice};
 use bitflags::bitflags;
 
 use wdf_macros::object_context;
@@ -128,7 +129,7 @@ impl Request {
     }
 
     pub fn retrieve_input_memory(&self) -> NtResult<&Memory> {
-        let mut raw_memory: WDFMEMORY = core::ptr::null_mut();
+        let mut raw_memory: WDFMEMORY = ptr::null_mut();
 
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -141,7 +142,7 @@ impl Request {
     }
 
     pub fn retrieve_output_memory(&mut self) -> NtResult<&mut Memory> {
-        let mut raw_memory: WDFMEMORY = core::ptr::null_mut();
+        let mut raw_memory: WDFMEMORY = ptr::null_mut();
 
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -151,6 +152,48 @@ impl Request {
             )
         }
         .map(|| unsafe { &mut *(raw_memory as *mut Memory) })
+    }
+
+    pub fn retrieve_input_buffer(&self, minimum_required_size: usize) -> NtResult<&[u8]> {
+        let mut buffer_ptr: *mut core::ffi::c_void = ptr::null_mut();
+        let mut buffer_size: usize = 0;
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestRetrieveInputBuffer,
+                self.as_ptr() as *mut _,
+                minimum_required_size,
+                &mut buffer_ptr,
+                &mut buffer_size
+            )
+            .and_then(|| {
+                Ok(slice::from_raw_parts(
+                    buffer_ptr as *const u8,
+                    buffer_size,
+                ))
+            })
+        }
+    }
+
+    pub fn retrieve_output_buffer(&mut self, minimum_required_size: usize) -> NtResult<&mut [u8]> {
+        let mut buffer_ptr: *mut core::ffi::c_void = ptr::null_mut();
+        let mut buffer_size: usize = 0;
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestRetrieveOutputBuffer,
+                self.as_ptr() as *mut _,
+                minimum_required_size,
+                &mut buffer_ptr,
+                &mut buffer_size
+            )
+            .and_then(|| {    
+                Ok(slice::from_raw_parts_mut(
+                    buffer_ptr as *mut u8,
+                    buffer_size,
+                ))
+            })
+        }
     }
 
     pub fn stop_acknowledge_requeue(self) {

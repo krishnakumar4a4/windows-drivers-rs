@@ -38,11 +38,45 @@ mod ioctl;
 
 use interrupt::cont_reader_for_interrupt_endpoint;
 
+
+bitflags::bitflags! {
+    /// Represents the state of the 8 switches on the FX2 device
+    #[repr(transparent)]
+    pub struct SwitchState: u8 {
+        /// Switch 1 of the FX2 device
+        const SWITCH1 = 1 << 0;
+
+        /// Switch 2 of the FX2 device
+        const SWITCH2 = 1 << 1;
+
+        /// Switch 3 of the FX2 device
+        const SWITCH3 = 1 << 2;
+
+        /// Switch 4 of the FX2 device
+        const SWITCH4 = 1 << 3;
+
+        /// Switch 5 of the FX2 device
+        const SWITCH5 = 1 << 4;
+
+        /// Switch 6 of the FX2 device
+        const SWITCH6 = 1 << 5;
+
+        /// Switch 7 of the FX2 device
+        const SWITCH7 = 1 << 6;
+
+        /// Switch 8 of the FX2 device
+        const SWITCH8 = 1 << 7;
+    }
+}
+
+
+
 #[object_context(Device)]
 struct DeviceContext {
     usb_device: Slot<Arc<UsbDevice>>,
     usb_device_traits: SpinLock<UsbDeviceTraits>,
-    current_switch_state: SpinLock<u8>,
+    current_switch_state: SpinLock<SwitchState>,
+    interrupt_msg_queue: Slot<Arc<IoQueue>>,
 }
 
 #[object_context(UsbDevice)]
@@ -107,13 +141,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     let device = Device::create(device_init, Some(pnp_power_callbacks), Some(&pnp_caps))?;
 
-    let context = DeviceContext {
-        usb_device: Slot::try_new(None)?,
-        usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
-        current_switch_state: SpinLock::create(0)?,
-    };
-
-    DeviceContext::attach(&device, context)?;
+    
 
     let queue_config = IoQueueConfig {
         dispatch_type: IoQueueDispatchType::Parallel {
@@ -155,6 +183,26 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     )?;
 
     device.configure_request_dispatching(&write_queue, RequestType::Write)?;
+
+    let queue_config = IoQueueConfig {
+        dispatch_type: IoQueueDispatchType::Manual,
+        power_managed: TriState::False,
+        ..Default::default()
+    };
+
+    let interrupt_msg_queue = IoQueue::create(
+        &device,
+        &queue_config,
+    )?;
+
+    let context = DeviceContext {
+        usb_device: Slot::try_new(None)?,
+        usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
+        current_switch_state: SpinLock::create(SwitchState::empty())?,
+        interrupt_msg_queue: Slot::try_new(Some(interrupt_msg_queue))?,
+    };
+
+    DeviceContext::attach(&device, context)?;
 
     Ok(())
 }
