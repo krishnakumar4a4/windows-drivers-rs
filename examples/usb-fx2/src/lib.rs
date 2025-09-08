@@ -34,14 +34,16 @@ use wdf::{
     object_context,
     println,
     status_codes,
-    usb::{UsbDevice, UsbDeviceCreateConfig, UsbDeviceTraits, UsbPipeType},
+    usb::{UsbDevice, UsbDeviceCreateConfig, UsbDeviceTraits, UsbPipe, UsbPipeType},
 };
 
+mod bulkrwr;
 mod interrupt;
 mod ioctl;
 
+use bulkrwr::{evt_io_read, evt_io_stop, evt_io_write};
 use interrupt::cont_reader_for_interrupt_endpoint;
-use ioctl::usb_ioctl_get_interrupt_message;
+use ioctl::{evt_io_device_control, usb_ioctl_get_interrupt_message};
 
 bitflags::bitflags! {
     /// Represents the state of the 8 switches on the FX2 device
@@ -79,6 +81,17 @@ struct DeviceContext {
     usb_device_traits: SpinLock<UsbDeviceTraits>,
     current_switch_state: SpinLock<SwitchState>,
     interrupt_msg_queue: Slot<Arc<IoQueue>>,
+}
+
+impl DeviceContext {
+    fn get_interrupt_pipe(&self) -> NtResult<&UsbPipe> {
+        let usb_device = self.usb_device.get().expect("USB device should be set");
+        let usb_device_context = UsbDeviceContext::get(&usb_device).expect("USB device context should be set");
+        let usb_interface = usb_device.get_interface(0).expect("USB interface 0 should be present");
+        let interrupt_pipe = usb_interface.get_configured_pipe(usb_device_context.interrupt_pipe_index).expect("Interrupt pipe should be present");
+
+        Ok(interrupt_pipe)
+    }
 }
 
 #[object_context(UsbDevice)]
@@ -264,12 +277,9 @@ fn evt_device_d0_exit(device: &Device, _next_state: PowerDeviceState) -> NtResul
     Ok(())
 }
 
-fn get_interrupt_io_target<'a>(device: &Device) -> NtResult<&'a IoTarget> {
+fn get_interrupt_io_target(device: &Device) -> NtResult<&IoTarget> {
     let device_context = DeviceContext::get(device).expect("Device context should be set");
-    let usb_device = device_context.usb_device.get().expect("USB device should be set");
-    let usb_device_context = UsbDeviceContext::get(&usb_device).expect("USB device context should be set");
-    let usb_interface = usb_device.get_interface(0).expect("USB interface 0 should be present");
-    let interrupt_pipe = usb_interface.get_configured_pipe(usb_device_context.interrupt_pipe_index).expect("Interrupt pipe should be present");
+    let interrupt_pipe = device_context.get_interrupt_pipe()?;
     let io_target = interrupt_pipe.get_io_target();
 
     Ok(io_target)
@@ -278,28 +288,6 @@ fn get_interrupt_io_target<'a>(device: &Device) -> NtResult<&'a IoTarget> {
 fn evt_device_self_managed_io_flush(device: &Device) {
     println!("Device self-managed I/O flush callback called");
     usb_ioctl_get_interrupt_message(device, status_codes::STATUS_DEVICE_REMOVED.into());
-}
-
-fn evt_io_device_control(
-    _queue: &IoQueue,
-    _request: Request,
-    _output_buffer_length: usize,
-    _input_buffer_length: usize,
-    _control_code: u32,
-) {
-    println!("I/O device control callback called");
-}
-
-fn evt_io_read(_queue: &IoQueue, _request: Request, _length: usize) {
-    println!("I/O read callback called");
-}
-
-fn evt_io_write(_queue: &IoQueue, _request: Request, _length: usize) {
-    println!("I/O write callback called");
-}
-
-fn evt_io_stop(_queue: &IoQueue, _request_id: RequestId, _action_flags: RequestStopActionFlags) {
-    println!("I/O stop callback called");
 }
 
 fn set_power_policy(device: &Device) -> NtResult<()> {
