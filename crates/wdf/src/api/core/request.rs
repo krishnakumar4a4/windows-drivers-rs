@@ -1,5 +1,5 @@
 use alloc::{string::String, vec::Vec};
-use core::{ffi::c_void, ptr, slice};
+use core::{ptr, slice};
 
 use bitflags::bitflags;
 use wdf_macros::object_context;
