@@ -42,6 +42,7 @@ mod interrupt;
 mod ioctl;
 
 use interrupt::cont_reader_for_interrupt_endpoint;
+use ioctl::usb_ioctl_get_interrupt_message;
 
 bitflags::bitflags! {
     /// Represents the state of the 8 switches on the FX2 device
@@ -275,8 +276,9 @@ fn get_interrupt_io_target<'a>(device: &Device) -> NtResult<&'a IoTarget> {
     Ok(io_target)
 }
 
-fn evt_device_self_managed_io_flush(_device: &Device) {
+fn evt_device_self_managed_io_flush(device: &Device) {
     trace("Device self-managed I/O flush callback called");
+    usb_ioctl_get_interrupt_message(device, status_codes::STATUS_DEVICE_REMOVED.into());
 }
 
 fn evt_io_device_control(
