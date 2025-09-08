@@ -34,7 +34,6 @@ use wdf::{
     object_context,
     println,
     status_codes,
-    trace,
     usb::{UsbDevice, UsbDeviceCreateConfig, UsbDeviceTraits, UsbPipeType},
 };
 
@@ -110,7 +109,7 @@ struct UsbDeviceContext {
 /// reboots. The path does not store hardware instance specific data.
 #[driver_entry(tracing_control_guid = "cb94defb-592a-4509-8f2e-54f204929669")]
 fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
-    trace("OSRUSBFX2 Driver Sample - Driver Framework Edition.\n");
+    println!("OSRUSBFX2 Driver Sample - Driver Framework Edition.\n");
 
     // Set up the device add callback
     driver.on_evt_device_add(evt_device_add);
@@ -119,7 +118,7 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
 }
 
 fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
-    trace("Device add callback called");
+    println!("Device add callback called");
 
     let pnp_power_callbacks = PnpPowerEventCallbacks {
         evt_device_prepare_hardware: Some(evt_device_prepare_hardware),
@@ -200,7 +199,7 @@ fn evt_device_prepare_hardware(
     _resources_raw: &CmResList,
     _resources_translated: &CmResList,
 ) -> NtResult<()> {
-    trace("Device prepare hardware callback called");
+    println!("Device prepare hardware callback called");
 
     let device_ctxt = DeviceContext::get(device).expect("device context should exist");
 
@@ -244,7 +243,7 @@ fn evt_device_prepare_hardware(
 }
 
 fn evt_device_d0_entry(device: &Device, _previous_state: PowerDeviceState) -> NtResult<()> {
-    trace("Device D0 entry callback called");
+    println!("Device D0 entry callback called");
     let io_target = get_interrupt_io_target(device)?;
 
     if let Err(e) = io_target.start() {
@@ -257,7 +256,7 @@ fn evt_device_d0_entry(device: &Device, _previous_state: PowerDeviceState) -> Nt
 }
 
 fn evt_device_d0_exit(device: &Device, _next_state: PowerDeviceState) -> NtResult<()> {
-    trace("Device D0 exit callback called");
+    println!("Device D0 exit callback called");
 
     let io_target = get_interrupt_io_target(device)?;
     io_target.stop(IoTargetSentIoAction::CancelSentIo);
@@ -277,7 +276,7 @@ fn get_interrupt_io_target<'a>(device: &Device) -> NtResult<&'a IoTarget> {
 }
 
 fn evt_device_self_managed_io_flush(device: &Device) {
-    trace("Device self-managed I/O flush callback called");
+    println!("Device self-managed I/O flush callback called");
     usb_ioctl_get_interrupt_message(device, status_codes::STATUS_DEVICE_REMOVED.into());
 }
 
@@ -288,23 +287,23 @@ fn evt_io_device_control(
     _input_buffer_length: usize,
     _control_code: u32,
 ) {
-    trace("I/O device control callback called");
+    println!("I/O device control callback called");
 }
 
 fn evt_io_read(_queue: &IoQueue, _request: Request, _length: usize) {
-    trace("I/O read callback called");
+    println!("I/O read callback called");
 }
 
 fn evt_io_write(_queue: &IoQueue, _request: Request, _length: usize) {
-    trace("I/O write callback called");
+    println!("I/O write callback called");
 }
 
 fn evt_io_stop(_queue: &IoQueue, _request_id: RequestId, _action_flags: RequestStopActionFlags) {
-    trace("I/O stop callback called");
+    println!("I/O stop callback called");
 }
 
 fn set_power_policy(device: &Device) -> NtResult<()> {
-    trace("Set power policy callback called");
+    println!("Set power policy callback called");
 
     let mut idle_settings = DevicePowerPolicyIdleSettings::from_caps(PowerPolicyS0IdleCapabilities::UsbSelectiveSuspend);
     idle_settings.idle_timeout = 10_000; // 10 seconds
