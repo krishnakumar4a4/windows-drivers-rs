@@ -13,6 +13,8 @@ use wdf::{
     IoQueue,
     IoQueueConfig,
     IoQueueDispatchType,
+    IoTarget,
+    IoTargetSentIoAction,
     IoTypeConfig,
     NtResult,
     NtStatusError,
@@ -232,16 +234,37 @@ fn evt_device_prepare_hardware(
     Ok(())
 }
 
-fn evt_device_d0_entry(_device: &Device, _previous_state: PowerDeviceState) -> NtResult<()> {
+fn evt_device_d0_entry(device: &Device, _previous_state: PowerDeviceState) -> NtResult<()> {
     trace("Device D0 entry callback called");
+    let io_target = get_interrupt_io_target(device)?;
+
+    if let Err(e) = io_target.start() {
+        println!("Failed to start IO target: {:?}", e);
+        io_target.stop(IoTargetSentIoAction::CancelSentIo);
+        return Err(e);
+    }
 
     Ok(())
 }
 
-fn evt_device_d0_exit(_device: &Device, _next_state: PowerDeviceState) -> NtResult<()> {
+fn evt_device_d0_exit(device: &Device, _next_state: PowerDeviceState) -> NtResult<()> {
     trace("Device D0 exit callback called");
 
+    let io_target = get_interrupt_io_target(device)?;
+    io_target.stop(IoTargetSentIoAction::CancelSentIo);
+
     Ok(())
+}
+
+fn get_interrupt_io_target<'a>(device: &Device) -> NtResult<&'a IoTarget> {
+    let device_context = DeviceContext::get(device).expect("Device context should be set");
+    let usb_device = device_context.usb_device.get().expect("USB device should be set");
+    let usb_device_context = UsbDeviceContext::get(&usb_device).expect("USB device context should be set");
+    let usb_interface = usb_device.get_interface(0).expect("USB interface 0 should be present");
+    let interrupt_pipe = usb_interface.get_configured_pipe(usb_device_context.interrupt_pipe_index).expect("Interrupt pipe should be present");
+    let io_target = interrupt_pipe.get_io_target();
+
+    Ok(io_target)
 }
 
 fn evt_device_self_managed_io_flush(_device: &Device) {
