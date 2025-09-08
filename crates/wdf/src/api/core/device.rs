@@ -150,6 +150,38 @@ impl Device {
             );
         }
     }
+
+    pub fn assign_s0_idle_settings(
+        &self,
+        settings: &DevicePowerPolicyIdleSettings,
+    ) -> NtResult<()> {
+        let mut settings = settings.into();
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceAssignS0IdleSettings,
+                self.as_ptr() as *mut _,
+                &mut settings
+            )
+        }
+        .ok()
+    }
+
+    pub fn assign_sx_wake_settings(
+        &self,
+        settings: &DevicePowerPolicyWakeSettings,
+    ) -> NtResult<()> {
+        let mut settings = settings.into();
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceAssignSxWakeSettings,
+                self.as_ptr() as *mut _,
+                &mut settings
+            )
+        }
+        .ok()
+    }
 }
 
 pub struct DeviceInit(*mut WDFDEVICE_INIT);
@@ -542,9 +574,9 @@ pub struct DevicePowerPolicyIdleSettings {
 }
 
 impl DevicePowerPolicyIdleSettings {
-    pub fn from_caps(caps: &PowerPolicyS0IdleCapabilities) -> Self {
+    pub fn from_caps(caps: PowerPolicyS0IdleCapabilities) -> Self {
         let mut obj = Self::default();
-        obj.idle_caps = *caps;
+        obj.idle_caps = caps;
 
         obj.dx_state = match caps {
             PowerPolicyS0IdleCapabilities::CanWakeFromS0

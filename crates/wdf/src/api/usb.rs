@@ -28,7 +28,7 @@ use wdk_sys::{
 };
 
 use super::core::{
-    device::{Device, DevicePowerPolicyIdleSettings, DevicePowerPolicyWakeSettings},
+    device::Device,
     enum_mapping,
     init_wdf_struct,
     io_target::{to_buffer_ptrs, IoTarget, RequestFormatBuffer},
@@ -136,37 +136,7 @@ impl UsbDevice {
         }
     }
 
-    pub fn assign_s0_idle_settings(
-        &self,
-        settings: &DevicePowerPolicyIdleSettings,
-    ) -> NtResult<()> {
-        let mut settings = settings.into();
-
-        unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfDeviceAssignS0IdleSettings,
-                self.as_ptr() as *mut _,
-                &mut settings
-            )
-        }
-        .ok()
-    }
-
-    pub fn assign_sx_wake_settings(
-        &self,
-        settings: &DevicePowerPolicyWakeSettings,
-    ) -> NtResult<()> {
-        let mut settings = settings.into();
-
-        unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfDeviceAssignSxWakeSettings,
-                self.as_ptr() as *mut _,
-                &mut settings
-            )
-        }
-        .ok()
-    }
+    
 }
 
 #[object_context_with_ref_count_check(UsbDevice)]

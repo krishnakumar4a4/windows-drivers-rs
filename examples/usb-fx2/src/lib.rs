@@ -9,6 +9,8 @@ use wdf::{
     DeviceInit,
     DeviceIoType,
     DevicePnpCapabilities,
+    DevicePowerPolicyIdleSettings,
+    DevicePowerPolicyWakeSettings,
     Driver,
     IoQueue,
     IoQueueConfig,
@@ -20,6 +22,7 @@ use wdf::{
     NtStatusError,
     PnpPowerEventCallbacks,
     PowerDeviceState,
+    PowerPolicyS0IdleCapabilities,
     Request,
     RequestId,
     RequestStopActionFlags,
@@ -228,8 +231,13 @@ fn evt_device_prepare_hardware(
         info.traits.contains(UsbDeviceTraits::REMOTE_WAKE_CAPABLE)
     );
 
+    if info.traits.contains(UsbDeviceTraits::REMOTE_WAKE_CAPABLE) {
+        set_power_policy(device)?;
+    }
+
     device_ctxt.usb_device.set(Some(usb_device));
     *device_ctxt.usb_device_traits.lock() = info.traits;
+
 
     Ok(())
 }
@@ -291,6 +299,19 @@ fn evt_io_write(_queue: &IoQueue, _request: Request, _length: usize) {
 
 fn evt_io_stop(_queue: &IoQueue, _request_id: RequestId, _action_flags: RequestStopActionFlags) {
     trace("I/O stop callback called");
+}
+
+fn set_power_policy(device: &Device) -> NtResult<()> {
+    trace("Set power policy callback called");
+
+    let mut idle_settings = DevicePowerPolicyIdleSettings::from_caps(PowerPolicyS0IdleCapabilities::UsbSelectiveSuspend);
+    idle_settings.idle_timeout = 10_000; // 10 seconds
+    device.assign_s0_idle_settings(&idle_settings)?;
+
+    let wake_settings = DevicePowerPolicyWakeSettings::default();
+    device.assign_sx_wake_settings(&wake_settings)?;
+
+    Ok(())
 }
 
 fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
