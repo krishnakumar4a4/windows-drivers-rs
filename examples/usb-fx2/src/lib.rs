@@ -85,12 +85,24 @@ struct DeviceContext {
 
 impl DeviceContext {
     fn get_interrupt_pipe(&self) -> NtResult<&UsbPipe> {
+        self.get_usb_pipe(|usb_dev_ctx| usb_dev_ctx.interrupt_pipe_index)
+    }
+
+    fn get_bulk_read_pipe(&self) -> NtResult<&UsbPipe> {
+        self.get_usb_pipe(|usb_dev_ctx| usb_dev_ctx.bulk_read_pipe_index)
+    }
+
+    fn get_bulk_write_pipe(&self) -> NtResult<&UsbPipe> {
+        self.get_usb_pipe(|usb_dev_ctx| usb_dev_ctx.bulk_write_pipe_index)
+    }
+
+    fn get_usb_pipe<F: Fn(&UsbDeviceContext) -> u8>(&self, pipe_index: F) -> NtResult<&UsbPipe> {
         let usb_device = self.usb_device.get().expect("USB device should be set");
         let usb_device_context = UsbDeviceContext::get(&usb_device).expect("USB device context should be set");
         let usb_interface = usb_device.get_interface(0).expect("USB interface 0 should be present");
-        let interrupt_pipe = usb_interface.get_configured_pipe(usb_device_context.interrupt_pipe_index).expect("Interrupt pipe should be present");
+        let pipe = usb_interface.get_configured_pipe(pipe_index(&usb_device_context)).expect("USB pipe should be present");
 
-        Ok(interrupt_pipe)
+        Ok(pipe)
     }
 }
 
