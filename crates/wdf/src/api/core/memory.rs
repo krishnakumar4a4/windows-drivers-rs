@@ -1,6 +1,6 @@
-use core::ops::{Deref, DerefMut};
+use core::{ops::{Deref, DerefMut}, ptr};
 
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFMEMORY_OFFSET};
+use wdk_sys::{call_unsafe_wdf_function_binding, _POOL_TYPE, WDFMEMORY, WDFMEMORY_OFFSET};
 
 use super::{
     object::{impl_handle, Handle},
@@ -82,6 +82,43 @@ impl Memory {
 #[repr(transparent)]
 pub struct OwnedMemory(WDFMEMORY);
 
+impl OwnedMemory {
+    pub fn create(pool_type: PoolType, pool_tag: u32, buffer_size: usize) -> NtResult<Self> {
+        let pool_type = match pool_type {
+            PoolType::Paged => _POOL_TYPE::PagedPool,
+            PoolType::NonPagedNx => _POOL_TYPE::NonPagedPoolNx,
+        };
+
+        let mut memory: WDFMEMORY = ptr::null_mut();
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfMemoryCreate,
+                ptr::null_mut(),
+                pool_type,
+                pool_tag,
+                buffer_size,
+                &mut memory,
+                ptr::null_mut(),
+            )
+        }
+        .ok()?;
+
+        // TODO: wonder if we need to increment the WDF object ref count here
+        // (and decrement it in drop) to keep the underlying object alive.
+        // Investigate and confirm.
+
+        Ok(OwnedMemory(memory))
+    }
+}
+
+impl Drop for OwnedMemory {
+    fn drop(&mut self) {
+        unsafe {
+            call_unsafe_wdf_function_binding!(WdfObjectDelete, self.0 as *mut _);
+        }
+    }
+}
+
 /// Although `OwnedMemory` carries a raw pointer it
 /// is still `Sync` because sharing it across thread
 /// will allow just readonly access to the pointer
@@ -120,4 +157,10 @@ impl Into<WDFMEMORY_OFFSET> for &MemoryOffset {
             BufferLength: self.buffer_length,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoolType {
+    Paged,
+    NonPagedNx,
 }
