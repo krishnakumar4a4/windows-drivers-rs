@@ -59,7 +59,7 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
 
                 request.complete_with_information(request_status, bytes_returned);
             }
-            Err(e) if e.code() == status_codes::STATUS_NO_MORE_ENTRIES.into() => {
+            Err(e) if e.code() == status_codes::STATUS_NO_MORE_ENTRIES => {
                 // No more requests to process
                 break;
             }

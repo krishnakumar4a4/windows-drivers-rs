@@ -25,8 +25,8 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
         return;
     }
 
-    let device_context = DeviceContext::get(&queue.get_device()).expect("Device context should be set");
-    let pipe = device_context.get_bulk_read_pipe().expect("Bulk read pipe should be present");
+    let device_context = DeviceContext::get(queue.get_device()).expect("Device context should be set");
+    let pipe = device_context.get_bulk_read_pipe();
 
     if let Err(e) = pipe.format_request_for_read(&mut request, RequestFormatBuffer::RequestBuffer(None)) {
         println!("Failed to initiate read on bulk read pipe: {:?}", e);
@@ -40,7 +40,7 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 
 }
 
-pub fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
+pub fn evt_io_write(_queue: &IoQueue, request: Request, length: usize) {
     println!("I/O write callback called");
 
     if length > TEST_BOARD_TRANSFER_BUFFER_SIZE {

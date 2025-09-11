@@ -84,25 +84,23 @@ struct DeviceContext {
 }
 
 impl DeviceContext {
-    fn get_interrupt_pipe(&self) -> NtResult<&UsbPipe> {
+    fn get_interrupt_pipe(&self) -> &UsbPipe {
         self.get_usb_pipe(|usb_dev_ctx| usb_dev_ctx.interrupt_pipe_index)
     }
 
-    fn get_bulk_read_pipe(&self) -> NtResult<&UsbPipe> {
+    fn get_bulk_read_pipe(&self) -> &UsbPipe {
         self.get_usb_pipe(|usb_dev_ctx| usb_dev_ctx.bulk_read_pipe_index)
     }
 
-    fn get_bulk_write_pipe(&self) -> NtResult<&UsbPipe> {
+    fn get_bulk_write_pipe(&self) -> &UsbPipe {
         self.get_usb_pipe(|usb_dev_ctx| usb_dev_ctx.bulk_write_pipe_index)
     }
 
-    fn get_usb_pipe<F: Fn(&UsbDeviceContext) -> u8>(&self, pipe_index: F) -> NtResult<&UsbPipe> {
+    fn get_usb_pipe<F: Fn(&UsbDeviceContext) -> u8>(&self, pipe_index: F) -> &UsbPipe {
         let usb_device = self.usb_device.get().expect("USB device should be set");
         let usb_device_context = UsbDeviceContext::get(&usb_device).expect("USB device context should be set");
         let usb_interface = usb_device.get_interface(0).expect("USB interface 0 should be present");
-        let pipe = usb_interface.get_configured_pipe(pipe_index(&usb_device_context)).expect("USB pipe should be present");
-
-        Ok(pipe)
+        usb_interface.get_configured_pipe(pipe_index(usb_device_context)).expect("USB pipe should be present")
     }
 }
 
@@ -175,7 +173,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let _ = IoQueue::create(&device, &queue_config)?;
+    let _ = IoQueue::create(device, &queue_config)?;
 
     let queue_config = IoQueueConfig {
         dispatch_type: IoQueueDispatchType::Sequential,
@@ -184,7 +182,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let read_queue = IoQueue::create(&device, &queue_config)?;
+    let read_queue = IoQueue::create(device, &queue_config)?;
 
     device.configure_request_dispatching(&read_queue, RequestType::Read)?;
 
@@ -195,7 +193,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let write_queue = IoQueue::create(&device, &queue_config)?;
+    let write_queue = IoQueue::create(device, &queue_config)?;
 
     device.configure_request_dispatching(&write_queue, RequestType::Write)?;
 
@@ -205,7 +203,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let interrupt_msg_queue = IoQueue::create(&device, &queue_config)?;
+    let interrupt_msg_queue = IoQueue::create(device, &queue_config)?;
 
     let context = DeviceContext {
         usb_device: Slot::try_new(None)?,
@@ -214,7 +212,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         interrupt_msg_queue: Slot::try_new(Some(interrupt_msg_queue))?,
     };
 
-    DeviceContext::attach(&device, context)?;
+    DeviceContext::attach(device, context)?;
 
     Ok(())
 }
@@ -269,7 +267,7 @@ fn evt_device_prepare_hardware(
 
 fn evt_device_d0_entry(device: &Device, _previous_state: PowerDeviceState) -> NtResult<()> {
     println!("Device D0 entry callback called");
-    let io_target = get_interrupt_io_target(device)?;
+    let io_target = get_interrupt_io_target(device);
 
     if let Err(e) = io_target.start() {
         println!("Failed to start IO target: {:?}", e);
@@ -283,18 +281,16 @@ fn evt_device_d0_entry(device: &Device, _previous_state: PowerDeviceState) -> Nt
 fn evt_device_d0_exit(device: &Device, _next_state: PowerDeviceState) -> NtResult<()> {
     println!("Device D0 exit callback called");
 
-    let io_target = get_interrupt_io_target(device)?;
+    let io_target = get_interrupt_io_target(device);
     io_target.stop(IoTargetSentIoAction::CancelSentIo);
 
     Ok(())
 }
 
-fn get_interrupt_io_target(device: &Device) -> NtResult<&IoTarget> {
+fn get_interrupt_io_target(device: &Device) -> &IoTarget {
     let device_context = DeviceContext::get(device).expect("Device context should be set");
-    let interrupt_pipe = device_context.get_interrupt_pipe()?;
-    let io_target = interrupt_pipe.get_io_target();
-
-    Ok(io_target)
+    let interrupt_pipe = device_context.get_interrupt_pipe();
+    interrupt_pipe.get_io_target()
 }
 
 fn evt_device_self_managed_io_flush(device: &Device) {

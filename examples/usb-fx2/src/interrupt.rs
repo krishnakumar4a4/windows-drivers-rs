@@ -29,11 +29,11 @@ fn evt_usb_interrupt_pipe_read_complete(
     }
 
     let device = pipe.get_io_target().get_device();
-    let device_context = DeviceContext::get(&device).expect("Device context should be set");
+    let device_context = DeviceContext::get(device).expect("Device context should be set");
     *device_context.current_switch_state.lock() =
         SwitchState::from_bits_retain(buffer.get_buffer()[0]);
 
-    usb_ioctl_get_interrupt_message(&device, status_codes::STATUS_SUCCESS.into());
+    usb_ioctl_get_interrupt_message(device, status_codes::STATUS_SUCCESS.into());
 }
 
 fn evt_usb_target_pipe_readers_failed(
@@ -44,11 +44,11 @@ fn evt_usb_target_pipe_readers_failed(
     println!("Interrupt readers failed callback called");
 
     let device = pipe.get_io_target().get_device();
-    let device_context = DeviceContext::get(&device).expect("Device context should be set");
+    let device_context = DeviceContext::get(device).expect("Device context should be set");
 
     *device_context.current_switch_state.lock() = SwitchState::empty();
 
-    usb_ioctl_get_interrupt_message(&device, status);
+    usb_ioctl_get_interrupt_message(device, status);
 
     true
 }
