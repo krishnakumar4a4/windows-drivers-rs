@@ -71,7 +71,7 @@ impl Device {
             )
         }
         .and_then(|| {
-            let device: &mut Device = unsafe { &mut *(device as *mut _) };
+            let device: &mut Device = unsafe { &mut *(device.cast()) };
 
             if let Some(caps) = pnp_capabilities {
                 device.set_pnp_capabilities(caps);
@@ -99,7 +99,7 @@ impl Device {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceCreateDeviceInterface,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 interaface_class_guid.as_lpcguid(),
                 unicode_ref_str.map_or(core::ptr::null(), |s| &s)
             )
@@ -109,11 +109,11 @@ impl Device {
 
     pub fn get_default_queue(&self) -> Option<&IoQueue> {
         let queue = unsafe {
-            call_unsafe_wdf_function_binding!(WdfDeviceGetDefaultQueue, self.as_ptr() as *mut _,)
+            call_unsafe_wdf_function_binding!(WdfDeviceGetDefaultQueue, self.as_ptr().cast())
         };
 
         if !queue.is_null() {
-            Some(unsafe { &*(queue as *mut IoQueue) })
+            Some(unsafe { &*(queue.cast::<IoQueue>()) })
         } else {
             None
         }
@@ -132,8 +132,8 @@ impl Device {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceConfigureRequestDispatching,
-                self.as_ptr() as *mut _,
-                queue.as_ptr() as *mut _,
+                self.as_ptr().cast(),
+                queue.as_ptr().cast(),
                 request_type
             )
         }
@@ -145,7 +145,7 @@ impl Device {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceSetPnpCapabilities,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 &mut caps
             );
         }
@@ -160,7 +160,7 @@ impl Device {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceAssignS0IdleSettings,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 &mut settings
             )
         }
@@ -176,7 +176,7 @@ impl Device {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceAssignSxWakeSettings,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 &mut settings
             )
         }
@@ -484,7 +484,7 @@ macro_rules! unsafe_pnp_power_callback {
     (@impl $callback_name:ident, ($($param_name:ident: $param_type:ty => $conversion:expr),*), ($($return_type:tt)?)) => {
         paste::paste! {
             pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE $(, $param_name: $param_type)*) -> unsafe_pnp_power_callback!(@ret_type $($return_type)*) {
-                let device: &mut Device = unsafe { &mut *(device as *mut Device) };
+                let device: &mut Device = unsafe { &mut *(device.cast()) };
 
                 if let Some(ctxt) = DeviceContext::get(device) {
                     if let Some(callbacks) = &ctxt.pnp_power_callbacks {
@@ -528,11 +528,11 @@ unsafe_pnp_power_callback!(evt_device_d0_entry_post_interrupts_enabled(previous_
 unsafe_pnp_power_callback!(evt_device_d0_exit(target_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(target_state)) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_d0_exit_pre_interrupts_disabled(target_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(target_state)) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_prepare_hardware(
-    resources_raw: WDFCMRESLIST => unsafe { &*(resources_raw as *const CmResList) },
-    resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated as *const CmResList) }
+    resources_raw: WDFCMRESLIST => unsafe { &*(resources_raw.cast::<CmResList>()) },
+    resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated.cast::<CmResList>()) }
 ) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_release_hardware(
-    resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated as *const CmResList) }
+    resources_translated: WDFCMRESLIST => unsafe { &*(resources_translated.cast::<CmResList>()) }
 ) -> NTSTATUS);
 
 unsafe_pnp_power_callback!(evt_device_self_managed_io_cleanup());

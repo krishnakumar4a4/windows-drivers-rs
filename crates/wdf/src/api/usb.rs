@@ -53,7 +53,7 @@ impl UsbDevice {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceCreateWithParameters,
-                device.as_ptr() as *mut _,
+                device.as_ptr().cast(),
                 &mut config,
                 WDF_NO_OBJECT_ATTRIBUTES,
                 &mut usb_device
@@ -64,12 +64,12 @@ impl UsbDevice {
                 ref_count: AtomicUsize::new(0),
             };
 
-            UsbDeviceContext::attach(unsafe { &*(usb_device as *mut _) }, ctxt)?;
+            UsbDeviceContext::attach(unsafe { &*(usb_device.cast()) }, ctxt)?;
 
-            let usb_device_mut_ref = unsafe { &mut *(usb_device as *mut _) };
+            let usb_device_mut_ref = unsafe { &mut *(usb_device.cast()) };
             configure(usb_device_mut_ref)?;
 
-            let usb_device = unsafe { Arc::from_raw(usb_device as *mut _) };
+            let usb_device = unsafe { Arc::from_raw(usb_device.cast()) };
 
             Ok(usb_device)
         })
@@ -80,7 +80,7 @@ impl UsbDevice {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceRetrieveInformation,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 &mut information
             )
         }
@@ -101,7 +101,7 @@ impl UsbDevice {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceSelectConfig,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 ptr::null_mut(),
                 &mut config
             )
@@ -111,26 +111,26 @@ impl UsbDevice {
                 config.Types.SingleInterface.NumberConfiguredPipes
             },
             configured_usb_interface: unsafe {
-                &*(config.Types.SingleInterface.ConfiguredUsbInterface as *const _)
+                &*(config.Types.SingleInterface.ConfiguredUsbInterface.cast())
             },
         })
     }
 
     pub fn get_interface(&self, interface_index: u8) -> Option<&UsbInterface> {
         let interface = self.get_interface_ptr(interface_index);
-        unsafe { (interface as *const UsbInterface).as_ref() }
+        unsafe { (interface.cast::<UsbInterface>()).as_ref() }
     }
 
     pub fn get_interface_mut(&mut self, interface_index: u8) -> Option<&mut UsbInterface> {
         let interface = self.get_interface_ptr(interface_index);
-        unsafe { (interface as *mut UsbInterface).as_mut() }
+        unsafe { (interface.cast::<UsbInterface>()).as_mut() }
     }
 
     fn get_interface_ptr(&self, interface_index: u8) -> WDFUSBINTERFACE {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceGetInterface,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 interface_index
             )
         }
@@ -203,7 +203,7 @@ impl_handle!(UsbInterface);
 impl UsbInterface {
     pub fn get_configured_pipe<'a>(&self, pipe_index: u8) -> Option<&'a UsbPipe> {
         self.get_configured_pipe_impl(pipe_index, false)
-            .map(|(pipe, _)| unsafe { &*(pipe as *const UsbPipe) })
+            .map(|(pipe, _)| unsafe { &*(pipe.cast::<UsbPipe>()) })
     }
 
     pub fn get_configured_pipe_with_information<'a>(
@@ -213,7 +213,7 @@ impl UsbInterface {
         self.get_configured_pipe_impl(pipe_index, true)
             .map(|(pipe, info)| {
                 (
-                    unsafe { &*(pipe as *const UsbPipe) },
+                    unsafe { &*(pipe.cast::<UsbPipe>()) },
                     info.expect("framework should return pipe information if pipe exists"),
                 )
             })
@@ -221,7 +221,7 @@ impl UsbInterface {
 
     pub fn get_configured_pipe_mut<'a>(&mut self, pipe_index: u8) -> Option<&'a mut UsbPipe> {
         self.get_configured_pipe_impl(pipe_index, false)
-            .map(|(pipe, _)| unsafe { &mut *(pipe as *mut UsbPipe) })
+            .map(|(pipe, _)| unsafe { &mut *(pipe.cast::<UsbPipe>()) })
     }
 
     pub fn get_configured_pipe_with_information_mut<'a>(
@@ -231,7 +231,7 @@ impl UsbInterface {
         self.get_configured_pipe_impl(pipe_index, true)
             .map(|(pipe, info)| {
                 (
-                    unsafe { &mut *(pipe as *mut UsbPipe) },
+                    unsafe { &mut *(pipe.cast::<UsbPipe>()) },
                     info.expect("framework should return pipe information if pipe exists"),
                 )
             })
@@ -264,7 +264,7 @@ impl UsbInterface {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbInterfaceSelectSetting,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 ptr::null_mut(),
                 &mut raw_params
             )
@@ -287,7 +287,7 @@ impl UsbInterface {
         let pipe = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbInterfaceGetConfiguredPipe,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 pipe_index,
                 pipe_info_ptr
             )
@@ -296,7 +296,7 @@ impl UsbInterface {
         if pipe.is_null() {
             None
         } else {
-            let pipe_ptr = pipe as *mut UsbPipe;
+            let pipe_ptr = pipe.cast::<UsbPipe>();
             let tuple = if get_info {
                 (pipe_ptr, Some(pipe_info.into()))
             } else {
@@ -350,14 +350,14 @@ impl UsbPipe {
     pub fn get_io_target(&self) -> &IoTarget {
         // SAFETY: The pipe pointer is also a valid
         // I/O target pointer. Hence this case is safe
-        unsafe { &*(self.as_ptr() as *const IoTarget) }
+        unsafe { &*(self.as_ptr().cast::<IoTarget>()) }
     }
 
     pub fn set_no_maximum_packet_size_check(&self) {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetPipeSetNoMaximumPacketSizeCheck,
-                self.as_ptr() as *mut _
+                self.as_ptr().cast()
             )
         }
     }
@@ -380,7 +380,7 @@ impl UsbPipe {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetPipeConfigContinuousReader,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 &mut config
             )
         }
@@ -399,9 +399,9 @@ impl UsbPipe {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetPipeFormatRequestForRead,
-                self.as_ptr() as *mut _,
-                request.as_ptr() as *mut _,
-                buffer_ptr as *mut _,
+                self.as_ptr().cast(),
+                request.as_ptr().cast(),
+                buffer_ptr.cast(),
                 buffer_offset_ptr,
             )
         }
@@ -420,9 +420,9 @@ impl UsbPipe {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetPipeFormatRequestForRead,
-                self.as_ptr() as *mut _,
-                request.as_ptr() as *mut _,
-                buffer_ptr as *mut _,
+                self.as_ptr().cast(),
+                request.as_ptr().cast(),
+                buffer_ptr.cast(),
                 buffer_offset_ptr,
             )
         }
@@ -431,7 +431,7 @@ impl UsbPipe {
 
     pub fn is_in_endpoint(&self) -> bool {
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfUsbTargetPipeIsInEndpoint, self.as_ptr() as *mut _)
+            call_unsafe_wdf_function_binding!(WdfUsbTargetPipeIsInEndpoint, self.as_ptr().cast())
                 != 0
         }
     }
@@ -440,7 +440,7 @@ impl UsbPipe {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetPipeIsOutEndpoint,
-                self.as_ptr() as *mut _
+                self.as_ptr().cast()
             ) != 0
         }
     }
@@ -564,11 +564,11 @@ pub extern "C" fn __evt_usb_target_pipe_read_complete(
     num_bytes_transferred: usize,
     _context: WDFCONTEXT,
 ) {
-    let pipe = unsafe { &*(pipe as *const UsbPipe) };
+    let pipe = unsafe { &*(pipe.cast::<UsbPipe>()) };
 
     if let Some(ctxt) = UsbPipeContinuousReaderContext::get(pipe) {
         if let Some(callback) = ctxt.read_complete_callback {
-            let buffer: &Memory = unsafe { &*(buffer as *const Memory) };
+            let buffer: &Memory = unsafe { &*(buffer.cast::<Memory>()) };
             callback(pipe, buffer, num_bytes_transferred);
             return;
         }
@@ -582,7 +582,7 @@ pub extern "C" fn __evt_usb_target_pipe_readers_failed(
     status: NTSTATUS,
     usbd_status: USBD_STATUS,
 ) -> BOOLEAN {
-    let pipe = unsafe { &*(pipe as *const UsbPipe) };
+    let pipe = unsafe { &*(pipe.cast::<UsbPipe>()) };
 
     if let Some(ctxt) = UsbPipeContinuousReaderContext::get(pipe) {
         if let Some(callback) = ctxt.readers_failed_callback {

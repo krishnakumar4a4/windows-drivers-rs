@@ -39,7 +39,7 @@ macro_rules! impl_handle {
 
         impl crate::api::object::Handle for $obj {
             fn as_ptr(&self) -> wdk_sys::WDFOBJECT {
-                self as *const _ as wdk_sys::WDFOBJECT
+                (self as *const Self).cast_mut().cast()
             }
 
             fn type_name() -> alloc::string::String {
@@ -106,14 +106,14 @@ impl<T: Handle> Deref for Owned<T> {
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
-        unsafe { &*(self.inner as *const _ as *const Self::Target) }
+        unsafe { &*(self.inner.cast::<Self::Target>()) }
     }
 }
 
 impl<T: Handle> DerefMut for Owned<T> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *(self.inner as *mut _ as *mut Self::Target) }
+        unsafe { &mut *(self.inner.cast::<Self::Target>()) }
     }
 }
 
@@ -295,7 +295,7 @@ unsafe fn get_context_raw<C: ObjectContext>(handle: WDFOBJECT) -> *mut C {
             WdfObjectGetTypedContextWorker,
             handle,
             &context_metadata.0
-        ) as *mut C
+        ).cast::<C>()
     }
 }
 
@@ -307,7 +307,7 @@ pub unsafe fn drop_context<C: ObjectContext>(handle: WDFOBJECT) {
             WdfObjectGetTypedContextWorker,
             handle,
             &context_metadata.0
-        ) as *mut core::mem::ManuallyDrop<C>
+        ).cast::<core::mem::ManuallyDrop<C>>()
     };
 
     if !context.is_null() {

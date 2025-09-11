@@ -49,7 +49,7 @@ impl Driver {
             call_unsafe_wdf_function_binding!(
                 WdfDriverRetrieveVersionString,
                 self.wdf_driver,
-                string.as_ptr() as *mut _,
+                string.as_ptr().cast(),
             )
         };
 

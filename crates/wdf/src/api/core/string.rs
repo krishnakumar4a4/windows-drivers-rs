@@ -75,7 +75,7 @@ pub fn to_unicode_string(buf: &[u16]) -> UNICODE_STRING {
     UNICODE_STRING {
         Length: byte_len - 2, // Length excluding the null terminator
         MaximumLength: byte_len,
-        Buffer: buf.as_ptr() as *mut _,
+        Buffer: buf.as_ptr().cast_mut().cast(),
     }
 }
 

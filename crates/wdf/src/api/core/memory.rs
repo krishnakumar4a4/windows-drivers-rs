@@ -1,9 +1,6 @@
-use core::{
-    ops::{Deref, DerefMut},
-    ptr,
-};
+use core::{ops::{Deref, DerefMut}, ptr};
 
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFMEMORY_OFFSET, _POOL_TYPE};
+use wdk_sys::{call_unsafe_wdf_function_binding, _POOL_TYPE, WDFMEMORY, WDFMEMORY_OFFSET};
 
 use super::{
     object::{impl_handle, Handle},
@@ -41,9 +38,9 @@ impl Memory {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfMemoryCopyFromBuffer,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 offset,
-                buffer.as_ptr() as *mut _,
+                buffer.as_ptr().cast_mut().cast(),
                 buffer.len()
             )
         }
@@ -54,9 +51,9 @@ impl Memory {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfMemoryCopyToBuffer,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 offset,
-                buffer.as_mut_ptr() as *mut _,
+                buffer.as_mut_ptr().cast(),
                 buffer.len()
             )
         }
@@ -68,11 +65,11 @@ impl Memory {
         let buffer = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfMemoryGetBuffer,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 &mut buf_size
             )
         };
-        (buffer as *mut _, buf_size)
+        (buffer.cast(), buf_size)
     }
 }
 
@@ -117,7 +114,7 @@ impl OwnedMemory {
 impl Drop for OwnedMemory {
     fn drop(&mut self) {
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfObjectDelete, self.0 as *mut _);
+            call_unsafe_wdf_function_binding!(WdfObjectDelete, self.0.cast());
         }
     }
 }
@@ -137,13 +134,13 @@ impl Deref for OwnedMemory {
     type Target = Memory;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &*(self.0 as *const Memory) }
+        unsafe { &*(self.0.cast::<Memory>()) }
     }
 }
 
 impl DerefMut for OwnedMemory {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *(self.0 as *mut Memory) }
+        unsafe { &mut *(self.0.cast::<Memory>()) }
     }
 }
 

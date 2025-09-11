@@ -31,7 +31,7 @@ impl IoTarget {
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoTargetCreate,
-                device.as_ptr() as *mut _,
+                device.as_ptr().cast(),
                 WDF_NO_OBJECT_ATTRIBUTES,
                 &mut io_target,
             )
@@ -42,9 +42,9 @@ impl IoTarget {
                 ref_count: AtomicUsize::new(0),
             };
 
-            IoTargetContext::attach(unsafe { &*(io_target as *mut _) }, ctxt)?;
+            IoTargetContext::attach(unsafe { &*(io_target.cast()) }, ctxt)?;
 
-            let io_target = unsafe { Arc::from_raw(io_target as *mut _) };
+            let io_target = unsafe { Arc::from_raw(io_target.cast()) };
 
             Ok(io_target)
         } else {
@@ -55,7 +55,7 @@ impl IoTarget {
     // TODO: start and stop are not thread-safe. They
     // cannot be called concurrently with each other. Fix that!
     pub fn start(&self) -> NtResult<()> {
-        unsafe { call_unsafe_wdf_function_binding!(WdfIoTargetStart, self.as_ptr() as *mut _) }.ok()
+        unsafe { call_unsafe_wdf_function_binding!(WdfIoTargetStart, self.as_ptr().cast()) }.ok()
     }
 
     // TODO: start and stop are not thread-safe. They
@@ -63,15 +63,15 @@ impl IoTarget {
     pub fn stop(&self, action: IoTargetSentIoAction) {
         let action_val: WDF_IO_TARGET_SENT_IO_ACTION = action.into();
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfIoTargetStop, self.as_ptr() as *mut _, action_val)
+            call_unsafe_wdf_function_binding!(WdfIoTargetStop, self.as_ptr().cast(), action_val)
         }
     }
 
     pub fn get_device(&self) -> &Device {
         unsafe {
             let device =
-                call_unsafe_wdf_function_binding!(WdfIoTargetGetDevice, self.as_ptr() as *mut _,);
-            &*(device as *mut Device)
+                call_unsafe_wdf_function_binding!(WdfIoTargetGetDevice, self.as_ptr().cast());
+            &*(device.cast::<Device>())
         }
     }
 
@@ -88,9 +88,9 @@ impl IoTarget {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoTargetFormatRequestForRead,
-                self.as_ptr() as *mut _,
-                request.as_ptr() as *mut _,
-                buffer_ptr as *mut _,
+                self.as_ptr().cast(),
+                request.as_ptr().cast(),
+                buffer_ptr.cast(),
                 buffer_offset_ptr,
                 to_device_offset_ptr(device_offset)
             )
@@ -111,9 +111,9 @@ impl IoTarget {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoTargetFormatRequestForWrite,
-                self.as_ptr() as *mut _,
-                request.as_ptr() as *mut _,
-                buffer_ptr as *mut _,
+                self.as_ptr().cast(),
+                request.as_ptr().cast(),
+                buffer_ptr.cast(),
                 buffer_offset_ptr,
                 to_device_offset_ptr(device_offset)
             )
@@ -157,12 +157,12 @@ pub(crate) fn to_buffer_ptrs(
         ptr::null_mut()
     };
 
-    Ok((buffer_ptr as *mut _, raw_buffer_offset_ptr))
+    Ok((buffer_ptr.cast(), raw_buffer_offset_ptr))
 }
 
 fn to_device_offset_ptr(device_offset: Option<i64>) -> *mut i64 {
     device_offset
-        .map(|mut offset| &mut offset as *mut _)
+        .map(|mut offset| &raw mut offset)
         .unwrap_or(ptr::null_mut())
 }
 
@@ -194,7 +194,7 @@ fn get_request_buf_ptr_and_len(
 
 fn get_memory_buf_ptr_and_len(memory: &Memory) -> (*mut u8, usize) {
     let buffer = memory.get_buffer();
-    (buffer.as_ptr() as *mut _, buffer.len())
+    (buffer.as_ptr().cast_mut(), buffer.len())
 }
 
 fn is_valid_offset(buffer_len: usize, offset: &Option<MemoryOffset>) -> bool {

@@ -142,12 +142,13 @@ impl TraceWriter {
 
     /// Starts WPP tracing
     pub fn start(&self) {
+        let control_block_ptr = (&self.trace_config.control_block as *const WPP_PROJECT_CONTROL_BLOCK).cast_mut();
         unsafe {
-            WPP_GLOBAL_Control = &self.trace_config.control_block as *const _ as *mut _;
+            WPP_GLOBAL_Control = control_block_ptr;
             WPP_RECORDER_INITIALIZED = WPP_GLOBAL_Control;
 
             WppAutoLogStart(
-                &self.trace_config.control_block as *const _ as *mut _,
+                control_block_ptr,
                 self.wdm_driver,
                 self.reg_path,
             );
@@ -156,13 +157,14 @@ impl TraceWriter {
 
     /// Stops WPP tracing
     pub fn stop(&self) {
+        let control_block_ptr = (&self.trace_config.control_block as *const WPP_PROJECT_CONTROL_BLOCK).cast_mut();
         unsafe {
             if let Some(etw_unregister) = self.trace_config.etw_unregister {
                 etw_unregister(self.trace_config.control_block.Control.RegHandle);
             }
 
             WppAutoLogStop(
-                &self.trace_config.control_block as *const _ as *mut _,
+                control_block_ptr,
                 self.wdm_driver,
             );
         }
@@ -228,7 +230,7 @@ impl TraceWriter {
                 self.trace_config.control_block.Control.AutoLogContext,
                 level,
                 flags,
-                traceGuid as *mut _,
+                traceGuid.cast_mut().cast(),
                 id,
                 &a1,
                 a1_len,
@@ -347,8 +349,8 @@ extern "C" fn WppClassicProviderCallback(
     EnableContext: PVOID,
     CallbackContext: PVOID,
 ) {
-    let TraceCb = CallbackContext as *mut WPP_TRACE_CONTROL_BLOCK;
-    let TraceContext = EnableContext as *mut WPP_TRACE_ENABLE_CONTEXT;
+    let TraceCb = CallbackContext.cast::<WPP_TRACE_CONTROL_BLOCK>();
+    let TraceContext = EnableContext.cast::<WPP_TRACE_ENABLE_CONTEXT>();
 
     if ControlCode != 1 && ControlCode != 0 {
         return;
@@ -358,7 +360,7 @@ extern "C" fn WppClassicProviderCallback(
         if ControlCode != 0 {
             (*TraceCb).Flags[0] = (*TraceContext).EnableFlags;
             (*TraceCb).Level = (*TraceContext).Level as UCHAR;
-            (*TraceCb).Logger = *(TraceContext as *const TRACEHANDLE);
+            (*TraceCb).Logger = *(TraceContext.cast::<TRACEHANDLE>());
 
             imp_WppRecorderReplay(
                 TraceCb as PVOID,

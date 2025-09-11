@@ -75,7 +75,7 @@ impl<T> Drop for SpinLock<T> {
         // SAFETY: `wdf_spin_lock` is a private member of `SpinLock`, originally created
         // by WDF, and this module guarantees that it is always in a valid state.
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfObjectDelete, self.wdf_spin_lock as *mut _);
+            call_unsafe_wdf_function_binding!(WdfObjectDelete, self.wdf_spin_lock.cast());
         }
     }
 }

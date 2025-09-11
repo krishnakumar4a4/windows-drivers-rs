@@ -25,14 +25,14 @@ impl_ref_counted_handle!(IoQueue, IoQueueContext);
 
 impl IoQueue {
     pub fn create(device: &Device, queue_config: &IoQueueConfig) -> NtResult<Arc<Self>> {
-        let mut config = queue_config.into();
+        let mut config: WDF_IO_QUEUE_CONFIG = queue_config.into();
         let mut queue: WDFQUEUE = core::ptr::null_mut();
 
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoQueueCreate,
-                device.as_ptr() as *mut _,
-                &mut config as *mut _,
+                device.as_ptr().cast(),
+                &mut config,
                 WDF_NO_OBJECT_ATTRIBUTES,
                 &mut queue,
             )
@@ -47,9 +47,9 @@ impl IoQueue {
                 evt_io_stop: queue_config.evt_io_stop,
             };
 
-            IoQueueContext::attach(unsafe { &*(queue as *mut _) }, ctxt)?;
+            IoQueueContext::attach(unsafe { &*(queue.cast()) }, ctxt)?;
 
-            let queue = unsafe { Arc::from_raw(queue as *mut _) };
+            let queue = unsafe { Arc::from_raw(queue.cast()) };
 
             Ok(queue)
         })
@@ -58,20 +58,20 @@ impl IoQueue {
     pub fn get_device(&self) -> &Device {
         unsafe {
             let device =
-                call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr() as *mut _);
-            &*(device as *mut _)
+                call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr().cast());
+            &*(device.cast())
         }
     }
 
     pub fn start(&self) {
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfIoQueueStart, self.as_ptr() as *mut _,);
+            call_unsafe_wdf_function_binding!(WdfIoQueueStart, self.as_ptr().cast());
         }
     }
 
     pub fn stop_synchronously(&self) {
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfIoQueueStopSynchronously, self.as_ptr() as *mut _,);
+            call_unsafe_wdf_function_binding!(WdfIoQueueStopSynchronously, self.as_ptr().cast());
         }
     }
 
@@ -80,7 +80,7 @@ impl IoQueue {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoQueueRetrieveNextRequest,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 &mut request
             )
         }

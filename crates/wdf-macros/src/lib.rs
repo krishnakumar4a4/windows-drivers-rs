@@ -300,7 +300,7 @@ fn object_context_impl(
             Size: core::mem::size_of::<#wdf_crate_path::WdfObjectContextTypeInfo>() as u32,
             ContextName: concat!(stringify!(#struct_name),'\0').as_bytes().as_ptr().cast(),
             ContextSize: core::mem::size_of::<#struct_name>(),
-            UniqueType: core::ptr::addr_of!(#static_name) as *const #wdf_crate_path::WDF_OBJECT_CONTEXT_TYPE_INFO,
+            UniqueType: core::ptr::addr_of!(#static_name).cast::<#wdf_crate_path::WDF_OBJECT_CONTEXT_TYPE_INFO>(),
             EvtDriverGetUniqueContextType: None,
         });
 

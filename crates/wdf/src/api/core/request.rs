@@ -41,7 +41,7 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestComplete,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 status.code()
             )
         };
@@ -51,7 +51,7 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestCompleteWithInformation,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 status.code(),
                 information as core::ffi::c_ulonglong
             )
@@ -62,7 +62,7 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestSetInformation,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 information as core::ffi::c_ulonglong
             )
         };
@@ -128,7 +128,7 @@ impl Request {
     pub fn get_io_queue(&self) -> &IoQueue {
         unsafe {
             let queue =
-                call_unsafe_wdf_function_binding!(WdfRequestGetIoQueue, self.as_ptr() as *mut _);
+                call_unsafe_wdf_function_binding!(WdfRequestGetIoQueue, self.as_ptr().cast());
             &*queue.cast::<IoQueue>()
         }
     }
@@ -139,11 +139,11 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestRetrieveInputMemory,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 &mut raw_memory
             )
         }
-        .map(|| unsafe { &*(raw_memory as *const Memory) })
+        .map(|| unsafe { &*(raw_memory.cast::<Memory>()) })
     }
 
     pub fn retrieve_output_memory(&mut self) -> NtResult<&mut Memory> {
@@ -152,11 +152,11 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestRetrieveOutputMemory,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 &mut raw_memory
             )
         }
-        .map(|| unsafe { &mut *(raw_memory as *mut Memory) })
+        .map(|| unsafe { &mut *(raw_memory.cast::<Memory>()) })
     }
 
     pub fn retrieve_input_buffer(&self, minimum_required_size: usize) -> NtResult<&[u8]> {
@@ -166,12 +166,12 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestRetrieveInputBuffer,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 minimum_required_size,
                 &mut buffer_ptr,
                 &mut buffer_size
             )
-            .and_then(|| Ok(slice::from_raw_parts(buffer_ptr as *const u8, buffer_size)))
+            .and_then(|| Ok(slice::from_raw_parts(buffer_ptr.cast::<u8>(), buffer_size)))
         }
     }
 
@@ -182,14 +182,14 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestRetrieveOutputBuffer,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 minimum_required_size,
                 &mut buffer_ptr,
                 &mut buffer_size
             )
             .and_then(|| {
                 Ok(slice::from_raw_parts_mut(
-                    buffer_ptr as *mut u8,
+                    buffer_ptr.cast::<u8>(),
                     buffer_size,
                 ))
             })
@@ -200,7 +200,7 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestStopAcknowledge,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 1
             );
         }
@@ -210,7 +210,7 @@ impl Request {
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestStopAcknowledge,
-                self.as_ptr() as *mut _,
+                self.as_ptr().cast(),
                 0
             );
         }
@@ -219,7 +219,7 @@ impl Request {
 
 impl Handle for Request {
     fn as_ptr(&self) -> WDFOBJECT {
-        self.0 as *mut _
+        self.0.cast()
     }
 
     fn type_name() -> String {
@@ -340,7 +340,7 @@ impl CancellableRequest {
         // the return value.
         // TODO: Redesign this and make sure we can handle genuine errors
         let _ = unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr() as *mut _)
+            call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr().cast())
         };
 
         self.0.complete(status);
@@ -349,7 +349,7 @@ impl CancellableRequest {
     pub fn complete_with_information(self, status: NtStatus, information: usize) {
         // Ignoring the return value for the same reason as in `complete`
         let _ = unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr() as *mut _)
+            call_unsafe_wdf_function_binding!(WdfRequestUnmarkCancelable, self.as_ptr().cast())
         };
 
         self.0.complete_with_information(status, information);

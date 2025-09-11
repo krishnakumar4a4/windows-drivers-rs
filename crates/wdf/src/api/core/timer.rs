@@ -45,8 +45,8 @@ impl Timer {
             )
         }
         .and_then(|| {
-            TimerContext::attach(unsafe { &*(timer as *mut _) }, context)?;
-            let timer = unsafe { Arc::from_raw(timer as *mut _) };
+            TimerContext::attach(unsafe { &*timer.cast() }, context)?;
+            let timer = unsafe { Arc::from_raw(timer.cast()) };
 
             Ok(timer)
         })
@@ -64,21 +64,21 @@ impl Timer {
 
         // TODO: use something like duration instead of i64 for due_time
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfTimerStart, self.as_ptr() as *mut _, due_time) != 0
+            call_unsafe_wdf_function_binding!(WdfTimerStart, self.as_ptr().cast(), due_time) != 0
         }
     }
 
     // TODO: Change to &mut self. See comment on start() method
     pub fn stop(&self, wait: bool) -> bool {
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfTimerStop, self.as_ptr() as *mut _, wait as u8)
+            call_unsafe_wdf_function_binding!(WdfTimerStop, self.as_ptr().cast(), wait as u8)
                 != 0
         }
     }
 
     pub fn get_device(&self) -> &Device {
         let parent = unsafe {
-            call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr() as *mut _)
+            call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr().cast())
         };
 
         if parent.is_null() {
