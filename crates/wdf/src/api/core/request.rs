@@ -20,6 +20,8 @@ use super::{
     sync::SpinLock,
 };
 
+use crate::usb::UsbRequestCompletionParams;
+
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct Request(WDFREQUEST);
@@ -196,6 +198,37 @@ impl Request {
         }
     }
 
+    //     pub fn set_completion_routine(&mut self, completion_routine:
+    // Option<fn(Request, &IoTarget, &RequestCompletionParams, &RequestContext)>) {
+    //         self.completion_routine = Some(completion_routine);
+    //     }
+
+    // // OID EvtWdfRequestCompletionRoutine(
+    // //   [in] WDFREQUEST Request,
+    // //   [in] WDFIOTARGET Target,
+    // //   [in] PWDF_REQUEST_COMPLETION_PARAMS Params,
+    // //   [in] WDFCONTEXT Context
+    // // )
+
+    //     pub fn send_asynchronously(self, io_target: &IoTarget) -> NtResult<()> {
+    //         let options = init_wdf_struct!!(WDF_REQUEST_SEND_OPTIONS);
+
+    //         let status = unsafe {
+    //             call_unsafe_wdf_function_binding!(
+    //                 WdfRequestSend,
+    //                 self.as_ptr().cast(),
+    //                 io_target.as_ptr().cast(),
+    //                 ptr::null_mut()
+    //             )
+    //         };
+
+    //         if status.is_success() || status == status_codes::STATUS_PENDING {
+    //             Ok(())
+    //         } else {
+    //             Err(NtStatusError::from(status))
+    //         }
+    //     }
+
     pub fn stop_acknowledge_requeue(self) {
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -322,6 +355,47 @@ pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     if let Some(context) = RequestContext::get(unsafe { &Request::from_raw(request as _) }) {
         (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
     }
+}
+
+pub struct RequestCompletionParams<'a> {
+    pub request_type: RequestType,
+    pub io_status: IoStatusBlock,
+    pub parameters: RequestCompletionParamData<'a>,
+}
+
+pub struct IoStatusBlock {
+    pub status: NtStatus,
+    pub information: usize,
+}
+
+pub enum RequestCompletionParamData<'a> {
+    Write {
+        buffer: &'a Memory,
+        length: usize,
+        offset: usize,
+    },
+    Read {
+        buffer: &'a Memory,
+        length: usize,
+        offset: usize,
+    },
+    Ioctl {
+        io_control_code: u32,
+        input_buffer: &'a Memory,
+        input_offset: usize,
+        output_buffer: &'a Memory,
+        output_offset: usize,
+        output_length: usize,
+    },
+    Others {
+        argument1: usize,
+        argument2: usize,
+        argument3: usize,
+        argument4: usize,
+    },
+    Usb {
+        completion: &'a UsbRequestCompletionParams<'a>,
+    },
 }
 
 pub struct CancellableRequest(Request);

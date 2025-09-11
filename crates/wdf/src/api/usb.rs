@@ -25,6 +25,7 @@ use wdk_sys::{
     WDF_USB_INTERFACE_SELECT_SETTING_PARAMS,
     WDF_USB_PIPE_INFORMATION,
     WDF_USB_PIPE_TYPE,
+    WDF_USB_REQUEST_TYPE,
 };
 
 use super::core::{
@@ -556,6 +557,55 @@ impl UsbdStatus {
     pub fn inner(&self) -> u32 {
         self.0
     }
+}
+
+pub struct UsbRequestCompletionParams<'a> {
+    pub usbd_status: UsbdStatus,
+    pub usb_request_type: UsbRequestType,
+    pub parameters: UsbRequestCompletionParamData<'a>,
+}
+
+enum_mapping! {
+    pub enum UsbRequestType: WDF_USB_REQUEST_TYPE {
+        DeviceString = WdfUsbRequestTypeDeviceString,
+        DeviceControlTransfer = WdfUsbRequestTypeDeviceControlTransfer,
+        DeviceUrb = WdfUsbRequestTypeDeviceUrb,
+        PipeWrite = WdfUsbRequestTypePipeWrite,
+        PipeRead = WdfUsbRequestTypePipeRead,
+        PipeAbort = WdfUsbRequestTypePipeAbort,
+        PipeReset = WdfUsbRequestTypePipeReset,
+        PipeUrb = WdfUsbRequestTypePipeUrb
+    }
+}
+
+pub enum UsbRequestCompletionParamData<'a> {
+    DeviceString {
+        buffer: &'a Memory,
+        lang_id: u16,
+        string_index: u8,
+        required_size: u8,
+    },
+    DeviceControlTransfer {
+        buffer: &'a Memory,
+        setup_packet: &'a [u8; 8], // WDF_USB_CONTROL_SETUP_PACKET is 8 bytes
+        length: u32,
+    },
+    DeviceUrb {
+        buffer: &'a Memory,
+    },
+    PipeWrite {
+        buffer: &'a Memory,
+        length: usize,
+        offset: usize,
+    },
+    PipeRead {
+        buffer: &'a Memory,
+        length: usize,
+        offset: usize,
+    },
+    PipeUrb {
+        buffer: &'a Memory,
+    },
 }
 
 pub extern "C" fn __evt_usb_target_pipe_read_complete(
