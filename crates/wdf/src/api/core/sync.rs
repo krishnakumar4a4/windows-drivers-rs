@@ -49,10 +49,6 @@ impl<T> SpinLock<T> {
             )
         }
         .map(|| spin_lock)
-
-        // TODO: should we increment the ref count of the spin lock
-        // to prevent it from being deleted while we are using it?
-        // This is super important for soundness so look into it
     }
 
     /// Acquire the spinlock and return a guard that will release the spinlock

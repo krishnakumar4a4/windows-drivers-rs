@@ -103,10 +103,6 @@ impl OwnedMemory {
         }
         .ok()?;
 
-        // TODO: wonder if we need to increment the WDF object ref count here
-        // (and decrement it in drop) to keep the underlying object alive.
-        // Investigate and confirm.
-
         Ok(OwnedMemory(memory))
     }
 }
