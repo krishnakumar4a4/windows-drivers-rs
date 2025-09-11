@@ -23,9 +23,11 @@ pub struct SpinLock<T> {
 }
 
 /// `SpinLock` requires `T` to be `Send` because non-`Send`
-/// types could allow their internal state to be accessible
-/// from another thread which is NOT holding the lock
-/// (case in point being `Rc` from the std lib).
+/// types can lead to situations where a thread NOT holding
+/// the lock can also access the data. An example of this 
+/// is `Rc` wherein the lock will protect only one clone of
+/// `Rc` and another thread can still access the data through
+/// another clone without taking the lock.
 unsafe impl<T> Sync for SpinLock<T> where T: Send {}
 
 impl<T> SpinLock<T> {
