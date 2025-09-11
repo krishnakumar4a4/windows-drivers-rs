@@ -1,11 +1,11 @@
 use wdf::{
     Device,
     IoQueue,
-    println,
     Request,
     RequestFormatBuffer,
     RequestId,
     RequestStopActionFlags,
+    println,
     status_codes,
 };
 
@@ -25,19 +25,17 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
         return;
     }
 
-    let device_context = DeviceContext::get(queue.get_device()).expect("Device context should be set");
+    let device_context =
+        DeviceContext::get(queue.get_device()).expect("Device context should be set");
     let pipe = device_context.get_bulk_read_pipe();
 
-    if let Err(e) = pipe.format_request_for_read(&mut request, RequestFormatBuffer::RequestBuffer(None)) {
+    if let Err(e) =
+        pipe.format_request_for_read(&mut request, RequestFormatBuffer::RequestBuffer(None))
+    {
         println!("Failed to initiate read on bulk read pipe: {:?}", e);
         request.complete_with_information(e.code().into(), 0);
         return;
     }
-
-
-
-    
-
 }
 
 pub fn evt_io_write(_queue: &IoQueue, request: Request, length: usize) {
@@ -53,6 +51,10 @@ pub fn evt_io_write(_queue: &IoQueue, request: Request, length: usize) {
     }
 }
 
-pub fn evt_io_stop(_queue: &IoQueue, _request_id: RequestId, _action_flags: RequestStopActionFlags) {
+pub fn evt_io_stop(
+    _queue: &IoQueue,
+    _request_id: RequestId,
+    _action_flags: RequestStopActionFlags,
+) {
     println!("I/O stop callback called");
 }

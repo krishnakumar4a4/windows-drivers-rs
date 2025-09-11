@@ -98,9 +98,14 @@ impl DeviceContext {
 
     fn get_usb_pipe<F: Fn(&UsbDeviceContext) -> u8>(&self, pipe_index: F) -> &UsbPipe {
         let usb_device = self.usb_device.get().expect("USB device should be set");
-        let usb_device_context = UsbDeviceContext::get(&usb_device).expect("USB device context should be set");
-        let usb_interface = usb_device.get_interface(0).expect("USB interface 0 should be present");
-        usb_interface.get_configured_pipe(pipe_index(usb_device_context)).expect("USB pipe should be present")
+        let usb_device_context =
+            UsbDeviceContext::get(&usb_device).expect("USB device context should be set");
+        let usb_interface = usb_device
+            .get_interface(0)
+            .expect("USB interface 0 should be present");
+        usb_interface
+            .get_configured_pipe(pipe_index(usb_device_context))
+            .expect("USB pipe should be present")
     }
 }
 
@@ -261,7 +266,6 @@ fn evt_device_prepare_hardware(
     device_ctxt.usb_device.set(Some(usb_device));
     *device_ctxt.usb_device_traits.lock() = info.traits;
 
-
     Ok(())
 }
 
@@ -301,7 +305,9 @@ fn evt_device_self_managed_io_flush(device: &Device) {
 fn set_power_policy(device: &Device) -> NtResult<()> {
     println!("Set power policy callback called");
 
-    let mut idle_settings = DevicePowerPolicyIdleSettings::from_caps(PowerPolicyS0IdleCapabilities::UsbSelectiveSuspend);
+    let mut idle_settings = DevicePowerPolicyIdleSettings::from_caps(
+        PowerPolicyS0IdleCapabilities::UsbSelectiveSuspend,
+    );
     idle_settings.idle_timeout = 10_000; // 10 seconds
     device.assign_s0_idle_settings(&idle_settings)?;
 

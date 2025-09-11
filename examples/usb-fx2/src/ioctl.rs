@@ -1,7 +1,6 @@
-use wdf::{Device, IoQueue, NtStatus, println, Request, status_codes};
+use wdf::{Device, IoQueue, NtStatus, Request, println, status_codes};
 
 use crate::{DeviceContext, SwitchState};
-
 
 pub fn evt_io_device_control(
     _queue: &IoQueue,
@@ -12,7 +11,6 @@ pub fn evt_io_device_control(
 ) {
     println!("I/O device control callback called");
 }
-
 
 pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus) {
     println!(

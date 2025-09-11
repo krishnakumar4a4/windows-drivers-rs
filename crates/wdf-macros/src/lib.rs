@@ -130,13 +130,13 @@ pub fn driver_impl(_args: TokenStream, input: TokenStream) -> TokenStream {
 /// A procedural macro used to mark the entry point of a WDF driver
 #[proc_macro_attribute]
 pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
+    const TRACING_CONTROL_GUID_ATTR_NAME: &str = "tracing_control_guid";
+
     let input_clone = input.clone();
     let item_fn = parse_macro_input!(input_clone as ItemFn);
     let safe_driver_entry = item_fn.sig.ident;
 
     let mut tracing_control_guid_str: Option<String> = None;
-
-    const TRACING_CONTROL_GUID_ATTR_NAME: &str = "tracing_control_guid";
 
     let tracing_control_guid_parser = parser(|meta| {
         if !meta.path.is_ident(TRACING_CONTROL_GUID_ATTR_NAME) {
@@ -144,7 +144,7 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         }
 
         let Lit::Str(guid_str_expr) = meta.value()?.parse()? else {
-            return Err(meta.error(format!("Expected tracing control GUID")));
+            return Err(meta.error("Expected tracing control GUID"));
         };
 
         let guid_str = guid_str_expr.value();
@@ -160,18 +160,18 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
 
     parse_macro_input!(args with tracing_control_guid_parser);
 
-    let parse_tracing_control_guid = match tracing_control_guid_str {
-        Some(s) => {
-            quote! {
-                Some(wdf::Guid::parse(#s).expect("Not a valid GUID"))
-            }
-        }
-        None => {
+    let parse_tracing_control_guid = tracing_control_guid_str.map_or_else(
+        || {
             quote! {
                 None
             }
-        }
-    };
+        },
+        |s| {
+            quote! {
+                Some(wdf::Guid::parse(#s).expect("Not a valid GUID"))
+            }
+        },
+    );
 
     let mut wrappers: TokenStream = quote! {
         use wdf::{
@@ -247,17 +247,16 @@ fn object_context_impl(
     for attr in &context_struct.attrs {
         if attr.path().is_ident("repr") {
             let res = attr.parse_nested_meta(|meta| {
-                if !(meta.path.is_ident("Rust") || meta.path.is_ident("transparent")) {
+                if meta.path.is_ident("Rust") || meta.path.is_ident("transparent") {
+                    Ok(())
+                } else {
                     Err(Error::new_spanned(
                         attr,
                         format!(
-                            "The `{}` attribute cannot be applied to structs with reprs other \
-                             than `Rust` or `transparent`",
-                            attr_name
+                            "The `{attr_name}` attribute cannot be applied to structs with reprs \
+                             other than `Rust` or `transparent`"
                         ),
                     ))
-                } else {
-                    Ok(())
                 }
             });
 
@@ -276,19 +275,15 @@ fn object_context_impl(
 
     let struct_name = &context_struct.ident;
     let static_name = Ident::new(
-        &format!("__WDF_{}_TYPE_INFO", struct_name),
+        &format!("__WDF_{struct_name}_TYPE_INFO"),
         struct_name.span(),
     );
 
-    let cleanup_callback_name = Ident::new(
-        &format!("__evt_{}_cleanup", struct_name),
-        struct_name.span(),
-    );
+    let cleanup_callback_name =
+        Ident::new(&format!("__evt_{struct_name}_cleanup"), struct_name.span());
 
-    let destroy_callback_name = Ident::new(
-        &format!("__evt_{}_destroy", struct_name),
-        struct_name.span(),
-    );
+    let destroy_callback_name =
+        Ident::new(&format!("__evt_{struct_name}_destroy"), struct_name.span());
 
     let attach_param_destroy_callback_name = if check_ref_count {
         quote! { Some(#destroy_callback_name) }
@@ -362,7 +357,7 @@ fn object_context_impl(
 // Move it to a common location
 fn is_valid_guid(guid_str: &str) -> bool {
     // Remove dashes from the input string
-    let guid_str = guid_str.replace("-", "");
+    let guid_str = guid_str.replace('-', "");
 
     if guid_str.len() != 32 {
         return false;

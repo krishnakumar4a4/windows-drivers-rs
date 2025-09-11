@@ -135,8 +135,6 @@ impl UsbDevice {
             )
         }
     }
-
-    
 }
 
 #[object_context_with_ref_count_check(UsbDevice)]
