@@ -1,11 +1,5 @@
 use wdf::{
-    Device,
-    IoQueue,
-    Request,
-    RequestFormatBuffer,
-    RequestId,
-    RequestStopActionFlags,
-    println,
+    Device, IoQueue, Request, RequestFormatBuffer, RequestId, RequestStopActionFlags, println,
     status_codes,
 };
 

@@ -1,9 +1,5 @@
 use wdf::{
-    Memory,
-    NtResult,
-    NtStatus,
-    println,
-    status_codes,
+    Memory, NtResult, NtStatus, println, status_codes,
     usb::{UsbContinuousReaderConfig, UsbPipe, UsbdStatus},
 };
 
