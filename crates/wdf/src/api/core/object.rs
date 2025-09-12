@@ -2,6 +2,7 @@ use alloc::string::String;
 use core::{
     marker::PhantomData,
     ops::{Deref, DerefMut},
+    ptr,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -307,12 +308,12 @@ pub unsafe fn drop_context<C: ObjectContext>(handle: WDFOBJECT) {
             WdfObjectGetTypedContextWorker,
             handle,
             &context_metadata.0
-        ).cast::<core::mem::ManuallyDrop<C>>()
+        )
     };
 
     if !context.is_null() {
         unsafe {
-            core::mem::ManuallyDrop::drop(&mut *context);
+            ptr::drop_in_place(context);
         }
     }
 }
