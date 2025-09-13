@@ -142,31 +142,26 @@ impl TraceWriter {
 
     /// Starts WPP tracing
     pub fn start(&self) {
-        let control_block_ptr = (&self.trace_config.control_block as *const WPP_PROJECT_CONTROL_BLOCK).cast_mut();
+        let control_block_ptr =
+            (&self.trace_config.control_block as *const WPP_PROJECT_CONTROL_BLOCK).cast_mut();
         unsafe {
             WPP_GLOBAL_Control = control_block_ptr;
             WPP_RECORDER_INITIALIZED = WPP_GLOBAL_Control;
 
-            WppAutoLogStart(
-                control_block_ptr,
-                self.wdm_driver,
-                self.reg_path,
-            );
+            WppAutoLogStart(control_block_ptr, self.wdm_driver, self.reg_path);
         }
     }
 
     /// Stops WPP tracing
     pub fn stop(&self) {
-        let control_block_ptr = (&self.trace_config.control_block as *const WPP_PROJECT_CONTROL_BLOCK).cast_mut();
+        let control_block_ptr =
+            (&self.trace_config.control_block as *const WPP_PROJECT_CONTROL_BLOCK).cast_mut();
         unsafe {
             if let Some(etw_unregister) = self.trace_config.etw_unregister {
                 etw_unregister(self.trace_config.control_block.Control.RegHandle);
             }
 
-            WppAutoLogStop(
-                control_block_ptr,
-                self.wdm_driver,
-            );
+            WppAutoLogStop(control_block_ptr, self.wdm_driver);
         }
     }
 

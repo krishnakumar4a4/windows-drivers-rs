@@ -71,8 +71,7 @@ impl Timer {
     // TODO: Change to &mut self. See comment on start() method
     pub fn stop(&self, wait: bool) -> bool {
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfTimerStop, self.as_ptr().cast(), wait as u8)
-                != 0
+            call_unsafe_wdf_function_binding!(WdfTimerStop, self.as_ptr().cast(), wait as u8) != 0
         }
     }
 

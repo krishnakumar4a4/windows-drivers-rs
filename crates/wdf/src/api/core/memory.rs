@@ -1,6 +1,9 @@
-use core::{ops::{Deref, DerefMut}, ptr};
+use core::{
+    ops::{Deref, DerefMut},
+    ptr,
+};
 
-use wdk_sys::{call_unsafe_wdf_function_binding, _POOL_TYPE, WDFMEMORY, WDFMEMORY_OFFSET};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFMEMORY_OFFSET, _POOL_TYPE};
 
 use super::{
     object::{impl_handle, Handle},

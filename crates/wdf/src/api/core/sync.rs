@@ -24,7 +24,7 @@ pub struct SpinLock<T> {
 
 /// `SpinLock` requires `T` to be `Send` because non-`Send`
 /// types can lead to situations where a thread NOT holding
-/// the lock can also access the data. An example of this 
+/// the lock can also access the data. An example of this
 /// is `Rc` wherein the lock will protect only one clone of
 /// `Rc` and another thread can still access the data through
 /// another clone without taking the lock.

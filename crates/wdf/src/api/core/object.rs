@@ -296,7 +296,8 @@ unsafe fn get_context_raw<C: ObjectContext>(handle: WDFOBJECT) -> *mut C {
             WdfObjectGetTypedContextWorker,
             handle,
             &context_metadata.0
-        ).cast::<C>()
+        )
+        .cast::<C>()
     }
 }
 

@@ -9,7 +9,6 @@ use wdk_sys::{
     WDFOBJECT,
     WDFREQUEST,
     WDF_REQUEST_COMPLETION_PARAMS,
-    WDF_REQUEST_SEND_OPTIONS,
     WDF_REQUEST_TYPE,
 };
 
@@ -21,7 +20,6 @@ use super::{
     result::{NtResult, NtStatus, NtStatusError, StatusCodeExt},
     sync::SpinLock,
 };
-
 use crate::usb::UsbRequestCompletionParams;
 
 #[derive(Debug)]
@@ -233,21 +231,13 @@ impl Request {
 
     pub fn stop_acknowledge_requeue(self) {
         unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfRequestStopAcknowledge,
-                self.as_ptr().cast(),
-                1
-            );
+            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, self.as_ptr().cast(), 1);
         }
     }
 
     pub fn stop_acknowledge_no_requeue(&self) {
         unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfRequestStopAcknowledge,
-                self.as_ptr().cast(),
-                0
-            );
+            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, self.as_ptr().cast(), 0);
         }
     }
 }
@@ -402,7 +392,9 @@ impl<'a> From<&'a WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a>
                 }
             }
             RequestType::Usb => RequestCompletionParamData::Usb {
-                completion: UsbRequestCompletionParams::from(unsafe { &*raw.Parameters.Usb.Completion }),
+                completion: UsbRequestCompletionParams::from(unsafe {
+                    &*raw.Parameters.Usb.Completion
+                }),
             },
             _ => unsafe {
                 let others = &raw.Parameters.Others;
