@@ -1,4 +1,4 @@
-use core::{ptr, sync::atomic::AtomicUsize};
+use core::{mem, ptr, sync::atomic::AtomicUsize};
 
 use bitflags::bitflags;
 use wdf_macros::{object_context, object_context_with_ref_count_check};
@@ -19,12 +19,14 @@ use wdk_sys::{
     WDFUSBPIPE,
     WDF_NO_OBJECT_ATTRIBUTES,
     WDF_USB_CONTINUOUS_READER_CONFIG,
+    WDF_USB_CONTROL_SETUP_PACKET,
     WDF_USB_DEVICE_CREATE_CONFIG,
     WDF_USB_DEVICE_INFORMATION,
     WDF_USB_DEVICE_SELECT_CONFIG_PARAMS,
     WDF_USB_INTERFACE_SELECT_SETTING_PARAMS,
     WDF_USB_PIPE_INFORMATION,
     WDF_USB_PIPE_TYPE,
+    WDF_USB_REQUEST_COMPLETION_PARAMS,
     WDF_USB_REQUEST_TYPE,
 };
 
@@ -439,10 +441,8 @@ impl UsbPipe {
 
     pub fn is_out_endpoint(&self) -> bool {
         unsafe {
-            call_unsafe_wdf_function_binding!(
-                WdfUsbTargetPipeIsOutEndpoint,
-                self.as_ptr().cast()
-            ) != 0
+            call_unsafe_wdf_function_binding!(WdfUsbTargetPipeIsOutEndpoint, self.as_ptr().cast())
+                != 0
         }
     }
 }
@@ -561,8 +561,8 @@ impl UsbdStatus {
 
 pub struct UsbRequestCompletionParams<'a> {
     pub usbd_status: UsbdStatus,
-    pub usb_request_type: UsbRequestType,
-    pub parameters: UsbRequestCompletionParamData<'a>,
+    pub request_type: UsbRequestType,
+    pub parameters: UsbRequestCompletionParamDetails<'a>,
 }
 
 enum_mapping! {
@@ -578,7 +578,63 @@ enum_mapping! {
     }
 }
 
-pub enum UsbRequestCompletionParamData<'a> {
+impl<'a> From<&'a WDF_USB_REQUEST_COMPLETION_PARAMS> for UsbRequestCompletionParams<'a> {
+    fn from(raw: &'a WDF_USB_REQUEST_COMPLETION_PARAMS) -> Self {
+        let request_type = UsbRequestType::try_from(raw.Type)
+            .expect("framework should return correct request type");
+
+        let parameters = match request_type {
+            UsbRequestType::DeviceString => {
+                let dev_string = unsafe { &raw.Parameters.DeviceString };
+                UsbRequestCompletionParamDetails::DeviceString {
+                    buffer: unsafe { &*(dev_string.Buffer.cast::<Memory>()) },
+                    lang_id: dev_string.LangID,
+                    string_index: dev_string.StringIndex,
+                    required_size: dev_string.RequiredSize,
+                }
+            }
+            UsbRequestType::DeviceControlTransfer => {
+                let transfer = unsafe { &raw.Parameters.DeviceControlTransfer };
+                UsbRequestCompletionParamDetails::DeviceControlTransfer {
+                    buffer: unsafe { &*(transfer.Buffer.cast::<Memory>()) },
+                    setup_packet: UsbControlSetupPacket::from(&transfer.SetupPacket),
+                    length: transfer.Length,
+                }
+            }
+            UsbRequestType::DeviceUrb => UsbRequestCompletionParamDetails::DeviceUrb {
+                buffer: unsafe { &*(raw.Parameters.DeviceUrb.Buffer.cast::<Memory>()) },
+            },
+            UsbRequestType::PipeWrite => {
+                let write = unsafe { &raw.Parameters.PipeWrite };
+                UsbRequestCompletionParamDetails::PipeWrite {
+                    buffer: unsafe { &*(write.Buffer.cast::<Memory>()) },
+                    length: write.Length as usize,
+                    offset: write.Offset as usize,
+                }
+            }
+            UsbRequestType::PipeRead => {
+                let read = unsafe { &raw.Parameters.PipeRead };
+                UsbRequestCompletionParamDetails::PipeRead {
+                    buffer: unsafe { &*(read.Buffer.cast::<Memory>()) },
+                    length: read.Length as usize,
+                    offset: read.Offset as usize,
+                }
+            }
+            UsbRequestType::PipeUrb => UsbRequestCompletionParamDetails::PipeUrb {
+                buffer: unsafe { &*(raw.Parameters.PipeUrb.Buffer.cast::<Memory>()) },
+            },
+            _ => panic!("framework should not return other request types"),
+        };
+
+        Self {
+            usbd_status: UsbdStatus::new(raw.UsbdStatus as u32),
+            request_type,
+            parameters,
+        }
+    }
+}
+
+pub enum UsbRequestCompletionParamDetails<'a> {
     DeviceString {
         buffer: &'a Memory,
         lang_id: u16,
@@ -587,7 +643,7 @@ pub enum UsbRequestCompletionParamData<'a> {
     },
     DeviceControlTransfer {
         buffer: &'a Memory,
-        setup_packet: &'a [u8; 8], // WDF_USB_CONTROL_SETUP_PACKET is 8 bytes
+        setup_packet: UsbControlSetupPacket,
         length: u32,
     },
     DeviceUrb {
@@ -608,6 +664,46 @@ pub enum UsbRequestCompletionParamData<'a> {
     },
 }
 
+// repr(C) is need to keep the memory layout stable
+// so that we can return the byte array representation
+// of the struct safely from the `as_bytes` method below
+#[repr(C)]
+pub struct UsbControlSetupPacket {
+    bm: u8,
+    request: u8,
+    value: u16,
+    index: u16,
+    length: u16,
+}
+
+impl UsbControlSetupPacket {
+    pub fn from_bytes(bytes: [u8; 8]) -> Self {
+        Self {
+            bm: bytes[0],
+            request: bytes[1],
+            value: (bytes[3] as u16) << 8 | (bytes[2] as u16),
+            index: (bytes[5] as u16) << 8 | (bytes[4] as u16),
+            length: (bytes[7] as u16) << 8 | (bytes[6] as u16),
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8; mem::size_of::<Self>()] {
+        unsafe { &*((self as *const Self).cast::<[u8; mem::size_of::<Self>()]>()) }
+    }
+}
+
+impl From<&WDF_USB_CONTROL_SETUP_PACKET> for UsbControlSetupPacket {
+    fn from(raw: &WDF_USB_CONTROL_SETUP_PACKET) -> Self {
+        let packet = unsafe { &raw.Packet };
+        Self {
+            bm: unsafe { packet.bm.Byte },
+            request: packet.bRequest,
+            value: unsafe { packet.wValue.Value },
+            index: unsafe { packet.wIndex.Value },
+            length: packet.wLength,
+        }
+    }
+}
 pub extern "C" fn __evt_usb_target_pipe_read_complete(
     pipe: WDFUSBPIPE,
     buffer: WDFMEMORY,

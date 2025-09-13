@@ -8,6 +8,8 @@ use wdk_sys::{
     WDFMEMORY,
     WDFOBJECT,
     WDFREQUEST,
+    WDF_REQUEST_COMPLETION_PARAMS,
+    WDF_REQUEST_SEND_OPTIONS,
     WDF_REQUEST_TYPE,
 };
 
@@ -363,6 +365,64 @@ pub struct RequestCompletionParams<'a> {
     pub parameters: RequestCompletionParamData<'a>,
 }
 
+impl<'a> From<&'a WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a> {
+    fn from(raw: &'a WDF_REQUEST_COMPLETION_PARAMS) -> Self {
+        let request_type = RequestType::from(raw.Type);
+        let io_status = IoStatusBlock {
+            status: NtStatus::from(unsafe { raw.IoStatus.__bindgen_anon_1.Status }),
+            information: raw.IoStatus.Information as usize,
+        };
+
+        let parameters = match request_type {
+            RequestType::Write => {
+                let write = unsafe { &raw.Parameters.Write };
+                RequestCompletionParamData::Write {
+                    buffer: unsafe { &*(write.Buffer.cast::<Memory>()) },
+                    length: write.Length as usize,
+                    offset: write.Offset as usize,
+                }
+            }
+            RequestType::Read => {
+                let read = unsafe { &raw.Parameters.Read };
+                RequestCompletionParamData::Read {
+                    buffer: unsafe { &*(read.Buffer.cast::<Memory>()) },
+                    length: read.Length as usize,
+                    offset: read.Offset as usize,
+                }
+            }
+            RequestType::DeviceControl | RequestType::DeviceControlInternal => {
+                let ioctl = unsafe { &raw.Parameters.Ioctl };
+                RequestCompletionParamData::Ioctl {
+                    io_control_code: ioctl.IoControlCode,
+                    input_buffer: unsafe { &*(ioctl.Input.Buffer.cast::<Memory>()) },
+                    input_offset: ioctl.Input.Offset as usize,
+                    output_buffer: unsafe { &*(ioctl.Output.Buffer.cast::<Memory>()) },
+                    output_offset: ioctl.Output.Offset as usize,
+                    output_length: ioctl.Output.Length as usize,
+                }
+            }
+            RequestType::Usb => RequestCompletionParamData::Usb {
+                completion: UsbRequestCompletionParams::from(unsafe { &*raw.Parameters.Usb.Completion }),
+            },
+            _ => unsafe {
+                let others = &raw.Parameters.Others;
+                RequestCompletionParamData::Others {
+                    argument1: others.Argument1.Value as usize,
+                    argument2: others.Argument2.Value as usize,
+                    argument3: others.Argument3.Value as usize,
+                    argument4: others.Argument4.Value as usize,
+                }
+            },
+        };
+
+        Self {
+            request_type,
+            io_status,
+            parameters,
+        }
+    }
+}
+
 pub struct IoStatusBlock {
     pub status: NtStatus,
     pub information: usize,
@@ -394,7 +454,7 @@ pub enum RequestCompletionParamData<'a> {
         argument4: usize,
     },
     Usb {
-        completion: &'a UsbRequestCompletionParams<'a>,
+        completion: UsbRequestCompletionParams<'a>,
     },
 }
 
