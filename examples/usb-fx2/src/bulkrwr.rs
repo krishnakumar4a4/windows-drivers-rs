@@ -135,7 +135,8 @@ fn evt_request_write_completion_routine(request: Request, _target: &IoTarget) {
     };
 
     let UsbRequestCompletionParamDetails::PipeWrite {
-        length: bytes_written, ..
+        length: bytes_written,
+        ..
     } = usb_completion_params.parameters
     else {
         println!("Request completed with Non-USB pipe write completion params");
@@ -155,10 +156,12 @@ fn evt_request_write_completion_routine(request: Request, _target: &IoTarget) {
     request.complete_with_information(status.into(), bytes_written);
 }
 
-pub fn evt_io_stop(
-    _queue: &IoQueue,
-    _request_id: RequestId,
-    _action_flags: RequestStopActionFlags,
-) {
+pub fn evt_io_stop(_queue: &IoQueue, request_id: RequestId, action_flags: RequestStopActionFlags) {
     println!("I/O stop callback called");
+
+    if action_flags.contains(RequestStopActionFlags::SUSPEND) {
+        Request::stop_acknowledge_no_requeue(request_id);
+    } else if action_flags.contains(RequestStopActionFlags::PURGE) {
+        Request::cancel_sent_request(request_id);
+    }
 }

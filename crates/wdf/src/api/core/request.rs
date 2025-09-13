@@ -251,10 +251,19 @@ impl Request {
         }
     }
 
-    pub fn stop_acknowledge_no_requeue(&self) {
+    pub fn stop_acknowledge_no_requeue(request_id: RequestId) {
+        let request_ptr = request_id.0 as WDFREQUEST;
         unsafe {
-            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, self.as_ptr().cast(), 0);
+            call_unsafe_wdf_function_binding!(WdfRequestStopAcknowledge, request_ptr, 0);
         }
+    }
+
+    pub fn cancel_sent_request(request_id: RequestId) -> bool {
+        let request_ptr = request_id.0 as WDFREQUEST;
+        let res =
+            unsafe { call_unsafe_wdf_function_binding!(WdfRequestCancelSentRequest, request_ptr) };
+
+        res != 0
     }
 }
 
