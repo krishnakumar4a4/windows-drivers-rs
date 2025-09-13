@@ -16,6 +16,7 @@ use wdk_sys::{
 use super::{
     enum_mapping,
     io_queue::IoQueue,
+    io_target::IoTarget,
     memory::{Memory, OwnedMemory},
     object::Handle,
     result::{NtResult, NtStatus, NtStatusError, StatusCodeExt},
@@ -123,6 +124,7 @@ impl Request {
                 self,
                 RequestContext {
                     evt_request_cancel: cancel_fn,
+                    evt_request_completion_routine: None,
                 },
             )
         }
@@ -199,10 +201,10 @@ impl Request {
         }
     }
 
-    //     pub fn set_completion_routine(&mut self, completion_routine:
-    // Option<fn(Request, &IoTarget, &RequestCompletionParams, &RequestContext)>) {
-    //         self.completion_routine = Some(completion_routine);
-    //     }
+    pub fn set_completion_routine(&mut self, completion_routine: fn(Request, &IoTarget)) {
+        let context = RequestContext::get_mut(self).expect("Request context should exist");
+        context.evt_request_completion_routine = Some(completion_routine);
+    }
 
     // // OID EvtWdfRequestCompletionRoutine(
     // //   [in] WDFREQUEST Request,
@@ -303,6 +305,7 @@ impl CancellableRequestStore for Vec<CancellableRequest> {
 #[object_context(Request)]
 struct RequestContext {
     evt_request_cancel: fn(&RequestCancellationToken),
+    evt_request_completion_routine: Option<fn(Request, &IoTarget)>,
 }
 
 /// Macro that defines input and output memory contexts
@@ -347,6 +350,23 @@ define_user_memory_context!(output);
 pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     if let Some(context) = RequestContext::get(unsafe { &Request::from_raw(request as _) }) {
         (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
+    }
+}
+
+pub extern "C" fn __evt_request_read_completion_routine(
+    request: WDFREQUEST,
+    target: WDFOBJECT,
+    _params: *const WDF_REQUEST_COMPLETION_PARAMS,
+    _context: WDFOBJECT,
+) {
+    let request = unsafe { Request::from_raw(request as _) };
+    if let Some(context) = RequestContext::get(&request) {
+        if let Some(callback) = context.evt_request_completion_routine {
+            callback(
+                request,
+                unsafe { &*(target.cast::<IoTarget>()) },
+            );
+        }
     }
 }
 
