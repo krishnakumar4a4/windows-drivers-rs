@@ -15,6 +15,7 @@ use wdk_sys::{
 
 use super::{
     enum_mapping,
+    init_wdf_struct,
     io_queue::IoQueue,
     io_target::IoTarget,
     memory::{Memory, OwnedMemory},
@@ -206,12 +207,18 @@ impl Request {
         context.evt_request_completion_routine = Some(completion_routine);
     }
 
-    // // OID EvtWdfRequestCompletionRoutine(
-    // //   [in] WDFREQUEST Request,
-    // //   [in] WDFIOTARGET Target,
-    // //   [in] PWDF_REQUEST_COMPLETION_PARAMS Params,
-    // //   [in] WDFCONTEXT Context
-    // // )
+    pub fn get_completion_params<'a>(&'a self) -> RequestCompletionParams<'a> {
+        let mut raw_params = init_wdf_struct!(WDF_REQUEST_COMPLETION_PARAMS);
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestGetCompletionParams,
+                self.as_ptr().cast(),
+                &mut raw_params
+            )
+        };
+
+        RequestCompletionParams::from(&raw_params)
+    }
 
     //     pub fn send_asynchronously(self, io_target: &IoTarget) -> NtResult<()> {
     //         let options = init_wdf_struct!!(WDF_REQUEST_SEND_OPTIONS);
@@ -362,10 +369,7 @@ pub extern "C" fn __evt_request_read_completion_routine(
     let request = unsafe { Request::from_raw(request as _) };
     if let Some(context) = RequestContext::get(&request) {
         if let Some(callback) = context.evt_request_completion_routine {
-            callback(
-                request,
-                unsafe { &*(target.cast::<IoTarget>()) },
-            );
+            callback(request, unsafe { &*(target.cast::<IoTarget>()) });
         }
     }
 }
@@ -376,8 +380,8 @@ pub struct RequestCompletionParams<'a> {
     pub parameters: RequestCompletionParamDetails<'a>,
 }
 
-impl<'a> From<&'a WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a> {
-    fn from(raw: &'a WDF_REQUEST_COMPLETION_PARAMS) -> Self {
+impl<'a> From<&WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a> {
+    fn from(raw: &WDF_REQUEST_COMPLETION_PARAMS) -> Self {
         let request_type = RequestType::from(raw.Type);
         let io_status = IoStatusBlock::from(raw.IoStatus);
 
