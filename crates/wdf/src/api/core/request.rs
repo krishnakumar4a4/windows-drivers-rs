@@ -5,6 +5,7 @@ use bitflags::bitflags;
 use wdf_macros::object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
+    IO_STATUS_BLOCK,
     WDFMEMORY,
     WDFOBJECT,
     WDFREQUEST,
@@ -352,21 +353,18 @@ pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
 pub struct RequestCompletionParams<'a> {
     pub request_type: RequestType,
     pub io_status: IoStatusBlock,
-    pub parameters: RequestCompletionParamData<'a>,
+    pub parameters: RequestCompletionParamDetails<'a>,
 }
 
 impl<'a> From<&'a WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a> {
     fn from(raw: &'a WDF_REQUEST_COMPLETION_PARAMS) -> Self {
         let request_type = RequestType::from(raw.Type);
-        let io_status = IoStatusBlock {
-            status: NtStatus::from(unsafe { raw.IoStatus.__bindgen_anon_1.Status }),
-            information: raw.IoStatus.Information as usize,
-        };
+        let io_status = IoStatusBlock::from(raw.IoStatus);
 
         let parameters = match request_type {
             RequestType::Write => {
                 let write = unsafe { &raw.Parameters.Write };
-                RequestCompletionParamData::Write {
+                RequestCompletionParamDetails::Write {
                     buffer: unsafe { &*(write.Buffer.cast::<Memory>()) },
                     length: write.Length as usize,
                     offset: write.Offset as usize,
@@ -374,7 +372,7 @@ impl<'a> From<&'a WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a>
             }
             RequestType::Read => {
                 let read = unsafe { &raw.Parameters.Read };
-                RequestCompletionParamData::Read {
+                RequestCompletionParamDetails::Read {
                     buffer: unsafe { &*(read.Buffer.cast::<Memory>()) },
                     length: read.Length as usize,
                     offset: read.Offset as usize,
@@ -382,7 +380,7 @@ impl<'a> From<&'a WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a>
             }
             RequestType::DeviceControl | RequestType::DeviceControlInternal => {
                 let ioctl = unsafe { &raw.Parameters.Ioctl };
-                RequestCompletionParamData::Ioctl {
+                RequestCompletionParamDetails::Ioctl {
                     io_control_code: ioctl.IoControlCode,
                     input_buffer: unsafe { &*(ioctl.Input.Buffer.cast::<Memory>()) },
                     input_offset: ioctl.Input.Offset as usize,
@@ -391,14 +389,14 @@ impl<'a> From<&'a WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a>
                     output_length: ioctl.Output.Length as usize,
                 }
             }
-            RequestType::Usb => RequestCompletionParamData::Usb {
+            RequestType::Usb => RequestCompletionParamDetails::Usb {
                 completion: UsbRequestCompletionParams::from(unsafe {
                     &*raw.Parameters.Usb.Completion
                 }),
             },
             _ => unsafe {
                 let others = &raw.Parameters.Others;
-                RequestCompletionParamData::Others {
+                RequestCompletionParamDetails::Others {
                     argument1: others.Argument1.Value as usize,
                     argument2: others.Argument2.Value as usize,
                     argument3: others.Argument3.Value as usize,
@@ -420,7 +418,16 @@ pub struct IoStatusBlock {
     pub information: usize,
 }
 
-pub enum RequestCompletionParamData<'a> {
+impl From<IO_STATUS_BLOCK> for IoStatusBlock {
+    fn from(raw: IO_STATUS_BLOCK) -> Self {
+        Self {
+            status: NtStatus::from(unsafe { raw.__bindgen_anon_1.Status }),
+            information: raw.Information as usize,
+        }
+    }
+}
+
+pub enum RequestCompletionParamDetails<'a> {
     Write {
         buffer: &'a Memory,
         length: usize,
