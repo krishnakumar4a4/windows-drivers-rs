@@ -207,7 +207,7 @@ impl Request {
         context.evt_request_completion_routine = Some(completion_routine);
     }
 
-    pub fn send_asynchronously(self, io_target: &IoTarget) -> bool {
+    pub fn send_asynchronously(self, io_target: &IoTarget) -> Result<(), Request> {
         let res = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestSend,
@@ -217,7 +217,11 @@ impl Request {
             )
         };
 
-        res != 0
+        if res != 0 {
+            Ok(())
+        } else {
+            Err(self)
+        }
     }
 
     pub fn get_completion_params<'a>(&'a self) -> RequestCompletionParams<'a> {
