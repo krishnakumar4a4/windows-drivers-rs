@@ -207,6 +207,19 @@ impl Request {
         context.evt_request_completion_routine = Some(completion_routine);
     }
 
+    pub fn send_asynchronously(self, io_target: &IoTarget) -> bool {
+        let res = unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestSend,
+                self.as_ptr().cast(),
+                io_target.as_ptr().cast(),
+                ptr::null_mut(), // Null options means asynchronous send
+            )
+        };
+
+        res != 0
+    }
+
     pub fn get_completion_params<'a>(&'a self) -> RequestCompletionParams<'a> {
         let mut raw_params = init_wdf_struct!(WDF_REQUEST_COMPLETION_PARAMS);
         unsafe {
@@ -220,24 +233,13 @@ impl Request {
         RequestCompletionParams::from(&raw_params)
     }
 
-    //     pub fn send_asynchronously(self, io_target: &IoTarget) -> NtResult<()> {
-    //         let options = init_wdf_struct!!(WDF_REQUEST_SEND_OPTIONS);
+    pub fn get_status(&self) -> NtStatus {
+        let status = unsafe {
+            call_unsafe_wdf_function_binding!(WdfRequestGetStatus, self.as_ptr().cast(),)
+        };
 
-    //         let status = unsafe {
-    //             call_unsafe_wdf_function_binding!(
-    //                 WdfRequestSend,
-    //                 self.as_ptr().cast(),
-    //                 io_target.as_ptr().cast(),
-    //                 ptr::null_mut()
-    //             )
-    //         };
-
-    //         if status.is_success() || status == status_codes::STATUS_PENDING {
-    //             Ok(())
-    //         } else {
-    //             Err(NtStatusError::from(status))
-    //         }
-    //     }
+        status.into()
+    }
 
     pub fn stop_acknowledge_requeue(self) {
         unsafe {
