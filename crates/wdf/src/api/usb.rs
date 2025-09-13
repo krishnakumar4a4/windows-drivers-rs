@@ -547,6 +547,7 @@ impl From<&UsbContinuousReaderConfig> for WDF_USB_CONTINUOUS_READER_CONFIG {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UsbdStatus(i32);
 
 impl UsbdStatus {
@@ -559,6 +560,7 @@ impl UsbdStatus {
     }
 }
 
+#[derive(Debug)]
 pub struct UsbRequestCompletionParams<'a> {
     pub usbd_status: UsbdStatus,
     pub request_type: UsbRequestType,
@@ -634,6 +636,7 @@ impl<'a> From<&'a WDF_USB_REQUEST_COMPLETION_PARAMS> for UsbRequestCompletionPar
     }
 }
 
+#[derive(Debug)]
 pub enum UsbRequestCompletionParamDetails<'a> {
     DeviceString {
         buffer: &'a Memory,
@@ -668,6 +671,7 @@ pub enum UsbRequestCompletionParamDetails<'a> {
 // so that we can return the byte array representation
 // of the struct safely from the `as_bytes` method below
 #[repr(C)]
+#[derive(Debug)]
 pub struct UsbControlSetupPacket {
     bm: u8,
     request: u8,

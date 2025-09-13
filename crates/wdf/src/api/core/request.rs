@@ -374,6 +374,7 @@ pub extern "C" fn __evt_request_read_completion_routine(
     }
 }
 
+#[derive(Debug)]
 pub struct RequestCompletionParams<'a> {
     pub request_type: RequestType,
     pub io_status: IoStatusBlock,
@@ -437,6 +438,7 @@ impl<'a> From<&WDF_REQUEST_COMPLETION_PARAMS> for RequestCompletionParams<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct IoStatusBlock {
     pub status: NtStatus,
     pub information: usize,
@@ -451,6 +453,7 @@ impl From<IO_STATUS_BLOCK> for IoStatusBlock {
     }
 }
 
+#[derive(Debug)]
 pub enum RequestCompletionParamDetails<'a> {
     Write {
         buffer: &'a Memory,
