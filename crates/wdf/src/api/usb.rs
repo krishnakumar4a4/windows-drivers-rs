@@ -547,14 +547,14 @@ impl From<&UsbContinuousReaderConfig> for WDF_USB_CONTINUOUS_READER_CONFIG {
     }
 }
 
-pub struct UsbdStatus(u32);
+pub struct UsbdStatus(i32);
 
 impl UsbdStatus {
-    pub fn new(status: u32) -> Self {
+    pub fn new(status: i32) -> Self {
         Self(status)
     }
 
-    pub fn inner(&self) -> u32 {
+    pub fn inner(&self) -> i32 {
         self.0
     }
 }
@@ -627,7 +627,7 @@ impl<'a> From<&'a WDF_USB_REQUEST_COMPLETION_PARAMS> for UsbRequestCompletionPar
         };
 
         Self {
-            usbd_status: UsbdStatus::new(raw.UsbdStatus as u32),
+            usbd_status: UsbdStatus::new(raw.UsbdStatus),
             request_type,
             parameters,
         }
@@ -733,7 +733,7 @@ pub extern "C" fn __evt_usb_target_pipe_readers_failed(
     if let Some(ctxt) = UsbPipeContinuousReaderContext::get(pipe) {
         if let Some(callback) = ctxt.readers_failed_callback {
             let nt_status: NtStatus = status.into();
-            let usbd = UsbdStatus::new(usbd_status as u32);
+            let usbd = UsbdStatus::new(usbd_status);
             let result = callback(pipe, nt_status, usbd);
             return if result { 1 } else { 0 };
         }
