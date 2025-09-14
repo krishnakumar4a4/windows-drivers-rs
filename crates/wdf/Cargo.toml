@@ -18,16 +18,12 @@ wdk-build.workspace = true
 [dependencies]
 wdf-macros.workspace = true
 wdk-alloc.workspace = true
-wdk-sys.workspace = true
+wdk-sys = { workspace = true, features = ["usb"] }
 wdk.workspace = true
 wdk-panic.workspace = true
 paste.workspace = true
 bitflags.workspace = true
 
-[features]
-default = []
-umdf = []
-usb = ["wdk-sys/usb"]
 
 # TODO temporarily turned off lints
 # [lints]
