@@ -162,6 +162,8 @@ pub fn evt_io_stop(_queue: &IoQueue, request_id: RequestId, action_flags: Reques
     if action_flags.contains(RequestStopActionFlags::SUSPEND) {
         Request::stop_acknowledge_no_requeue(request_id);
     } else if action_flags.contains(RequestStopActionFlags::PURGE) {
+        // TODO: this is not safe as request might already be completed.
+        // We need to design to enforce synchronization with completion here.
         Request::cancel_sent_request(request_id);
     }
 }
