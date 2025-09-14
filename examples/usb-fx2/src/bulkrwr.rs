@@ -3,6 +3,7 @@ use wdf::{
     IoTarget,
     Request,
     RequestCompletionParamDetails,
+    RequestCompletionToken,
     RequestFormatBuffer,
     RequestId,
     RequestStopActionFlags,
@@ -42,14 +43,24 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 
     let io_target = pipe.get_io_target();
 
-    if let Err(request) = request.send_asynchronously(&io_target) {
-        let status = request.get_status();
-        println!("Request send failed: {:?}", status);
-        request.complete_with_information(status, 0);
+    match request.send_asynchronously(&io_target) {
+        Ok(sent_request) => device_context.add_sent_request(sent_request),
+        Err(request) => {
+            let status = request.get_status();
+            println!("Request send failed: {:?}", status);
+            request.complete_with_information(status, 0);
+        }
     }
 }
 
-fn evt_request_read_completion_routine(request: Request, _target: &IoTarget) {
+fn evt_request_read_completion_routine(completion_token: RequestCompletionToken, _target: &IoTarget) {
+    println!("Read completion routine called");
+
+    let Some(request) = get_request(completion_token) else {
+        println!("Received completion token for unknown request");
+        return;
+    };
+
     let completion_params = request.get_completion_params();
     let status = completion_params.io_status.status;
 
@@ -111,14 +122,24 @@ pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
 
     let io_target = pipe.get_io_target();
 
-    if let Err(request) = request.send_asynchronously(&io_target) {
-        let status = request.get_status();
-        println!("Request send failed: {:?}", status);
-        request.complete_with_information(status, 0);
+    match request.send_asynchronously(&io_target) {
+        Ok(sent_request) => device_context.add_sent_request(sent_request),
+        Err(request) => {
+            let status = request.get_status();
+            println!("Request send failed: {:?}", status);
+            request.complete_with_information(status, 0);
+        }
     }
 }
 
-fn evt_request_write_completion_routine(request: Request, _target: &IoTarget) {
+fn evt_request_write_completion_routine(completion_token: RequestCompletionToken, _target: &IoTarget) {
+    println!("Write completion routine called");
+
+    let Some(request) = get_request(completion_token) else {
+        println!("Received completion token for unknown request");
+        return;
+    };
+
     let completion_params = request.get_completion_params();
     let status = completion_params.io_status.status;
 
@@ -154,14 +175,25 @@ fn evt_request_write_completion_routine(request: Request, _target: &IoTarget) {
     request.complete_with_information(status.into(), bytes_written);
 }
 
-pub fn evt_io_stop(_queue: &IoQueue, request_id: RequestId, action_flags: RequestStopActionFlags) {
+pub fn evt_io_stop(queue: &IoQueue, request_id: RequestId, action_flags: RequestStopActionFlags) {
     println!("I/O stop callback called");
 
     if action_flags.contains(RequestStopActionFlags::SUSPEND) {
         Request::stop_acknowledge_no_requeue(request_id);
     } else if action_flags.contains(RequestStopActionFlags::PURGE) {
-        // TODO: this is not safe as request might already be completed.
-        // We need to design to enforce synchronization with completion here.
-        Request::cancel_sent_request(request_id);
+        let device_context = DeviceContext::get(queue.get_device());
+        let Some(sent_request) = device_context.get_sent_request(request_id) else {
+            println!("evt_io_stop: request {:?} may have been already completed", request_id);
+            return;
+        };
+        Request::cancel_sent_request(sent_request);
     }
+}
+
+fn get_request(token: RequestCompletionToken) -> Option<Request> {
+    let queue = token.get_io_queue();
+    let device_context = DeviceContext::get(queue.get_device());
+    device_context.get_sent_request(token.request_id()).map(|s| {
+        s.into_request(token)
+    })
 }

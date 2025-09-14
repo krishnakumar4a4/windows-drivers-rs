@@ -202,12 +202,12 @@ impl Request {
         }
     }
 
-    pub fn set_completion_routine(&mut self, completion_routine: fn(Request, &IoTarget)) {
+    pub fn set_completion_routine(&mut self, completion_routine: fn(RequestCompletionToken, &IoTarget)) {
         let context = RequestContext::get_mut(self);
         context.evt_request_completion_routine = Some(completion_routine);
     }
 
-    pub fn send_asynchronously(self, io_target: &IoTarget) -> Result<(), Request> {
+    pub fn send_asynchronously(self, io_target: &IoTarget) -> Result<SentRequest, Request> {
         let res = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfRequestSend,
@@ -218,7 +218,7 @@ impl Request {
         };
 
         if res != 0 {
-            Ok(())
+            Ok(SentRequest(self))
         } else {
             Err(self)
         }
@@ -258,8 +258,8 @@ impl Request {
         }
     }
 
-    pub fn cancel_sent_request(request_id: RequestId) -> bool {
-        let request_ptr = request_id.0 as WDFREQUEST;
+    pub fn cancel_sent_request(sent_request: SentRequest) -> bool {
+        let request_ptr = sent_request.as_ptr() as WDFREQUEST;
         let res =
             unsafe { call_unsafe_wdf_function_binding!(WdfRequestCancelSentRequest, request_ptr) };
 
@@ -327,7 +327,7 @@ impl CancellableRequestStore for Vec<CancellableRequest> {
 #[object_context(Request)]
 struct RequestContext {
     evt_request_cancel: fn(&RequestCancellationToken),
-    evt_request_completion_routine: Option<fn(Request, &IoTarget)>,
+    evt_request_completion_routine: Option<fn(RequestCompletionToken, &IoTarget)>,
 }
 
 /// Macro that defines input and output memory contexts
@@ -381,10 +381,10 @@ pub extern "C" fn __evt_request_read_completion_routine(
     _params: *const WDF_REQUEST_COMPLETION_PARAMS,
     _context: WDFOBJECT,
 ) {
-    let request = unsafe { Request::from_raw(request as _) };
-    let context = RequestContext::get(&request);
+    let safe_req = unsafe { Request::from_raw(request as _) };
+    let context = RequestContext::get(&safe_req);
     if let Some(callback) = context.evt_request_completion_routine {
-        callback(request, unsafe { &*(target.cast::<IoTarget>()) });
+        callback(unsafe { RequestCompletionToken::new(request) }, unsafe { &*(target.cast::<IoTarget>()) });
     }
 }
 
@@ -540,12 +540,34 @@ impl Handle for CancellableRequest {
     }
 }
 
-/// SAFETY: This is safe because all the WDF functions
-/// that operate on WDFREQUEST do so in a thread-safe manner.
-/// As a result, all the Rust methods on this struct are
-/// also thread-safe.
-unsafe impl Send for CancellableRequest {}
+/// A request that has been sent to an I/O target.
+pub struct SentRequest(Request);
 
+impl SentRequest {
+    pub fn id(&self) -> RequestId {
+        self.0.id()
+    }
+
+    pub fn into_request(self, _token: RequestCompletionToken) -> Request {
+        // _token is required only to ensure that
+        // caller is calling this from either evt_request_cancel
+        // or evt_request_completion_routine.
+        self.0
+    }
+}
+
+impl Handle for SentRequest {
+    fn as_ptr(&self) -> WDFOBJECT {
+        self.0.as_ptr()
+    }
+
+    fn type_name() -> String {
+        String::from("SentRequest")
+    }
+}
+
+
+#[derive(Debug)]
 pub struct RequestCancellationToken(Request);
 
 impl RequestCancellationToken {
@@ -562,12 +584,22 @@ impl RequestCancellationToken {
     }
 }
 
-/// SAFETY: This is safe because all the WDF functions
-/// that operate on WDFREQUEST do so in a thread-safe manner.
-/// As a result, all the Rust methods on this struct are
-/// also thread-safe.
-unsafe impl Send for RequestCancellationToken {}
-unsafe impl Sync for RequestCancellationToken {}
+#[derive(Debug)]
+pub struct RequestCompletionToken(Request);
+
+impl RequestCompletionToken {
+    unsafe fn new(inner: WDFREQUEST) -> Self {
+        Self(unsafe { Request::from_raw(inner) })
+    }
+
+    pub fn request_id(&self) -> RequestId {
+        self.0.id()
+    }
+
+    pub fn get_io_queue(&self) -> &IoQueue {
+        self.0.get_io_queue()
+    }
+}
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

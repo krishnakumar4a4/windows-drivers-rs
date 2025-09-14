@@ -2,6 +2,9 @@
 
 #![no_std]
 
+extern crate alloc;
+use alloc::vec::Vec;
+
 use wdf::{
     Arc,
     CmResList,
@@ -23,7 +26,9 @@ use wdf::{
     PnpPowerEventCallbacks,
     PowerDeviceState,
     PowerPolicyS0IdleCapabilities,
+    RequestId,
     RequestType,
+    SentRequest,
     Slot,
     SpinLock,
     TriState,
@@ -78,6 +83,7 @@ struct DeviceContext {
     usb_device_traits: SpinLock<UsbDeviceTraits>,
     current_switch_state: SpinLock<SwitchState>,
     interrupt_msg_queue: Slot<Arc<IoQueue>>,
+    sent_requests: SpinLock<Vec<SentRequest>>, // TODO: change to HashMap when available
 }
 
 impl DeviceContext {
@@ -91,6 +97,20 @@ impl DeviceContext {
 
     fn get_bulk_write_pipe(&self) -> &UsbPipe {
         self.get_usb_pipe(|usb_dev_ctx| usb_dev_ctx.bulk_write_pipe_index)
+    }
+
+    fn add_sent_request(&self, sent_request: SentRequest) {
+        let mut sent_requests = self.sent_requests.lock();
+        sent_requests.push(sent_request);
+    }
+
+    fn get_sent_request(&self, request_id: RequestId) -> Option<SentRequest> {
+        let mut sent_requests = self.sent_requests.lock();
+        if let Some(pos) = sent_requests.iter().position(|r| r.id() == request_id) {
+            Some(sent_requests.remove(pos))
+        } else {
+            None
+        }
     }
 
     fn get_usb_pipe<F: Fn(&UsbDeviceContext) -> u8>(&self, pipe_index: F) -> &UsbPipe {
@@ -211,6 +231,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
         current_switch_state: SpinLock::create(SwitchState::empty())?,
         interrupt_msg_queue: Slot::try_new(Some(interrupt_msg_queue))?,
+        sent_requests: SpinLock::create(Vec::new())?,
     };
 
     DeviceContext::attach(device, context)?;
