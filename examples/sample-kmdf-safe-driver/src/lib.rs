@@ -24,9 +24,10 @@ use wdf::{
     driver_entry,
     object_context,
     println,
+    status_codes,
     trace,
     Arc,
-    CancellableMarkedRequest,
+    CancellableRequest,
     Device,
     DeviceInit,
     Driver,
@@ -38,7 +39,6 @@ use wdf::{
     Request,
     RequestCancellationToken,
     SpinLock,
-    status_codes,
     Timer,
     TimerConfig,
 };
@@ -57,7 +57,7 @@ struct QueueContext {
     // The lock is enforced at compile time (i.e. the
     // code will fail to compile if you do not use
     // the lock).
-    request: SpinLock<Option<CancellableMarkedRequest>>,
+    request: SpinLock<Option<CancellableRequest>>,
 
     // Buffer where data from incoming write request is stored
     buffer: SpinLock<Option<Vec<u8>>>,
@@ -135,7 +135,7 @@ fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
         Some(evt_device_self_managed_io_suspend);
     pnp_power_callbacks.evt_device_self_managed_io_restart = Some(evt_device_self_managed_io_start);
 
-    let device = Device::create(device_init, Some(pnp_power_callbacks))?;
+    let device = Device::create(device_init, Some(pnp_power_callbacks), None)?;
 
     // Create a device interface so that applications can find us and talk
     // to us.
@@ -205,7 +205,7 @@ fn evt_device_self_managed_io_start(device: &Device) -> NtResult<()> {
 
     queue.start();
 
-    let context = QueueContext::get(&queue).expect("Failed to get queue context");
+    let context = QueueContext::get(&queue);
 
     let _ = context.timer.start(&Duration::from_millis(100));
 
@@ -228,7 +228,7 @@ fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
 
     queue.stop_synchronously();
 
-    let context = QueueContext::get(&queue).expect("Failed to get queue context");
+    let context = QueueContext::get(&queue);
 
     context.timer.stop(false);
 
@@ -253,12 +253,7 @@ fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
 fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
 
-    let Some(context) = QueueContext::get(&queue) else {
-        println!("evt_io_write failed to get queue context");
-        request.complete(status_codes::STATUS_UNSUCCESSFUL.into()); // TODO: decide on the status code here
-        return;
-    };
-
+    let context = QueueContext::get(&queue);
     let memory = match request.retrieve_output_memory() {
         Ok(memory) => memory,
         Err(e) => {
@@ -298,16 +293,10 @@ fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 
     request.set_information(length);
 
-    let request = match request.mark_cancellable(evt_request_cancel) {
-        Ok(request) => request,
-        Err((e, request)) => {
-            println!("evt_io_write failed to mark request cancellable: {e:?}");
-            request.complete(status_codes::STATUS_UNSUCCESSFUL.into()); // TODO: decide on the status code here
-            return;
-        }
-    };
-
-    *context.request.lock() = Some(request);
+    if let Err((e, request)) = request.mark_cancellable(evt_request_cancel, &context.request) {
+        println!("evt_io_write failed to mark request cancellable: {e:?}");
+        request.complete(status_codes::STATUS_UNSUCCESSFUL.into()); // TODO: decide on the status code here
+    }
 }
 
 /// This callback is invoked when the framework receives IRP_MJ_WRITE request.
@@ -351,26 +340,16 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
         return;
     }
 
-    let Some(context) = QueueContext::get(&queue) else {
-        println!("evt_io_write failed to get queue context");
-        request.complete(status_codes::STATUS_UNSUCCESSFUL.into());
-        return;
-    };
+    let context = QueueContext::get(&queue);
 
     *context.buffer.lock() = Some(buffer);
 
     request.set_information(length);
 
-    let request = match request.mark_cancellable(evt_request_cancel) {
-        Ok(request) => request,
-        Err((e, request)) => {
-            println!("evt_io_write failed to mark request cancellable: {e:?}");
-            request.complete(status_codes::STATUS_UNSUCCESSFUL.into());
-            return;
-        }
-    };
-
-    *context.request.lock() = Some(request);
+    if let Err((e, request)) = request.mark_cancellable(evt_request_cancel, &context.request) {
+        println!("evt_io_write failed to mark request cancellable: {e:?}");
+        request.complete(status_codes::STATUS_UNSUCCESSFUL.into());
+    }
 }
 
 /// Callback that is called when the request is cancelled.
@@ -385,16 +364,14 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 
     let queue = token.get_io_queue();
 
-    if let Some(context) = QueueContext::get(&queue) {
-        let mut req = context.request.lock();
-        if let Some(req) = req.take() {
-            req.complete(status_codes::STATUS_CANCELLED.into());
-            println!("Request cancelled");
-        } else {
-            println!("Request already completed");
-        }
+    let context = QueueContext::get(&queue);
+
+    let mut req = context.request.lock();
+    if let Some(req) = req.take() {
+        req.complete(status_codes::STATUS_CANCELLED.into());
+        println!("Request cancelled");
     } else {
-        println!("Could not cancel request. Failed to get queue context");
+        println!("Request already completed");
     }
 }
 
@@ -408,11 +385,9 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 fn evt_timer(timer: &Timer) {
     println!("evt_timer called");
 
-    let queue = &TimerContext::get(timer)
-        .expect("Failed to get timer context")
-        .queue;
+    let queue = &TimerContext::get(timer).queue;
 
-    let req = QueueContext::get(queue).and_then(|context| context.request.lock().take());
+    let req = QueueContext::get(queue).request.lock().take();
 
     if let Some(req) = req {
         req.complete(status_codes::STATUS_SUCCESS.into());
