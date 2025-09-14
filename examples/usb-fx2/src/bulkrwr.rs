@@ -27,8 +27,7 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
         return;
     }
 
-    let device_context =
-        DeviceContext::get(queue.get_device()).expect("Device context should be set");
+    let device_context = DeviceContext::get(queue.get_device());
     let pipe = device_context.get_bulk_read_pipe();
 
     if let Err(e) =
@@ -97,8 +96,7 @@ pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
         return;
     }
 
-    let device_context =
-        DeviceContext::get(queue.get_device()).expect("Device context should be set");
+    let device_context = DeviceContext::get(queue.get_device());
     let pipe = device_context.get_bulk_write_pipe();
 
     if let Err(e) =

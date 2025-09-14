@@ -66,8 +66,7 @@ macro_rules! impl_ref_counted_handle {
 
         impl crate::api::object::RefCountedHandle for $obj {
             fn get_ref_count(&self) -> &core::sync::atomic::AtomicUsize {
-                let inner_context =
-                    <$inner_context>::get(self).expect("Failed to get inner context");
+                let inner_context = <$inner_context>::get(self);
                 &inner_context.ref_count
             }
         }
@@ -260,7 +259,7 @@ fn set_up_context<H: Handle, C: ObjectContext>(
 }
 
 /// Gets context of type `C` for the given framework handle if it exists
-pub fn get_context<H: Handle, C: ObjectContext>(handle: &H) -> Option<&C> {
+pub fn try_get_context<H: Handle, C: ObjectContext>(handle: &H) -> Option<&C> {
     // SAFETY: The pointer to framework handle is obtained via as_ptr()
     // which is guaranteed to be valid
     let context = unsafe { get_context_raw::<C>(handle.as_ptr()) };
@@ -274,7 +273,7 @@ pub fn get_context<H: Handle, C: ObjectContext>(handle: &H) -> Option<&C> {
 
 /// Gets mutable context of type `C` for the given framework handle if it
 /// exists
-pub fn get_context_mut<H: Handle, C: ObjectContext>(handle: &mut H) -> Option<&mut C> {
+pub fn try_get_context_mut<H: Handle, C: ObjectContext>(handle: &mut H) -> Option<&mut C> {
     // SAFETY: The pointer to framework handle is obtained via as_ptr()
     // which is guaranteed to be valid
     let context = unsafe { get_context_raw::<C>(handle.as_ptr()) };

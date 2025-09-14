@@ -209,11 +209,11 @@ macro_rules! unsafe_request_handler {
             pub extern "C" fn [<__ $handler_name>](queue: WDFQUEUE, request: WDFREQUEST $(, $arg_name: $arg_type )* ) {
                 let queue = unsafe { &*queue.cast::<IoQueue>() };
                 let request = unsafe { Request::from_raw(request as WDFREQUEST) };
-                if let Some(handlers) = IoQueueContext::get(&queue) {
-                    if let Some(handler) = handlers.$handler_name {
-                        handler(queue, ($req_transform)(request) $(, unsafe_request_handler!(@transform $arg_name $(=> $arg_transform)? ) )*);
-                        return;
-                    }
+
+                let handlers = IoQueueContext::get(&queue);
+                if let Some(handler) = handlers.$handler_name {
+                    handler(queue, ($req_transform)(request) $(, unsafe_request_handler!(@transform $arg_name $(=> $arg_transform)? ) )*);
+                    return;
                 }
 
                 request.complete(status_codes::STATUS_ABANDONED.into());

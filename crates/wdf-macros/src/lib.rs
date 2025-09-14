@@ -317,16 +317,28 @@ fn object_context_impl(
                 }
             }
 
-            fn get(fw_obj: &#fw_obj_type_name) -> Option<&#struct_name> where Self: Sync {
+            fn get(fw_obj: &#fw_obj_type_name) -> &#struct_name where Self: Sync {
+                Self::try_get(fw_obj).unwrap_or_else(|| Self::panic_on_missing_context())
+            }
+
+            fn get_mut(fw_obj: &mut #fw_obj_type_name) -> &mut #struct_name where Self: Sync {
+                Self::try_get_mut(fw_obj).unwrap_or_else(|| Self::panic_on_missing_context())
+            }
+
+            fn try_get(fw_obj: &#fw_obj_type_name) -> Option<&#struct_name> where Self: Sync {
                 unsafe {
-                    #wdf_crate_path::get_context(fw_obj)
+                    #wdf_crate_path::try_get_context(fw_obj)
                 }
             }
 
-            fn get_mut(fw_obj: &mut #fw_obj_type_name) -> Option<&mut #struct_name> where Self: Sync {
+            fn try_get_mut(fw_obj: &mut #fw_obj_type_name) -> Option<&mut #struct_name> where Self: Sync {
                 unsafe {
-                    #wdf_crate_path::get_context_mut(fw_obj)
+                    #wdf_crate_path::try_get_context_mut(fw_obj)
                 }
+            }
+
+            fn panic_on_missing_context() -> ! {
+                panic!(concat!("No context of type ", stringify!(#struct_name), " attached to the framework object"));
             }
         }
 

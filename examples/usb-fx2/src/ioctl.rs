@@ -18,7 +18,7 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
         reader_status
     );
 
-    let device_context = DeviceContext::get(device).expect("Device context should be set");
+    let device_context = DeviceContext::get(device);
     let interrupt_msg_queue = device_context
         .interrupt_msg_queue
         .get()

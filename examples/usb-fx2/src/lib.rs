@@ -95,8 +95,7 @@ impl DeviceContext {
 
     fn get_usb_pipe<F: Fn(&UsbDeviceContext) -> u8>(&self, pipe_index: F) -> &UsbPipe {
         let usb_device = self.usb_device.get().expect("USB device should be set");
-        let usb_device_context =
-            UsbDeviceContext::get(&usb_device).expect("USB device context should be set");
+        let usb_device_context = UsbDeviceContext::get(&usb_device);
         let usb_interface = usb_device
             .get_interface(0)
             .expect("USB interface 0 should be present");
@@ -226,7 +225,7 @@ fn evt_device_prepare_hardware(
 ) -> NtResult<()> {
     println!("Device prepare hardware callback called");
 
-    let device_ctxt = DeviceContext::get(device).expect("device context should exist");
+    let device_ctxt = DeviceContext::get(device);
 
     // Create a UsbDevice only if it does not already exist
     if device_ctxt.usb_device.is_some() {
@@ -289,7 +288,7 @@ fn evt_device_d0_exit(device: &Device, _next_state: PowerDeviceState) -> NtResul
 }
 
 fn get_interrupt_io_target(device: &Device) -> &IoTarget {
-    let device_context = DeviceContext::get(device).expect("Device context should be set");
+    let device_context = DeviceContext::get(device);
     let interrupt_pipe = device_context.get_interrupt_pipe();
     interrupt_pipe.get_io_target()
 }

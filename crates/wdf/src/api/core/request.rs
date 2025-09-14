@@ -117,7 +117,7 @@ impl Request {
         &mut self,
         cancel_fn: fn(&RequestCancellationToken),
     ) -> NtResult<()> {
-        if let Some(context) = RequestContext::get_mut(self) {
+        if let Some(context) = RequestContext::try_get_mut(self) {
             context.evt_request_cancel = cancel_fn;
             Ok(())
         } else {
@@ -203,7 +203,7 @@ impl Request {
     }
 
     pub fn set_completion_routine(&mut self, completion_routine: fn(Request, &IoTarget)) {
-        let context = RequestContext::get_mut(self).expect("Request context should exist");
+        let context = RequestContext::get_mut(self);
         context.evt_request_completion_routine = Some(completion_routine);
     }
 
@@ -349,12 +349,12 @@ macro_rules! define_user_memory_context {
 
         impl Request {
             pub(crate) fn $retrieve_fn(&mut self) -> Option<OwnedMemory> {
-                let context = $ctx_name::get_mut(self)?;
+                let context = $ctx_name::get_mut(self);
                 context.memory.take()
             }
 
             pub(crate) fn $set_fn(&mut self, memory: OwnedMemory) -> NtResult<()> {
-                match $ctx_name::get_mut(self) {
+                match $ctx_name::try_get_mut(self) {
                     Some(context) => {
                         context.memory = Some(memory);
                         Ok(())
@@ -370,9 +370,9 @@ define_user_memory_context!(input);
 define_user_memory_context!(output);
 
 pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
-    if let Some(context) = RequestContext::get(unsafe { &Request::from_raw(request as _) }) {
-        (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
-    }
+    let safe_request = unsafe { &Request::from_raw(request as _) };
+    let context = RequestContext::get(safe_request);
+    (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
 }
 
 pub extern "C" fn __evt_request_read_completion_routine(
@@ -382,10 +382,9 @@ pub extern "C" fn __evt_request_read_completion_routine(
     _context: WDFOBJECT,
 ) {
     let request = unsafe { Request::from_raw(request as _) };
-    if let Some(context) = RequestContext::get(&request) {
-        if let Some(callback) = context.evt_request_completion_routine {
-            callback(request, unsafe { &*(target.cast::<IoTarget>()) });
-        }
+    let context = RequestContext::get(&request);
+    if let Some(callback) = context.evt_request_completion_routine {
+        callback(request, unsafe { &*(target.cast::<IoTarget>()) });
     }
 }
 

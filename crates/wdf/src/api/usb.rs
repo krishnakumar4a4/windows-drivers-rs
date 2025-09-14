@@ -366,7 +366,7 @@ impl UsbPipe {
     }
 
     pub fn config_continuous_reader(&mut self, config: &UsbContinuousReaderConfig) -> NtResult<()> {
-        if let Some(ctxt) = UsbPipeContinuousReaderContext::get_mut(self) {
+        if let Some(ctxt) = UsbPipeContinuousReaderContext::try_get_mut(self) {
             ctxt.read_complete_callback = config.read_complete_callback;
             ctxt.readers_failed_callback = config.readers_failed_callback;
         } else {
@@ -716,7 +716,7 @@ pub extern "C" fn __evt_usb_target_pipe_read_complete(
 ) {
     let pipe = unsafe { &*(pipe.cast::<UsbPipe>()) };
 
-    if let Some(ctxt) = UsbPipeContinuousReaderContext::get(pipe) {
+    if let Some(ctxt) = UsbPipeContinuousReaderContext::try_get(pipe) {
         if let Some(callback) = ctxt.read_complete_callback {
             let buffer: &Memory = unsafe { &*(buffer.cast::<Memory>()) };
             callback(pipe, buffer, num_bytes_transferred);
@@ -734,7 +734,7 @@ pub extern "C" fn __evt_usb_target_pipe_readers_failed(
 ) -> BOOLEAN {
     let pipe = unsafe { &*(pipe.cast::<UsbPipe>()) };
 
-    if let Some(ctxt) = UsbPipeContinuousReaderContext::get(pipe) {
+    if let Some(ctxt) = UsbPipeContinuousReaderContext::try_get(pipe) {
         if let Some(callback) = ctxt.readers_failed_callback {
             let nt_status: NtStatus = status.into();
             let usbd = UsbdStatus::new(usbd_status);

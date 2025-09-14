@@ -145,7 +145,6 @@ struct TimerContext {
 
 pub extern "C" fn __evt_timer_func(timer: WDFTIMER) {
     let timer = unsafe { &*timer.cast::<Timer>() };
-    if let Some(timer_state) = TimerContext::get(&timer) {
-        (timer_state.evt_timer_func)(timer);
-    }
+    let timer_state = TimerContext::get(&timer);
+    (timer_state.evt_timer_func)(timer);
 }

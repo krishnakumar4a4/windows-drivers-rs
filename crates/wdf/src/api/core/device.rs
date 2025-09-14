@@ -485,12 +485,11 @@ macro_rules! unsafe_pnp_power_callback {
         paste::paste! {
             pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE $(, $param_name: $param_type)*) -> unsafe_pnp_power_callback!(@ret_type $($return_type)*) {
                 let device: &mut Device = unsafe { &mut *(device.cast()) };
+                let ctxt = DeviceContext::get(device);
 
-                if let Some(ctxt) = DeviceContext::get(device) {
-                    if let Some(callbacks) = &ctxt.pnp_power_callbacks {
-                        if let Some(callback) = callbacks.$callback_name {
-                            return unsafe_pnp_power_callback_call_and_return!($($return_type)*, callback(device $(, $conversion)*));
-                        }
+                if let Some(callbacks) = &ctxt.pnp_power_callbacks {
+                    if let Some(callback) = callbacks.$callback_name {
+                        return unsafe_pnp_power_callback_call_and_return!($($return_type)*, callback(device $(, $conversion)*));
                     }
                 }
 
