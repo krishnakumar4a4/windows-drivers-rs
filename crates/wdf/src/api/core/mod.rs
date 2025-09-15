@@ -14,6 +14,8 @@ pub mod sync;
 pub mod timer;
 pub mod tracing;
 
+use core::time::Duration;
+
 pub use device::*;
 pub use driver::*;
 pub use guid::*;
@@ -30,6 +32,33 @@ pub use timer::*;
 pub use wdf_macros::*;
 pub use wdk::println;
 use wdk_sys::WDF_TRI_STATE;
+
+/// A timeout value which can either be
+/// relative to the current system time
+/// or to January 1, 1601 (UTC)
+pub enum Timeout {
+    /// Timeout Relative time current system time
+    Relative(Duration),
+    /// Timeout relative to  January 1, 1601 (UTC)
+    Absolute(Duration),
+}
+
+impl Timeout {
+    /// Convert the timeout to a WDF value
+    /// which in 100-nanosecond intervals
+    /// and is negative for relative duration
+    /// and positive for absolute
+    pub(crate) fn as_wdf_timeout(&self) -> i64 {
+        match self {
+            Timeout::Relative(dur) => -(Self::to_100_ns_intervals(*dur)),
+            Timeout::Absolute(dur) => Self::to_100_ns_intervals(*dur),
+        }
+    }
+
+    fn to_100_ns_intervals(duration: Duration) -> i64 {
+        duration.as_nanos() as i64 / 100
+    }
+}
 
 enum_mapping! {
     infallible;

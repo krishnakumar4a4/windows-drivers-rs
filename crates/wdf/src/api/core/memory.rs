@@ -142,7 +142,6 @@ impl DerefMut for OwnedMemory {
         unsafe { &mut *(self.0.cast::<Memory>()) }
     }
 }
-
 #[derive(Debug)]
 pub struct MemoryOffset {
     pub buffer_offset: usize,

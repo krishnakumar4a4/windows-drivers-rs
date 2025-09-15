@@ -18,6 +18,7 @@ use wdk_sys::{
     WDFUSBINTERFACE,
     WDFUSBPIPE,
     WDF_NO_OBJECT_ATTRIBUTES,
+    WDF_REQUEST_SEND_OPTIONS,
     WDF_USB_BMREQUEST_DIRECTION,
     WDF_USB_BMREQUEST_RECIPIENT,
     WDF_USB_BMREQUEST_TYPE,
@@ -31,6 +32,7 @@ use wdk_sys::{
     WDF_USB_PIPE_TYPE,
     WDF_USB_REQUEST_COMPLETION_PARAMS,
     WDF_USB_REQUEST_TYPE,
+    _WDF_REQUEST_SEND_OPTIONS_FLAGS,
 };
 
 use super::core::{
@@ -43,6 +45,7 @@ use super::core::{
     request::Request,
     result::{status_codes, NtResult, NtStatus, StatusCodeExt},
     sync::Arc,
+    Timeout,
 };
 
 impl_ref_counted_handle!(UsbDevice, UsbDeviceContext);
@@ -164,6 +167,40 @@ impl UsbDevice {
             )
         }
         .ok()
+    }
+
+    // WdfUsbTargetDeviceSendControlTransferSynchronously
+
+    pub fn send_control_transfer_synchronously(
+        &self,
+        // TODO: support request
+        // request: Option<Request>,
+        setup_packet: &UsbControlSetupPacket,
+        timeout: Timeout,
+        // TODO: support memory descriptor
+        // memory_descriptor: Option<&MemoryDescriptor>,
+    ) -> NtResult<u32> {
+        let mut setup_packet = setup_packet.into();
+
+        let mut send_options = init_wdf_struct!(WDF_REQUEST_SEND_OPTIONS);
+        send_options.Flags |=
+            _WDF_REQUEST_SEND_OPTIONS_FLAGS::WDF_REQUEST_SEND_OPTION_TIMEOUT as u32;
+        send_options.Timeout = timeout.as_wdf_timeout();
+
+        let mut bytes_transferred: u32 = 0;
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbTargetDeviceSendControlTransferSynchronously,
+                self.as_ptr().cast(),
+                ptr::null_mut(),
+                &mut send_options,
+                &mut setup_packet,
+                ptr::null_mut(), // TODO: support memory descriptor
+                &mut bytes_transferred
+            )
+        }
+        .map(|| bytes_transferred)
     }
 
     fn get_interface_ptr(&self, interface_index: u8) -> WDFUSBINTERFACE {
@@ -771,6 +808,21 @@ impl From<&WDF_USB_CONTROL_SETUP_PACKET> for UsbControlSetupPacket {
             index: unsafe { packet.wIndex.Value },
             length: packet.wLength,
         }
+    }
+}
+
+impl Into<WDF_USB_CONTROL_SETUP_PACKET> for &UsbControlSetupPacket {
+    fn into(self) -> WDF_USB_CONTROL_SETUP_PACKET {
+        // WDF_USB_CONTROL_SETUP_PACKET does not have any Size field so
+        // wdf_init_struct! macro is not used
+        let mut raw = WDF_USB_CONTROL_SETUP_PACKET::default();
+        raw.Packet.bm.Byte = self.bm;
+        raw.Packet.bRequest = self.request;
+        raw.Packet.wValue.Value = self.value;
+        raw.Packet.wIndex.Value = self.index;
+        raw.Packet.wLength = self.length;
+
+        raw
     }
 }
 
