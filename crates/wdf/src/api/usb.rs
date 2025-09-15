@@ -153,6 +153,16 @@ impl UsbDevice {
         unsafe { (interface.cast::<UsbInterface>()).as_mut() }
     }
 
+    pub fn reset_port_synchronously(&self) -> NtResult<()> {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbTargetDeviceResetPortSynchronously,
+                self.as_ptr().cast()
+            )
+        }
+        .ok()
+    }
+
     fn get_interface_ptr(&self, interface_index: u8) -> WDFUSBINTERFACE {
         unsafe {
             call_unsafe_wdf_function_binding!(
