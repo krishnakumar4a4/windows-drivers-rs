@@ -38,7 +38,7 @@ use super::core::{
     memory::Memory,
     object::{impl_handle, impl_ref_counted_handle, Handle},
     request::Request,
-    result::{NtResult, NtStatus, StatusCodeExt},
+    result::{status_codes, NtResult, NtStatus, StatusCodeExt},
     sync::Arc,
 };
 
@@ -83,7 +83,8 @@ impl UsbDevice {
         config_descriptor: Option<&mut [u8]>,
     ) -> NtResult<u16> {
         let mut length: u16 = 0;
-        unsafe {
+        let config_descriptor_is_none = config_descriptor.is_none();
+        let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceRetrieveConfigDescriptor,
                 self.as_ptr().cast(),
@@ -92,8 +93,13 @@ impl UsbDevice {
                     .cast(),
                 &mut length
             )
+        };
+
+        if status == status_codes::STATUS_BUFFER_TOO_SMALL && config_descriptor_is_none {
+            Ok(length)
+        } else {
+            Err(status.into())
         }
-        .map(|| length)
     }
 
     pub fn retrieve_information(&self) -> NtResult<UsbDeviceInformation> {
