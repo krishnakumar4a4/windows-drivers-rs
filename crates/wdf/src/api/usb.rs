@@ -18,6 +18,9 @@ use wdk_sys::{
     WDFUSBINTERFACE,
     WDFUSBPIPE,
     WDF_NO_OBJECT_ATTRIBUTES,
+    WDF_USB_BMREQUEST_DIRECTION,
+    WDF_USB_BMREQUEST_RECIPIENT,
+    WDF_USB_BMREQUEST_TYPE,
     WDF_USB_CONTINUOUS_READER_CONFIG,
     WDF_USB_CONTROL_SETUP_PACKET,
     WDF_USB_DEVICE_CREATE_CONFIG,
@@ -725,8 +728,36 @@ impl UsbControlSetupPacket {
         }
     }
 
+    pub fn create_vendor(
+        direction: UsbBmRequestDirection,
+        recipient: UsbBmRequestRecipient,
+        request: u8,
+        value: u16,
+        index: u16,
+    ) -> Self {
+        Self {
+            bm: Self::to_bm(recipient, UsbBmRequestType::Vendor, direction),
+            request,
+            value,
+            index,
+            length: 0,
+        }
+    }
+
     pub fn as_bytes(&self) -> &[u8; mem::size_of::<Self>()] {
         unsafe { &*((self as *const Self).cast::<[u8; mem::size_of::<Self>()]>()) }
+    }
+
+    fn to_bm(
+        recipient: UsbBmRequestRecipient,
+        typ: UsbBmRequestType,
+        dir: UsbBmRequestDirection,
+    ) -> u8 {
+        let mut bm = 0;
+        bm |= (recipient as u8) & 0b11;
+        bm |= ((typ as u8) & 0b11) << 5;
+        bm |= ((dir as u8) & 0b1) << 7;
+        bm
     }
 }
 
@@ -742,6 +773,34 @@ impl From<&WDF_USB_CONTROL_SETUP_PACKET> for UsbControlSetupPacket {
         }
     }
 }
+
+enum_mapping! {
+    infallible;
+    pub enum UsbBmRequestDirection: WDF_USB_BMREQUEST_DIRECTION {
+        HostToDevice = BmRequestHostToDevice,
+        DeviceToHost = BmRequestDeviceToHost
+    }
+}
+
+enum_mapping! {
+    infallible;
+    pub enum UsbBmRequestRecipient: WDF_USB_BMREQUEST_RECIPIENT {
+        ToDevice = BmRequestToDevice,
+        ToInterface = BmRequestToInterface,
+        ToEndpoint = BmRequestToEndpoint,
+        ToOther = BmRequestToOther
+    }
+}
+
+enum_mapping! {
+    infallible;
+    enum UsbBmRequestType: WDF_USB_BMREQUEST_TYPE {
+        Standard = BmRequestStandard,
+        Class = BmRequestClass,
+        Vendor = BmRequestVendor
+    }
+}
+
 pub extern "C" fn __evt_usb_target_pipe_read_complete(
     pipe: WDFUSBPIPE,
     buffer: WDFMEMORY,
