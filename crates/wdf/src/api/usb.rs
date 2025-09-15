@@ -78,6 +78,24 @@ impl UsbDevice {
         })
     }
 
+    pub fn retrieve_config_descriptor(
+        &self,
+        config_descriptor: Option<&mut [u8]>,
+    ) -> NtResult<u16> {
+        let mut length: u16 = 0;
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfUsbTargetDeviceRetrieveConfigDescriptor,
+                self.as_ptr().cast(),
+                config_descriptor
+                    .map_or(ptr::null_mut(), |b| b.as_mut_ptr())
+                    .cast(),
+                &mut length
+            )
+        }
+        .map(|| length)
+    }
+
     pub fn retrieve_information(&self) -> NtResult<UsbDeviceInformation> {
         let mut information = init_wdf_struct!(WDF_USB_DEVICE_INFORMATION);
         unsafe {
