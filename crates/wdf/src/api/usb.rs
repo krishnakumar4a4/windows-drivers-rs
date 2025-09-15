@@ -837,16 +837,16 @@ enum_mapping! {
 enum_mapping! {
     infallible;
     pub enum UsbBmRequestRecipient: WDF_USB_BMREQUEST_RECIPIENT {
-        ToDevice = BmRequestToDevice,
-        ToInterface = BmRequestToInterface,
-        ToEndpoint = BmRequestToEndpoint,
-        ToOther = BmRequestToOther
+        Device = BmRequestToDevice,
+        Interface = BmRequestToInterface,
+        Endpoint = BmRequestToEndpoint,
+        Other = BmRequestToOther
     }
 }
 
 enum_mapping! {
     infallible;
-    enum UsbBmRequestType: WDF_USB_BMREQUEST_TYPE {
+    pub enum UsbBmRequestType: WDF_USB_BMREQUEST_TYPE {
         Standard = BmRequestStandard,
         Class = BmRequestClass,
         Vendor = BmRequestVendor

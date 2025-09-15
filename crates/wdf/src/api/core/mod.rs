@@ -44,6 +44,14 @@ pub enum Timeout {
 }
 
 impl Timeout {
+    pub fn relative_from_millis(millis: u64) -> Self {
+        Self::Relative(Duration::from_millis(millis))
+    }
+
+    pub fn absolute_from_millis(millis: u64) -> Self {
+        Self::Absolute(Duration::from_millis(millis))
+    }
+
     /// Convert the timeout to a WDF value
     /// which in 100-nanosecond intervals
     /// and is negative for relative duration

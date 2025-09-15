@@ -9,9 +9,11 @@ use wdf::{
     NtResult,
     NtStatus,
     Request,
+    Timeout,
     ctl_code,
     println,
     status_codes,
+    usb::{UsbBmRequestDirection, UsbBmRequestRecipient, UsbControlSetupPacket},
 };
 
 use crate::DeviceContext;
@@ -81,6 +83,16 @@ const IOCTL_OSRUSBFX2_GET_INTERRUPT_MESSAGE: u32 = ctl_code(
     METHOD_OUT_DIRECT,
     FILE_READ_ACCESS,
 );
+
+// The vendor commands supported by our device
+
+const USBFX2LK_READ_7SEGMENT_DISPLAY: u8 = 0xD4;
+const USBFX2LK_READ_SWITCHES: u8 = 0xD6;
+const USBFX2LK_READ_BARGRAPH_DISPLAY: u8 = 0xD7;
+const USBFX2LK_SET_BARGRAPH_DISPLAY: u8 = 0xD8;
+const USBFX2LK_IS_HIGH_SPEED: u8 = 0xD9;
+const USBFX2LK_REENUMERATE: u8 = 0xDA;
+const USBFX2LK_SET_7SEGMENT_DISPLAY: u8 = 0xDB;
 
 bitflags::bitflags! {
     /// Represents the state of the bar graph on the FX2 device
@@ -235,7 +247,10 @@ fn reset_device(device_context: &DeviceContext) -> NtResult<usize> {
 
     stop_all_pipes(device_context);
 
-    let usb_device = device_context.usb_device.get().expect("USB device should be set");
+    let usb_device = device_context
+        .usb_device
+        .get()
+        .expect("USB device should be set");
     usb_device.reset_port_synchronously()?;
 
     start_all_pipes(device_context)?;
@@ -243,40 +258,25 @@ fn reset_device(device_context: &DeviceContext) -> NtResult<usize> {
     Ok(0)
 }
 
-fn start_all_pipes(device_context: &DeviceContext) -> NtResult<()> {
-    device_context
-        .get_interrupt_pipe()
-        .get_io_target()
-        .start()?;
-    device_context
-        .get_bulk_read_pipe()
-        .get_io_target()
-        .start()?;
-    device_context
-        .get_bulk_write_pipe()
-        .get_io_target()
-        .start()?;
-
-    Ok(())
-}
-
-fn stop_all_pipes(device_context: &DeviceContext) {
-    device_context
-        .get_interrupt_pipe()
-        .get_io_target()
-        .stop(IoTargetSentIoAction::CancelSentIo);
-    device_context
-        .get_bulk_read_pipe()
-        .get_io_target()
-        .stop(IoTargetSentIoAction::CancelSentIo);
-    device_context
-        .get_bulk_write_pipe()
-        .get_io_target()
-        .stop(IoTargetSentIoAction::CancelSentIo);
-}
-
 fn reenumerate_device(device_context: &DeviceContext) -> NtResult<usize> {
     println!("Re-enumerate device");
+
+    let setup_packet = UsbControlSetupPacket::new_vendor(
+        UsbBmRequestDirection::HostToDevice,
+        UsbBmRequestRecipient::Device,
+        USBFX2LK_REENUMERATE,
+        0,
+        0,
+    );
+
+    let usb_device = device_context
+        .usb_device
+        .get()
+        .expect("USB device should be set");
+
+    usb_device
+        .send_control_transfer_synchronously(&setup_packet, Timeout::relative_from_millis(10000))
+        .inspect_err(|e| println!("Failed to send re-enumerate control transfer: {:?}", e))?;
 
     Ok(0)
 }
@@ -379,4 +379,36 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
             }
         }
     }
+}
+
+fn start_all_pipes(device_context: &DeviceContext) -> NtResult<()> {
+    device_context
+        .get_interrupt_pipe()
+        .get_io_target()
+        .start()?;
+    device_context
+        .get_bulk_read_pipe()
+        .get_io_target()
+        .start()?;
+    device_context
+        .get_bulk_write_pipe()
+        .get_io_target()
+        .start()?;
+
+    Ok(())
+}
+
+fn stop_all_pipes(device_context: &DeviceContext) {
+    device_context
+        .get_interrupt_pipe()
+        .get_io_target()
+        .stop(IoTargetSentIoAction::CancelSentIo);
+    device_context
+        .get_bulk_read_pipe()
+        .get_io_target()
+        .stop(IoTargetSentIoAction::CancelSentIo);
+    device_context
+        .get_bulk_write_pipe()
+        .get_io_target()
+        .stop(IoTargetSentIoAction::CancelSentIo);
 }
