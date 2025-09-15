@@ -221,21 +221,13 @@ fn get_config_descriptor(device_context: &DeviceContext, request: &mut Request) 
         .get()
         .expect("USB device should be set");
 
-    let required_size = match usb_device.retrieve_config_descriptor(None) {
-        Ok(size) => size,
-        Err(e) => {
-            println!("Failed to retrieve config descriptor size: {:?}", e);
-            return Err(e.code().into());
-        }
-    };
+    let required_size = usb_device
+        .retrieve_config_descriptor(None)
+        .inspect_err(|e| println!("Failed to retrieve config descriptor size: {:?}", e))?;
 
-    let request_buffer = match request.retrieve_output_buffer(required_size as usize) {
-        Ok(buf) => buf,
-        Err(e) => {
-            println!("Failed to retrieve output buffer from request: {:?}", e);
-            return Err(e.code().into());
-        }
-    };
+    let request_buffer = request
+        .retrieve_output_buffer(required_size as usize)
+        .inspect_err(|e| println!("Failed to retrieve output buffer from request: {:?}", e))?;
 
     let bytes_written = usb_device.retrieve_config_descriptor(Some(request_buffer))?;
 
