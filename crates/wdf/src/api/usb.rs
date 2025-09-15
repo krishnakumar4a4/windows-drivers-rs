@@ -728,7 +728,7 @@ impl UsbControlSetupPacket {
         }
     }
 
-    pub fn create_vendor(
+    pub fn new_vendor(
         direction: UsbBmRequestDirection,
         recipient: UsbBmRequestRecipient,
         request: u8,
