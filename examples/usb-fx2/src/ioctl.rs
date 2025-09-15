@@ -163,7 +163,7 @@ pub fn evt_io_device_control(
         IOCTL_OSRUSBFX2_GET_CONFIG_DESCRIPTOR => {
             get_config_descriptor(&device_context, &mut request)
         }
-        IOCTL_OSRUSBFX2_RESET_DEVICE => reset_device(&device),
+        IOCTL_OSRUSBFX2_RESET_DEVICE => reset_device(device_context),
         IOCTL_OSRUSBFX2_REENUMERATE_DEVICE => reenumerate_device(device_context),
         IOCTL_OSRUSBFX2_GET_BAR_GRAPH_DISPLAY => get_bar_graph_display(device_context),
         IOCTL_OSRUSBFX2_SET_BAR_GRAPH_DISPLAY => set_bar_graph_display(device_context, &request),
@@ -204,22 +204,20 @@ pub fn evt_io_device_control(
 fn get_config_descriptor(device_context: &DeviceContext, request: &mut Request) -> NtResult<usize> {
     println!("Get config descriptor");
 
-    let mut required_size = 0_usize;
     let usb_device = device_context
         .usb_device
         .get()
         .expect("USB device should be set");
-    match usb_device.retrieve_config_descriptor(None) {
-        Ok(size) => {
-            required_size = size as usize;
-        }
+
+    let required_size = match usb_device.retrieve_config_descriptor(None) {
+        Ok(size) => size,
         Err(e) => {
             println!("Failed to retrieve config descriptor size: {:?}", e);
             return Err(e.code().into());
         }
-    }
+    };
 
-    let request_buffer = match request.retrieve_output_buffer(required_size) {
+    let request_buffer = match request.retrieve_output_buffer(required_size as usize) {
         Ok(buf) => buf,
         Err(e) => {
             println!("Failed to retrieve output buffer from request: {:?}", e);
@@ -232,11 +230,15 @@ fn get_config_descriptor(device_context: &DeviceContext, request: &mut Request) 
     Ok(bytes_written as usize)
 }
 
-fn reset_device(device: &Device) -> NtResult<usize> {
+fn reset_device(device_context: &DeviceContext) -> NtResult<usize> {
     println!("Reset device");
 
-    let device_context = DeviceContext::get(device);
-    let usb_device = device_context.usb_device.get();
+    stop_all_pipes(device_context);
+
+    let usb_device = device_context.usb_device.get().expect("USB device should be set");
+    usb_device.reset_port_synchronously()?;
+
+    start_all_pipes(device_context)?;
 
     Ok(0)
 }
