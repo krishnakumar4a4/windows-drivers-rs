@@ -45,37 +45,7 @@ mod ioctl;
 
 use bulkrwr::{evt_io_read, evt_io_stop, evt_io_write};
 use interrupt::cont_reader_for_interrupt_endpoint;
-use ioctl::{evt_io_device_control, usb_ioctl_get_interrupt_message};
-
-bitflags::bitflags! {
-    /// Represents the state of the 8 switches on the FX2 device
-    #[repr(transparent)]
-    pub struct SwitchState: u8 {
-        /// Switch 1 of the FX2 device
-        const SWITCH1 = 1 << 0;
-
-        /// Switch 2 of the FX2 device
-        const SWITCH2 = 1 << 1;
-
-        /// Switch 3 of the FX2 device
-        const SWITCH3 = 1 << 2;
-
-        /// Switch 4 of the FX2 device
-        const SWITCH4 = 1 << 3;
-
-        /// Switch 5 of the FX2 device
-        const SWITCH5 = 1 << 4;
-
-        /// Switch 6 of the FX2 device
-        const SWITCH6 = 1 << 5;
-
-        /// Switch 7 of the FX2 device
-        const SWITCH7 = 1 << 6;
-
-        /// Switch 8 of the FX2 device
-        const SWITCH8 = 1 << 7;
-    }
-}
+use ioctl::{SwitchState, evt_io_device_control, usb_ioctl_get_interrupt_message};
 
 #[object_context(Device)]
 struct DeviceContext {

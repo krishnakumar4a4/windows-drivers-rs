@@ -53,7 +53,10 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     }
 }
 
-fn evt_request_read_completion_routine(completion_token: RequestCompletionToken, _target: &IoTarget) {
+fn evt_request_read_completion_routine(
+    completion_token: RequestCompletionToken,
+    _target: &IoTarget,
+) {
     println!("Read completion routine called");
 
     let Some(request) = get_request(completion_token) else {
@@ -132,7 +135,10 @@ pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
     }
 }
 
-fn evt_request_write_completion_routine(completion_token: RequestCompletionToken, _target: &IoTarget) {
+fn evt_request_write_completion_routine(
+    completion_token: RequestCompletionToken,
+    _target: &IoTarget,
+) {
     println!("Write completion routine called");
 
     let Some(request) = get_request(completion_token) else {
@@ -183,7 +189,10 @@ pub fn evt_io_stop(queue: &IoQueue, request_id: RequestId, action_flags: Request
     } else if action_flags.contains(RequestStopActionFlags::PURGE) {
         let device_context = DeviceContext::get(queue.get_device());
         let Some(sent_request) = device_context.get_sent_request(request_id) else {
-            println!("evt_io_stop: request {:?} may have been already completed", request_id);
+            println!(
+                "evt_io_stop: request {:?} may have been already completed",
+                request_id
+            );
             return;
         };
         Request::cancel_sent_request(sent_request);
@@ -193,7 +202,7 @@ pub fn evt_io_stop(queue: &IoQueue, request_id: RequestId, action_flags: Request
 fn get_request(token: RequestCompletionToken) -> Option<Request> {
     let queue = token.get_io_queue();
     let device_context = DeviceContext::get(queue.get_device());
-    device_context.get_sent_request(token.request_id()).map(|s| {
-        s.into_request(token)
-    })
+    device_context
+        .get_sent_request(token.request_id())
+        .map(|s| s.into_request(token))
 }
