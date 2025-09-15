@@ -202,7 +202,10 @@ impl Request {
         }
     }
 
-    pub fn set_completion_routine(&mut self, completion_routine: fn(RequestCompletionToken, &IoTarget)) {
+    pub fn set_completion_routine(
+        &mut self,
+        completion_routine: fn(RequestCompletionToken, &IoTarget),
+    ) {
         let context = RequestContext::get_mut(self);
         context.evt_request_completion_routine = Some(completion_routine);
     }
@@ -384,7 +387,9 @@ pub extern "C" fn __evt_request_read_completion_routine(
     let safe_req = unsafe { Request::from_raw(request as _) };
     let context = RequestContext::get(&safe_req);
     if let Some(callback) = context.evt_request_completion_routine {
-        callback(unsafe { RequestCompletionToken::new(request) }, unsafe { &*(target.cast::<IoTarget>()) });
+        callback(unsafe { RequestCompletionToken::new(request) }, unsafe {
+            &*(target.cast::<IoTarget>())
+        });
     }
 }
 
@@ -565,7 +570,6 @@ impl Handle for SentRequest {
         String::from("SentRequest")
     }
 }
-
 
 #[derive(Debug)]
 pub struct RequestCancellationToken(Request);
