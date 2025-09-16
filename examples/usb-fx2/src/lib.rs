@@ -320,10 +320,6 @@ fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
             return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
         };
 
-        // let Some(interface) = usb_device.get_interface_mut(0) else {
-        //     println!("Failed to get interface 0");
-        //     return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
-        // };
         match pipe_info.pipe_type {
             UsbPipeType::Interrupt => {
                 println!("Interrupt Pipe is 0x{:x}", i);
