@@ -17,6 +17,7 @@ use wdk_sys::{
     WDFUSBDEVICE,
     WDFUSBINTERFACE,
     WDFUSBPIPE,
+    WDF_MEMORY_DESCRIPTOR,
     WDF_NO_OBJECT_ATTRIBUTES,
     WDF_REQUEST_SEND_OPTIONS,
     WDF_USB_BMREQUEST_DIRECTION,
@@ -40,7 +41,7 @@ use super::core::{
     enum_mapping,
     init_wdf_struct,
     io_target::{to_buffer_ptrs, IoTarget, RequestFormatBuffer},
-    memory::Memory,
+    memory::{Memory, MemoryDescriptor},
     object::{impl_handle, impl_ref_counted_handle, Handle},
     request::Request,
     result::{status_codes, NtResult, NtStatus, StatusCodeExt},
@@ -169,18 +170,22 @@ impl UsbDevice {
         .ok()
     }
 
-    // WdfUsbTargetDeviceSendControlTransferSynchronously
-
     pub fn send_control_transfer_synchronously(
         &self,
-        // TODO: support request
-        // request: Option<Request>,
+        request: Option<Request>,
         setup_packet: &UsbControlSetupPacket,
+        memory_descriptor: Option<&MemoryDescriptor>,
         timeout: Timeout,
-        // TODO: support memory descriptor
-        // memory_descriptor: Option<&MemoryDescriptor>,
     ) -> NtResult<u32> {
         let mut setup_packet = setup_packet.into();
+
+        let memory_descriptor: Option<WDF_MEMORY_DESCRIPTOR> =
+            memory_descriptor.map(|desc| desc.into());
+        let memory_descriptor_ptr = memory_descriptor
+            .as_ref()
+            .map_or(ptr::null_mut(), |desc: &WDF_MEMORY_DESCRIPTOR| {
+                (desc as *const WDF_MEMORY_DESCRIPTOR).cast_mut()
+            });
 
         let mut send_options = init_wdf_struct!(WDF_REQUEST_SEND_OPTIONS);
         send_options.Flags |=
@@ -193,10 +198,10 @@ impl UsbDevice {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceSendControlTransferSynchronously,
                 self.as_ptr().cast(),
-                ptr::null_mut(),
+                request.map_or(ptr::null_mut(), |r| r.as_ptr().cast()),
                 &mut send_options,
                 &mut setup_packet,
-                ptr::null_mut(), // TODO: support memory descriptor
+                memory_descriptor_ptr,
                 &mut bytes_transferred
             )
         }

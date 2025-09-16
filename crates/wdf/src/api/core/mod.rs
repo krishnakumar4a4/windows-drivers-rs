@@ -44,11 +44,11 @@ pub enum Timeout {
 }
 
 impl Timeout {
-    pub fn relative_from_millis(millis: u64) -> Self {
+    pub const fn relative_from_millis(millis: u64) -> Self {
         Self::Relative(Duration::from_millis(millis))
     }
 
-    pub fn absolute_from_millis(millis: u64) -> Self {
+    pub const fn absolute_from_millis(millis: u64) -> Self {
         Self::Absolute(Duration::from_millis(millis))
     }
 

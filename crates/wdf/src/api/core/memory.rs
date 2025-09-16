@@ -1,9 +1,18 @@
 use core::{
+    ffi::c_void,
     ops::{Deref, DerefMut},
     ptr,
 };
 
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFMEMORY, WDFMEMORY_OFFSET, _POOL_TYPE};
+use wdk_sys::{
+    call_unsafe_wdf_function_binding,
+    MDL,
+    WDFMEMORY,
+    WDFMEMORY_OFFSET,
+    WDF_MEMORY_DESCRIPTOR,
+    _POOL_TYPE,
+    _WDF_MEMORY_DESCRIPTOR_TYPE,
+};
 
 use super::{
     object::{impl_handle, Handle},
@@ -142,7 +151,60 @@ impl DerefMut for OwnedMemory {
         unsafe { &mut *(self.0.cast::<Memory>()) }
     }
 }
+
+pub enum MemoryDescriptor<'a> {
+    Buffer(&'a [u8]),
+    Mdl {
+        mdl: &'a Mdl,
+        buffer_length: u32, // TODO: this can be arbitrary right. Ensure it is within buffer bounds
+    },
+    Handle {
+        memory: &'a Memory,
+        offset: Option<&'a MemoryOffset>,
+    },
+}
+
+impl<'a> Into<WDF_MEMORY_DESCRIPTOR> for &MemoryDescriptor<'a> {
+    fn into(self) -> WDF_MEMORY_DESCRIPTOR {
+        let mut descriptor = WDF_MEMORY_DESCRIPTOR::default();
+        match self {
+            MemoryDescriptor::Buffer(buf) => {
+                descriptor.Type = _WDF_MEMORY_DESCRIPTOR_TYPE::WdfMemoryDescriptorTypeBuffer;
+                descriptor.u.BufferType.Buffer = buf.as_ptr().cast::<c_void>().cast_mut();
+                descriptor.u.BufferType.Length = buf.len() as u32;
+            }
+            MemoryDescriptor::Mdl { mdl, buffer_length } => {
+                descriptor.Type = _WDF_MEMORY_DESCRIPTOR_TYPE::WdfMemoryDescriptorTypeMdl;
+                descriptor.u.MdlType.Mdl = (*mdl as *const Mdl).cast::<MDL>().cast_mut();
+                descriptor.u.MdlType.BufferLength = *buffer_length;
+            }
+            MemoryDescriptor::Handle { memory, offset } => {
+                descriptor.Type = _WDF_MEMORY_DESCRIPTOR_TYPE::WdfMemoryDescriptorTypeHandle;
+                descriptor.u.HandleType.Memory = memory.as_ptr().cast();
+                descriptor.u.HandleType.Offsets = offset.map_or(ptr::null_mut(), |o| {
+                    (o as *const MemoryOffset)
+                        .cast::<WDFMEMORY_OFFSET>()
+                        .cast_mut()
+                });
+            }
+        };
+
+        descriptor
+    }
+}
+
+// TODO: define Mdl better
+// Add the relevant fields like flags
+// and maybe an iterator for Next
+// plus buffer length to prevent
+// buffer overflows
+#[repr(C)]
+pub struct Mdl {
+    _private: [u8; 0], // Prevents instantiation of the struct from driver code
+}
+
 #[derive(Debug)]
+#[repr(C)] // To allow casting to WDFMEMORY_OFFSET
 pub struct MemoryOffset {
     pub buffer_offset: usize,
     pub buffer_length: usize,
