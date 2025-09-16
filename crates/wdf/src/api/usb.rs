@@ -11,6 +11,9 @@ use wdk_sys::{
     USBD_STATUS,
     USBD_VERSION_INFORMATION,
     USB_INTERFACE_DESCRIPTOR,
+    USB_REQUEST_CLEAR_FEATURE,
+    USB_REQUEST_GET_STATUS,
+    USB_REQUEST_SET_FEATURE,
     WDFCONTEXT,
     WDFMEMORY,
     WDFMEMORY_OFFSET,
@@ -41,7 +44,7 @@ use super::core::{
     enum_mapping,
     init_wdf_struct,
     io_target::{to_buffer_ptrs, IoTarget, RequestFormatBuffer},
-    memory::{Memory, MemoryDescriptor},
+    memory::{Memory, MemoryDescriptor, MemoryDescriptorMut},
     object::{impl_handle, impl_ref_counted_handle, Handle},
     request::Request,
     result::{status_codes, NtResult, NtStatus, StatusCodeExt},
@@ -173,22 +176,13 @@ impl UsbDevice {
     pub fn send_control_transfer_synchronously(
         &self,
         request: Option<Request>,
-        setup_packet: &UsbControlSetupPacket,
-        memory_descriptor: Option<&MemoryDescriptor>,
+        transfer: &UsbControlTransfer<'_>,
         timeout: Timeout,
     ) -> NtResult<u32> {
-        // If the transfer direction is device to host,
-        // make sure that memory is provided and it is mutable
-        if setup_packet.bm_direction() == UsbBmRequestDirection::DeviceToHost
-            && !memory_descriptor.is_some_and(|md| md.is_mut())
-        {
-            return Err(status_codes::STATUS_INVALID_PARAMETER.into());
-        }
+        let mut setup_packet = transfer.into();
 
-        let mut setup_packet = setup_packet.into();
+        let memory_descriptor: Option<WDF_MEMORY_DESCRIPTOR> = transfer.into();
 
-        let memory_descriptor: Option<WDF_MEMORY_DESCRIPTOR> =
-            memory_descriptor.map(|desc| desc.into());
         let memory_descriptor_ptr = memory_descriptor
             .as_ref()
             .map_or(ptr::null_mut(), |desc: &WDF_MEMORY_DESCRIPTOR| {
@@ -791,14 +785,33 @@ impl UsbControlSetupPacket {
         request: u8,
         value: u16,
         index: u16,
+        length: u16,
     ) -> Self {
         Self {
             bm: Self::to_bm(recipient, request_type, direction),
             request,
             value,
             index,
-            length: 0,
+            length,
         }
+    }
+
+    pub fn new_class(
+        recipient: UsbBmRequestRecipient,
+        direction: UsbBmRequestDirection,
+        request: u8,
+        value: u16,
+        index: u16,
+    ) -> Self {
+        Self::new(
+            recipient,
+            UsbBmRequestType::Class,
+            direction,
+            request,
+            value,
+            index,
+            0,
+        )
     }
 
     pub fn new_vendor(
@@ -815,6 +828,41 @@ impl UsbControlSetupPacket {
             request,
             value,
             index,
+            0,
+        )
+    }
+
+    pub fn new_feature(
+        recipient: UsbBmRequestRecipient,
+        feature_selector: u16,
+        index: u16,
+        set_feature: bool,
+    ) -> Self {
+        let request = if set_feature {
+            USB_REQUEST_SET_FEATURE
+        } else {
+            USB_REQUEST_CLEAR_FEATURE
+        };
+        Self::new(
+            recipient,
+            UsbBmRequestType::Standard,
+            UsbBmRequestDirection::HostToDevice,
+            request as u8,
+            feature_selector,
+            index,
+            0,
+        )
+    }
+
+    pub fn new_get_status(recipient: UsbBmRequestRecipient, index: u16) -> Self {
+        Self::new(
+            recipient,
+            UsbBmRequestType::Standard,
+            UsbBmRequestDirection::DeviceToHost,
+            USB_REQUEST_GET_STATUS as u8,
+            0,
+            index,
+            0,
         )
     }
 
@@ -891,6 +939,128 @@ impl Into<WDF_USB_CONTROL_SETUP_PACKET> for &UsbControlSetupPacket {
         raw.Packet.wLength = self.length;
 
         raw
+    }
+}
+
+pub enum UsbMemoryDescriptorKind<'a> {
+    HostToDevice(Option<&'a MemoryDescriptor<'a>>),
+    DeviceToHost(&'a MemoryDescriptorMut<'a>),
+}
+
+impl Into<UsbBmRequestDirection> for &UsbMemoryDescriptorKind<'_> {
+    fn into(self) -> UsbBmRequestDirection {
+        match self {
+            UsbMemoryDescriptorKind::HostToDevice(_) => UsbBmRequestDirection::HostToDevice,
+            UsbMemoryDescriptorKind::DeviceToHost(_) => UsbBmRequestDirection::DeviceToHost,
+        }
+    }
+}
+
+pub enum UsbControlTransfer<'a> {
+    Class {
+        recipient: UsbBmRequestRecipient,
+        request: u8,
+        value: u16,
+        index: u16,
+        memory_descriptor: UsbMemoryDescriptorKind<'a>,
+    },
+    Vendor {
+        recipient: UsbBmRequestRecipient,
+        request: u8,
+        value: u16,
+        index: u16,
+        memory_descriptor: UsbMemoryDescriptorKind<'a>,
+    },
+    Feature {
+        recipient: UsbBmRequestRecipient,
+        feature_selector: u16,
+        index: u16,
+        set_feature: bool,
+        memory_descriptor: &'a MemoryDescriptor<'a>,
+    },
+    GetStatus {
+        recipient: UsbBmRequestRecipient,
+        index: u16,
+        memory_descriptor: &'a MemoryDescriptorMut<'a>,
+    },
+}
+
+impl Into<UsbControlSetupPacket> for &UsbControlTransfer<'_> {
+    fn into(self) -> UsbControlSetupPacket {
+        match self {
+            UsbControlTransfer::Class {
+                recipient,
+                request,
+                value,
+                index,
+                memory_descriptor,
+            } => UsbControlSetupPacket::new_class(
+                *recipient,
+                memory_descriptor.into(),
+                *request,
+                *value,
+                *index,
+            ),
+            UsbControlTransfer::Vendor {
+                recipient,
+                request,
+                value,
+                index,
+                memory_descriptor,
+            } => UsbControlSetupPacket::new_vendor(
+                *recipient,
+                memory_descriptor.into(),
+                *request,
+                *value,
+                *index,
+            ),
+            UsbControlTransfer::Feature {
+                recipient,
+                feature_selector,
+                index,
+                set_feature,
+                memory_descriptor: _,
+            } => UsbControlSetupPacket::new_feature(
+                *recipient,
+                *feature_selector,
+                *index,
+                *set_feature,
+            ),
+            UsbControlTransfer::GetStatus {
+                recipient,
+                index,
+                memory_descriptor: _,
+            } => UsbControlSetupPacket::new_get_status(*recipient, *index),
+        }
+    }
+}
+
+impl Into<WDF_USB_CONTROL_SETUP_PACKET> for &UsbControlTransfer<'_> {
+    fn into(self) -> WDF_USB_CONTROL_SETUP_PACKET {
+        let packet: UsbControlSetupPacket = self.into();
+        (&packet).into()
+    }
+}
+
+impl Into<Option<WDF_MEMORY_DESCRIPTOR>> for &UsbControlTransfer<'_> {
+    fn into(self) -> Option<WDF_MEMORY_DESCRIPTOR> {
+        match self {
+            UsbControlTransfer::Class {
+                memory_descriptor, ..
+            }
+            | UsbControlTransfer::Vendor {
+                memory_descriptor, ..
+            } => match memory_descriptor {
+                UsbMemoryDescriptorKind::HostToDevice(desc_opt) => desc_opt.map(|md| md.into()),
+                UsbMemoryDescriptorKind::DeviceToHost(desc) => Some((*desc).into()),
+            },
+            UsbControlTransfer::Feature {
+                memory_descriptor, ..
+            } => Some((*memory_descriptor).into()),
+            UsbControlTransfer::GetStatus {
+                memory_descriptor, ..
+            } => Some((*memory_descriptor).into()),
+        }
     }
 }
 

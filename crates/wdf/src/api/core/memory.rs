@@ -156,14 +156,8 @@ impl DerefMut for OwnedMemory {
 /// kinds of memory buffers
 pub enum MemoryDescriptor<'a> {
     Buffer(&'a [u8]),
-    BufferMut(&'a mut [u8]),
     Mdl {
         mdl: &'a Mdl,
-        buffer_length: u32, /* TODO: this can be arbitrary length. Ensure it is within buffer
-                             * bounds */
-    },
-    MdlMut {
-        mdl: &'a mut Mdl,
         buffer_length: u32, /* TODO: this can be arbitrary length. Ensure it is within buffer
                              * bounds */
     },
@@ -171,77 +165,85 @@ pub enum MemoryDescriptor<'a> {
         memory: &'a Memory,
         offset: Option<&'a MemoryOffset>,
     },
-    HandleMut {
-        memory: &'a mut Memory,
-        offset: Option<&'a MemoryOffset>,
-    },
-}
-
-impl<'a> MemoryDescriptor<'a> {
-    /// Returns true if the memory descriptor
-    /// allows mutable access to its contents
-    pub fn is_mut(&self) -> bool {
-        matches!(
-            self,
-            MemoryDescriptor::BufferMut { .. }
-                | MemoryDescriptor::MdlMut { .. }
-                | MemoryDescriptor::HandleMut { .. }
-        )
-    }
 }
 
 impl<'a> Into<WDF_MEMORY_DESCRIPTOR> for &MemoryDescriptor<'a> {
     fn into(self) -> WDF_MEMORY_DESCRIPTOR {
-        enum TempDescriptor<'a> {
-            Buf(&'a [u8]),
-            Mdl(&'a Mdl, u32),
-            Handle(&'a Memory, Option<&'a MemoryOffset>),
-        }
-
-        // Convert to a temporary enum to avoid errors due to
-        // type differences between mutable and immutable
-        // references
-        let temp_descriptor = match self {
-            MemoryDescriptor::Buffer(buf) => TempDescriptor::Buf(buf),
-            MemoryDescriptor::BufferMut(buf) => TempDescriptor::Buf(buf),
-            MemoryDescriptor::Mdl { mdl, buffer_length } => {
-                TempDescriptor::Mdl(mdl, *buffer_length)
-            }
-            MemoryDescriptor::MdlMut { mdl, buffer_length } => {
-                TempDescriptor::Mdl(mdl, *buffer_length)
-            }
-            MemoryDescriptor::Handle { memory, offset } => TempDescriptor::Handle(memory, *offset),
-            MemoryDescriptor::HandleMut { memory, offset } => {
-                TempDescriptor::Handle(memory, *offset)
-            }
-        };
-
         let mut descriptor = WDF_MEMORY_DESCRIPTOR::default();
 
-        match temp_descriptor {
-            TempDescriptor::Buf(buf) => {
-                descriptor.Type = _WDF_MEMORY_DESCRIPTOR_TYPE::WdfMemoryDescriptorTypeBuffer;
-                descriptor.u.BufferType.Buffer = buf.as_ptr().cast::<c_void>().cast_mut();
-                descriptor.u.BufferType.Length = buf.len() as u32;
+        match self {
+            MemoryDescriptor::Buffer(buf) => {
+                set_buffer(buf, &mut descriptor);
             }
-            TempDescriptor::Mdl(mdl, buffer_length) => {
-                descriptor.Type = _WDF_MEMORY_DESCRIPTOR_TYPE::WdfMemoryDescriptorTypeMdl;
-                descriptor.u.MdlType.Mdl = (mdl as *const Mdl).cast::<MDL>().cast_mut();
-                descriptor.u.MdlType.BufferLength = buffer_length;
+            MemoryDescriptor::Mdl { mdl, buffer_length } => {
+                set_mdl(mdl, *buffer_length, &mut descriptor);
             }
-            TempDescriptor::Handle(memory, offset) => {
-                descriptor.Type = _WDF_MEMORY_DESCRIPTOR_TYPE::WdfMemoryDescriptorTypeHandle;
-                descriptor.u.HandleType.Memory = memory.as_ptr().cast();
-                descriptor.u.HandleType.Offsets = offset.map_or(ptr::null_mut(), |o| {
-                    (o as *const MemoryOffset)
-                        .cast::<WDFMEMORY_OFFSET>()
-                        .cast_mut()
-                });
+            MemoryDescriptor::Handle { memory, offset } => {
+                set_handle(memory, *offset, &mut descriptor);
             }
         };
 
         descriptor
     }
+}
+
+pub enum MemoryDescriptorMut<'a> {
+    Buffer(&'a mut [u8]),
+    Mdl {
+        mdl: &'a mut Mdl,
+        buffer_length: u32, /* TODO: this can be arbitrary length. Ensure it is within buffer
+                             * bounds */
+    },
+    Handle {
+        memory: &'a mut Memory,
+        offset: Option<&'a MemoryOffset>,
+    },
+}
+
+impl<'a> Into<WDF_MEMORY_DESCRIPTOR> for &MemoryDescriptorMut<'a> {
+    fn into(self) -> WDF_MEMORY_DESCRIPTOR {
+        let mut descriptor = WDF_MEMORY_DESCRIPTOR::default();
+
+        match self {
+            MemoryDescriptorMut::Buffer(buf) => {
+                set_buffer(buf, &mut descriptor);
+            }
+            MemoryDescriptorMut::Mdl { mdl, buffer_length } => {
+                set_mdl(mdl, *buffer_length, &mut descriptor);
+            }
+            MemoryDescriptorMut::Handle { memory, offset } => {
+                set_handle(memory, *offset, &mut descriptor);
+            }
+        };
+
+        descriptor
+    }
+}
+
+fn set_buffer(buf: &[u8], descriptor: &mut WDF_MEMORY_DESCRIPTOR) {
+    descriptor.Type = _WDF_MEMORY_DESCRIPTOR_TYPE::WdfMemoryDescriptorTypeBuffer;
+    descriptor.u.BufferType.Buffer = buf.as_ptr().cast::<c_void>().cast_mut();
+    descriptor.u.BufferType.Length = buf.len() as u32;
+}
+
+fn set_mdl(mdl: &Mdl, buffer_length: u32, descriptor: &mut WDF_MEMORY_DESCRIPTOR) {
+    descriptor.Type = _WDF_MEMORY_DESCRIPTOR_TYPE::WdfMemoryDescriptorTypeMdl;
+    descriptor.u.MdlType.Mdl = (mdl as *const Mdl).cast::<MDL>().cast_mut();
+    descriptor.u.MdlType.BufferLength = buffer_length;
+}
+
+fn set_handle(
+    memory: &Memory,
+    offset: Option<&MemoryOffset>,
+    descriptor: &mut WDF_MEMORY_DESCRIPTOR,
+) {
+    descriptor.Type = _WDF_MEMORY_DESCRIPTOR_TYPE::WdfMemoryDescriptorTypeHandle;
+    descriptor.u.HandleType.Memory = memory.as_ptr().cast();
+    descriptor.u.HandleType.Offsets = offset.map_or(ptr::null_mut(), |o| {
+        (o as *const MemoryOffset)
+            .cast::<WDFMEMORY_OFFSET>()
+            .cast_mut()
+    });
 }
 
 // TODO: define Mdl better
