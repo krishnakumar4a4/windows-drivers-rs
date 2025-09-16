@@ -1,3 +1,5 @@
+use core::mem::size_of;
+
 use wdf::{
     Device,
     FILE_READ_ACCESS,
@@ -6,6 +8,8 @@ use wdf::{
     IoTargetSentIoAction,
     METHOD_BUFFERED,
     METHOD_OUT_DIRECT,
+    MemoryDescriptor,
+    MemoryDescriptorMut,
     NtResult,
     NtStatus,
     Request,
@@ -13,7 +17,12 @@ use wdf::{
     ctl_code,
     println,
     status_codes,
-    usb::{UsbBmRequestDirection, UsbBmRequestRecipient, UsbControlSetupPacket},
+    usb::{
+        UsbBmRequestDirection,
+        UsbBmRequestRecipient,
+        UsbControlTransfer,
+        UsbMemoryDescriptorKind,
+    },
 };
 
 use crate::DeviceContext;
@@ -90,9 +99,11 @@ const USBFX2LK_READ_7SEGMENT_DISPLAY: u8 = 0xD4;
 const USBFX2LK_READ_SWITCHES: u8 = 0xD6;
 const USBFX2LK_READ_BARGRAPH_DISPLAY: u8 = 0xD7;
 const USBFX2LK_SET_BARGRAPH_DISPLAY: u8 = 0xD8;
-const USBFX2LK_IS_HIGH_SPEED: u8 = 0xD9;
+// const USBFX2LK_IS_HIGH_SPEED: u8 = 0xD9;
 const USBFX2LK_REENUMERATE: u8 = 0xDA;
 const USBFX2LK_SET_7SEGMENT_DISPLAY: u8 = 0xDB;
+
+const DEFAULT_CONTROL_TRANSFER_TIMEOUT: Timeout = Timeout::relative_from_millis(5000);
 
 bitflags::bitflags! {
     /// Represents the state of the bar graph on the FX2 device
@@ -177,7 +188,9 @@ pub fn evt_io_device_control(
         }
         IOCTL_OSRUSBFX2_RESET_DEVICE => reset_device(device_context),
         IOCTL_OSRUSBFX2_REENUMERATE_DEVICE => reenumerate_device(device_context),
-        IOCTL_OSRUSBFX2_GET_BAR_GRAPH_DISPLAY => get_bar_graph_display(device_context),
+        IOCTL_OSRUSBFX2_GET_BAR_GRAPH_DISPLAY => {
+            get_bar_graph_display(device_context, &mut request)
+        }
         IOCTL_OSRUSBFX2_SET_BAR_GRAPH_DISPLAY => set_bar_graph_display(device_context, &request),
         IOCTL_OSRUSBFX2_GET_7_SEGMENT_DISPLAY => {
             get_seven_segment_display(device_context, &mut request)
@@ -185,7 +198,7 @@ pub fn evt_io_device_control(
         IOCTL_OSRUSBFX2_SET_7_SEGMENT_DISPLAY => {
             set_seven_segment_display(device_context, &request)
         }
-        IOCTL_OSRUSBFX2_READ_SWITCHES => read_switches(device_context, &mut request),
+        IOCTL_OSRUSBFX2_READ_SWITCHES => get_switch_state(device_context, &mut request),
         IOCTL_OSRUSBFX2_GET_INTERRUPT_MESSAGE => {
             get_interrupt_message(device_context, &mut request, &mut request_pending)
         }
@@ -253,36 +266,67 @@ fn reset_device(device_context: &DeviceContext) -> NtResult<usize> {
 fn reenumerate_device(device_context: &DeviceContext) -> NtResult<usize> {
     println!("Re-enumerate device");
 
-    let setup_packet = UsbControlSetupPacket::new_vendor(
+    send_vendor_command(
         UsbBmRequestDirection::HostToDevice,
-        UsbBmRequestRecipient::Device,
         USBFX2LK_REENUMERATE,
-        0,
-        0,
-    );
-
-    let usb_device = device_context
-        .usb_device
-        .get()
-        .expect("USB device should be set");
-
-    usb_device
-        .send_control_transfer_synchronously(&setup_packet, Timeout::relative_from_millis(10000))
-        .inspect_err(|e| println!("Failed to send re-enumerate control transfer: {:?}", e))?;
+        None,
+        device_context,
+    )
+    .inspect_err(|e| println!("Failed to re-enumerate device: {:?}", e))?;
 
     Ok(0)
 }
 
-fn get_bar_graph_display(device_context: &DeviceContext) -> NtResult<usize> {
+fn get_bar_graph_display(device_context: &DeviceContext, request: &mut Request) -> NtResult<usize> {
     println!("Get bar graph display");
 
-    Ok(0)
+    let buffer = request.retrieve_output_buffer(size_of::<BarGraphState>())?;
+    if buffer.len() < size_of::<BarGraphState>() {
+        println!(
+            "Output buffer too small for getting bar graph state: {}",
+            buffer.len()
+        );
+        return Err(status_codes::STATUS_BUFFER_TOO_SMALL.into());
+    }
+
+    let bytes_transferred = send_vendor_command(
+        UsbBmRequestDirection::DeviceToHost,
+        USBFX2LK_READ_BARGRAPH_DISPLAY,
+        Some(buffer),
+        device_context,
+    )
+    .inspect_err(|e| println!("Failed to get bar graph state: {:?}", e))?;
+
+    println!("Bar graph state: {:#X}", buffer[0]);
+
+    Ok(bytes_transferred)
 }
 
 fn set_bar_graph_display(device_context: &DeviceContext, request: &Request) -> NtResult<usize> {
     println!("Set bar graph display");
 
-    Ok(0)
+    let buffer = request.retrieve_input_buffer(size_of::<BarGraphState>())?;
+    if buffer.len() < size_of::<BarGraphState>() {
+        println!(
+            "Input buffer too small for setting bar graph state: {}",
+            buffer.len()
+        );
+        return Err(status_codes::STATUS_BUFFER_TOO_SMALL.into());
+    }
+
+    let buf_mut = &mut [buffer[0]; 1];
+
+    let bytes_transferred = send_vendor_command(
+        UsbBmRequestDirection::DeviceToHost,
+        USBFX2LK_SET_BARGRAPH_DISPLAY,
+        Some(buf_mut),
+        device_context,
+    )
+    .inspect_err(|e| println!("Failed to set bar graph state: {:?}", e))?;
+
+    println!("Bar graph state: {:#X}", buffer[0]);
+
+    Ok(bytes_transferred)
 }
 
 fn get_seven_segment_display(
@@ -291,19 +335,78 @@ fn get_seven_segment_display(
 ) -> NtResult<usize> {
     println!("Get 7-segment display");
 
-    Ok(0)
+    let buffer = request.retrieve_output_buffer(size_of::<u8>())?;
+    if buffer.len() < size_of::<u8>() {
+        println!(
+            "Output buffer too small for getting 7-segment state: {}",
+            buffer.len()
+        );
+        return Err(status_codes::STATUS_BUFFER_TOO_SMALL.into());
+    }
+
+    let bytes_transferred = send_vendor_command(
+        UsbBmRequestDirection::DeviceToHost,
+        USBFX2LK_READ_7SEGMENT_DISPLAY,
+        Some(buffer),
+        device_context,
+    )
+    .inspect_err(|e| println!("Failed to get 7-segment: {:?}", e))?;
+
+    println!("7-segment state: {:#X}", buffer[0]);
+
+    Ok(bytes_transferred)
 }
 
 fn set_seven_segment_display(device_context: &DeviceContext, request: &Request) -> NtResult<usize> {
     println!("Set 7-segment display");
 
-    Ok(0)
+    let buffer = request.retrieve_input_buffer(size_of::<u8>())?;
+    if buffer.len() < size_of::<u8>() {
+        println!(
+            "Input buffer too small for setting 7-segment state: {}",
+            buffer.len()
+        );
+        return Err(status_codes::STATUS_BUFFER_TOO_SMALL.into());
+    }
+
+    let buf_mut = &mut [buffer[0]; 1];
+
+    let bytes_transferred = send_vendor_command(
+        UsbBmRequestDirection::DeviceToHost,
+        USBFX2LK_SET_7SEGMENT_DISPLAY,
+        Some(buf_mut),
+        device_context,
+    )
+    .inspect_err(|e| println!("Failed to set 7-segment: {:?}", e))?;
+
+    println!("7-segment state: {:#X}", buffer[0]);
+
+    Ok(bytes_transferred)
 }
 
-fn read_switches(device_context: &DeviceContext, request: &mut Request) -> NtResult<usize> {
+fn get_switch_state(device_context: &DeviceContext, request: &mut Request) -> NtResult<usize> {
     println!("Read switches");
 
-    Ok(size_of::<SwitchState>())
+    let buffer = request.retrieve_output_buffer(size_of::<SwitchState>())?;
+    if buffer.len() < size_of::<SwitchState>() {
+        println!(
+            "Output buffer too small for getting switch state: {}",
+            buffer.len()
+        );
+        return Err(status_codes::STATUS_BUFFER_TOO_SMALL.into());
+    }
+
+    let bytes_transferred = send_vendor_command(
+        UsbBmRequestDirection::DeviceToHost,
+        USBFX2LK_READ_SWITCHES,
+        Some(buffer),
+        device_context,
+    )
+    .inspect_err(|e| println!("Failed to get switch state: {:?}", e))?;
+
+    println!("Switch state: {:#X}", buffer[0]);
+
+    Ok(bytes_transferred)
 }
 
 fn get_interrupt_message(
@@ -397,4 +500,49 @@ fn stop_all_pipes(device_context: &DeviceContext) {
         .get_bulk_write_pipe()
         .get_io_target()
         .stop(IoTargetSentIoAction::CancelSentIo);
+}
+
+fn send_vendor_command(
+    direction: UsbBmRequestDirection,
+    request: u8,
+    mut buffer: Option<&mut [u8]>,
+    device_context: &DeviceContext,
+) -> NtResult<usize> {
+    let mem_desc: Option<MemoryDescriptor>;
+    let mem_desc_mut: MemoryDescriptorMut;
+
+    let memory_descriptor = match direction {
+        UsbBmRequestDirection::HostToDevice => {
+            mem_desc = buffer.map(|b| MemoryDescriptor::Buffer(&b[..]));
+            UsbMemoryDescriptorKind::HostToDevice(mem_desc.as_ref())
+        }
+        UsbBmRequestDirection::DeviceToHost => {
+            let buffer = buffer
+                .as_mut()
+                .ok_or(status_codes::STATUS_INVALID_PARAMETER)?;
+            mem_desc_mut = MemoryDescriptorMut::Buffer(buffer);
+            UsbMemoryDescriptorKind::DeviceToHost(&mem_desc_mut)
+        }
+    };
+
+    let transfer = UsbControlTransfer::Vendor {
+        recipient: UsbBmRequestRecipient::Device,
+        request,
+        value: 0,
+        index: 0,
+        memory_descriptor,
+    };
+
+    let usb_device = device_context
+        .usb_device
+        .get()
+        .expect("USB device should be set");
+
+    let bytes_transferred = usb_device.send_control_transfer_synchronously(
+        None,
+        &transfer,
+        DEFAULT_CONTROL_TRANSFER_TIMEOUT,
+    )?;
+
+    Ok(bytes_transferred as usize)
 }
