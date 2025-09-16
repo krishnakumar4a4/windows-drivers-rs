@@ -345,13 +345,7 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
                             bytes_returned = 0;
                         }
 
-                        let request_status = if reader_status.is_success() {
-                            reader_status
-                        } else {
-                            status_codes::STATUS_SUCCESS.into()
-                        };
-
-                        (request_status, bytes_returned)
+                        (reader_status, bytes_returned)
                     }
                     Err(e) => {
                         println!("Failed to retrieve output buffer from request: {:?}", e);
