@@ -416,6 +416,17 @@ fn get_interrupt_message(
 ) -> NtResult<usize> {
     println!("Get interrupt message");
 
+    *request_pending = false;
+
+    let interrupt_queue = device_context
+        .interrupt_msg_queue
+        .get()
+        .expect("Interrupt message queue should be set");
+
+    request
+        .forward_to_io_queue(&interrupt_queue)
+        .inspect(|_| *request_pending = true)?;
+
     Ok(0)
 }
 

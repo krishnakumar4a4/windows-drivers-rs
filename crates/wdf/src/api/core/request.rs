@@ -227,6 +227,17 @@ impl Request {
         }
     }
 
+    pub fn forward_to_io_queue(&self, queue: &IoQueue) -> NtResult<()> {
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestForwardToIoQueue,
+                self.as_ptr().cast(),
+                queue.as_ptr().cast()
+            )
+        }
+        .ok()
+    }
+
     pub fn get_completion_params<'a>(&'a self) -> RequestCompletionParams<'a> {
         let mut raw_params = init_wdf_struct!(WDF_REQUEST_COMPLETION_PARAMS);
         unsafe {
