@@ -177,6 +177,14 @@ impl UsbDevice {
         memory_descriptor: Option<&MemoryDescriptor>,
         timeout: Timeout,
     ) -> NtResult<u32> {
+        // If the transfer direction is device to host,
+        // make sure that memory is provided and it is mutable
+        if setup_packet.bm_direction() == UsbBmRequestDirection::DeviceToHost
+            && !memory_descriptor.is_some_and(|md| md.is_mut())
+        {
+            return Err(status_codes::STATUS_INVALID_PARAMETER.into());
+        }
+
         let mut setup_packet = setup_packet.into();
 
         let memory_descriptor: Option<WDF_MEMORY_DESCRIPTOR> =
@@ -760,6 +768,12 @@ pub struct UsbControlSetupPacket {
 }
 
 impl UsbControlSetupPacket {
+    const DIRECTION_MASK: u8 = 0b1;
+    const DIRECTION_SHIFT_BITS: u8 = 7;
+    const RECIPIENT_MASK: u8 = 0b11;
+    const REQUEST_TYPE_MASK: u8 = 0b11;
+    const REQUEST_TYPE_SHIFT_BITS: u8 = 5;
+
     pub fn from_bytes(bytes: [u8; 8]) -> Self {
         Self {
             bm: bytes[0],
@@ -770,15 +784,16 @@ impl UsbControlSetupPacket {
         }
     }
 
-    pub fn new_vendor(
-        direction: UsbBmRequestDirection,
+    pub fn new(
         recipient: UsbBmRequestRecipient,
+        request_type: UsbBmRequestType,
+        direction: UsbBmRequestDirection,
         request: u8,
         value: u16,
         index: u16,
     ) -> Self {
         Self {
-            bm: Self::to_bm(recipient, UsbBmRequestType::Vendor, direction),
+            bm: Self::to_bm(recipient, request_type, direction),
             request,
             value,
             index,
@@ -786,8 +801,56 @@ impl UsbControlSetupPacket {
         }
     }
 
+    pub fn new_vendor(
+        recipient: UsbBmRequestRecipient,
+        direction: UsbBmRequestDirection,
+        request: u8,
+        value: u16,
+        index: u16,
+    ) -> Self {
+        Self::new(
+            recipient,
+            UsbBmRequestType::Vendor,
+            direction,
+            request,
+            value,
+            index,
+        )
+    }
+
     pub fn as_bytes(&self) -> &[u8; mem::size_of::<Self>()] {
         unsafe { &*((self as *const Self).cast::<[u8; mem::size_of::<Self>()]>()) }
+    }
+
+    pub fn bm_recepient(&self) -> UsbBmRequestRecipient {
+        let recip_bits: u8 = self.bm & Self::RECIPIENT_MASK;
+        unsafe { mem::transmute(recip_bits) }
+    }
+
+    pub fn bm_request_type(&self) -> UsbBmRequestType {
+        let type_bits: u8 = (self.bm >> Self::REQUEST_TYPE_SHIFT_BITS) & Self::REQUEST_TYPE_MASK;
+        unsafe { mem::transmute(type_bits) }
+    }
+
+    pub fn bm_direction(&self) -> UsbBmRequestDirection {
+        let dir_bit: u8 = (self.bm >> Self::DIRECTION_SHIFT_BITS) & Self::DIRECTION_MASK;
+        unsafe { mem::transmute(dir_bit) }
+    }
+
+    pub fn request(&self) -> u8 {
+        self.request
+    }
+
+    pub fn value(&self) -> u16 {
+        self.value
+    }
+
+    pub fn index(&self) -> u16 {
+        self.index
+    }
+
+    pub fn length(&self) -> u16 {
+        self.length
     }
 
     fn to_bm(
@@ -796,9 +859,9 @@ impl UsbControlSetupPacket {
         dir: UsbBmRequestDirection,
     ) -> u8 {
         let mut bm = 0;
-        bm |= (recipient as u8) & 0b11;
-        bm |= ((typ as u8) & 0b11) << 5;
-        bm |= ((dir as u8) & 0b1) << 7;
+        bm |= (recipient as u8) & Self::RECIPIENT_MASK;
+        bm |= ((typ as u8) & Self::REQUEST_TYPE_MASK) << Self::REQUEST_TYPE_SHIFT_BITS;
+        bm |= ((dir as u8) & Self::DIRECTION_MASK) << Self::DIRECTION_SHIFT_BITS;
         bm
     }
 }
@@ -833,6 +896,7 @@ impl Into<WDF_USB_CONTROL_SETUP_PACKET> for &UsbControlSetupPacket {
 
 enum_mapping! {
     infallible;
+    #[repr(u8)]
     pub enum UsbBmRequestDirection: WDF_USB_BMREQUEST_DIRECTION {
         HostToDevice = BmRequestHostToDevice,
         DeviceToHost = BmRequestDeviceToHost
@@ -841,6 +905,7 @@ enum_mapping! {
 
 enum_mapping! {
     infallible;
+    #[repr(u8)]
     pub enum UsbBmRequestRecipient: WDF_USB_BMREQUEST_RECIPIENT {
         Device = BmRequestToDevice,
         Interface = BmRequestToInterface,
@@ -851,6 +916,7 @@ enum_mapping! {
 
 enum_mapping! {
     infallible;
+    #[repr(u8)]
     pub enum UsbBmRequestType: WDF_USB_BMREQUEST_TYPE {
         Standard = BmRequestStandard,
         Class = BmRequestClass,
