@@ -1,8 +1,8 @@
 [package]
 edition = "2024"
-name = "usb-fx2"
+name = "osrusbfx2"
 version = "0.1.0"
-description = "A sample KMDF driver that demonstrates KMDF in safe Rust"
+description = "A USB driver for the OSR USB-FX2 kit"
 repository = "https://github.com/microsoft/windows-drivers-rs"
 license = "MIT OR Apache-2.0"
 keywords = ["windows", "driver", "sample", "example", "wdf", "usb"]

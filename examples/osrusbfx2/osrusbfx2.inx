@@ -1,0 +1,118 @@
+;/*++
+;
+;Copyright (c) Microsoft Corporation.  All rights reserved.
+;
+;   THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY
+;   KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+;   IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A PARTICULAR
+;   PURPOSE.
+;
+;Module Name:
+;
+;    OSRUSBFX2.INF
+;
+;Abstract:
+;    Installation inf for OSR USB-FX2 Learning Kit
+;
+;Important:
+;    This INF depends on features for the Driver Store DIRIDs which are available starting Windows 10 1709
+;
+;--*/
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=Sample
+ClassGuid={78A1C341-4539-11d3-B88D-00C04FAD5171}
+Provider=%ProviderName%
+DriverVer=03/20/2003,5.0.3788.0
+CatalogFile=KmdfSamples.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1=%Disk_Description%,,,
+
+[SourceDisksFiles]
+osrusbfx2.sys = 1
+
+; ================= Class section =====================
+
+[ClassInstall32]
+Addreg=SampleClassReg
+
+[SampleClassReg]
+HKR,,,0,%ClassName%
+HKR,,Icon,,-5
+
+
+; ================= Device section =====================
+
+[Manufacturer]
+%MfgName%=OSR,NT$ARCH$.10.0...16299
+
+[OSR.NT$ARCH$.10.0...16299]
+%USB\VID_045E&PID_930A.DeviceDesc%=osrusbfx2.Dev, USB\VID_0547&PID_1002
+%Switch.DeviceDesc%=Switch.Dev, {6FDE7521-1B65-48ae-B628-80BE62016026}\OsrUsbFxRawPdo
+
+
+[osrusbfx2.Dev.NT]
+CopyFiles=osrusbfx2.Files.Ext
+
+[Switch.Dev.NT]
+;dummy section
+
+[Switch.Dev.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%, 
+
+[osrusbfx2.Dev.NT.Services]
+AddService = osrusbfx2, %SPSVCINST_ASSOCSERVICE%, osrusbfx2.AddService
+
+[osrusbfx2.AddService]
+DisplayName    = %osrusbfx2.SvcDesc%
+ServiceType    = 1                  ; SERVICE_KERNEL_DRIVER
+StartType      = 3                  ; SERVICE_DEMAND_START
+ErrorControl   = 1                  ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\osrusbfx2.sys
+
+[osrusbfx2.Files.Ext]
+osrusbfx2.sys
+
+; ================= OsrUsb Interface Installation ============================
+; This sample sets the custom capability programatically in the code which
+; allows Windows store apps for device to access this device interface through 
+; Windows.Devices.Custom namespace. If you prefer to set this in INF, uncomment
+; the below section (including relevant Strings) and remove the block of 
+; code which refers to "Adding Custom Capability".
+
+;[OsrUsb_Install.NT.Interfaces]
+;AddInterface="{%GUID_DEVINTERFACE_OSRUSBFX2%}", , OsrUsbAddInterface
+
+;[OsrUsbAddInterface] 
+;AddProperty=OsrUsbAddInterface.AddProps 
+
+;[OsrUsbAddInterface.AddProps]
+;{%DEVPKEY_DeviceInterface_UnrestrictedAppCapabilities%}, 8, 0x2012,, %CustomCapability%
+
+
+[osrusbfx2.Dev.NT.Wdf]
+KmdfService = osrusbfx2, osrusbfx2_wdfsect
+
+[osrusbfx2_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+;---------------------------------------------------------------;
+
+[Strings]
+ProviderName="TODO-Set-Provider"
+MfgName="OSR"
+Disk_Description="OSRUSBFX2 Installation Disk"
+USB\VID_045E&PID_930A.DeviceDesc="WDF Sample Driver for OSR USB-FX2 Learning Kit"
+osrusbfx2.SvcDesc="WDF Sample Driver for OSR USB-FX2 Learning Kit"
+ClassName       = "Sample Device"
+Switch.DeviceDesc = "OsrUsbFX2 RawPdo For Switch"
+SPSVCINST_ASSOCSERVICE= 0x00000002
+;GUID_DEVINTERFACE_OSRUSBFX2="573E8C73-0CB4-4471-A1BF-FAB26C31D384"
+;DEVPKEY_DeviceInterface_UnrestrictedAppCapabilities="026e516e-b814-414b-83cd-856d6fef4822"
+;CustomCapability="microsoft.hsaTestCustomCapability_q536wpkpf5cy2"
