@@ -21,7 +21,7 @@ use wdf::{
         UsbBmRequestDirection,
         UsbBmRequestRecipient,
         UsbControlTransfer,
-        UsbMemoryDescriptorKind,
+        UsbControlTransferMemoryDescriptor,
     },
 };
 
@@ -525,14 +525,14 @@ fn send_vendor_command(
     let memory_descriptor = match direction {
         UsbBmRequestDirection::HostToDevice => {
             mem_desc = buffer.map(|b| MemoryDescriptor::Buffer(&b[..]));
-            UsbMemoryDescriptorKind::HostToDevice(mem_desc.as_ref())
+            UsbControlTransferMemoryDescriptor::HostToDevice(mem_desc.as_ref())
         }
         UsbBmRequestDirection::DeviceToHost => {
             let buffer = buffer
                 .as_mut()
                 .ok_or(status_codes::STATUS_INVALID_PARAMETER)?;
             mem_desc_mut = MemoryDescriptorMut::Buffer(buffer);
-            UsbMemoryDescriptorKind::DeviceToHost(&mem_desc_mut)
+            UsbControlTransferMemoryDescriptor::DeviceToHost(&mem_desc_mut)
         }
     };
 

@@ -942,16 +942,20 @@ impl Into<WDF_USB_CONTROL_SETUP_PACKET> for &UsbControlSetupPacket {
     }
 }
 
-pub enum UsbMemoryDescriptorKind<'a> {
+pub enum UsbControlTransferMemoryDescriptor<'a> {
     HostToDevice(Option<&'a MemoryDescriptor<'a>>),
     DeviceToHost(&'a MemoryDescriptorMut<'a>),
 }
 
-impl Into<UsbBmRequestDirection> for &UsbMemoryDescriptorKind<'_> {
+impl Into<UsbBmRequestDirection> for &UsbControlTransferMemoryDescriptor<'_> {
     fn into(self) -> UsbBmRequestDirection {
         match self {
-            UsbMemoryDescriptorKind::HostToDevice(_) => UsbBmRequestDirection::HostToDevice,
-            UsbMemoryDescriptorKind::DeviceToHost(_) => UsbBmRequestDirection::DeviceToHost,
+            UsbControlTransferMemoryDescriptor::HostToDevice(_) => {
+                UsbBmRequestDirection::HostToDevice
+            }
+            UsbControlTransferMemoryDescriptor::DeviceToHost(_) => {
+                UsbBmRequestDirection::DeviceToHost
+            }
         }
     }
 }
@@ -962,14 +966,14 @@ pub enum UsbControlTransfer<'a> {
         request: u8,
         value: u16,
         index: u16,
-        memory_descriptor: UsbMemoryDescriptorKind<'a>,
+        memory_descriptor: UsbControlTransferMemoryDescriptor<'a>,
     },
     Vendor {
         recipient: UsbBmRequestRecipient,
         request: u8,
         value: u16,
         index: u16,
-        memory_descriptor: UsbMemoryDescriptorKind<'a>,
+        memory_descriptor: UsbControlTransferMemoryDescriptor<'a>,
     },
     Feature {
         recipient: UsbBmRequestRecipient,
@@ -1051,8 +1055,10 @@ impl Into<Option<WDF_MEMORY_DESCRIPTOR>> for &UsbControlTransfer<'_> {
             | UsbControlTransfer::Vendor {
                 memory_descriptor, ..
             } => match memory_descriptor {
-                UsbMemoryDescriptorKind::HostToDevice(desc_opt) => desc_opt.map(|md| md.into()),
-                UsbMemoryDescriptorKind::DeviceToHost(desc) => Some((*desc).into()),
+                UsbControlTransferMemoryDescriptor::HostToDevice(desc_opt) => {
+                    desc_opt.map(|md| md.into())
+                }
+                UsbControlTransferMemoryDescriptor::DeviceToHost(desc) => Some((*desc).into()),
             },
             UsbControlTransfer::Feature {
                 memory_descriptor, ..
