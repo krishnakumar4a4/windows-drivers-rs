@@ -123,7 +123,7 @@ struct UsbDeviceContext {
 /// reboots. The path does not store hardware instance specific data.
 #[driver_entry(tracing_control_guid = "cb94defb-592a-4509-8f2e-54f204929669")]
 fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
-    println!("OSRUSBFX2 Driver Sample - Driver Framework Edition.\n");
+    println!("OSRUSBFX2 Rust Driver Sample - Driver Framework Edition.\n");
 
     // Set up the device add callback
     driver.on_evt_device_add(evt_device_add);
