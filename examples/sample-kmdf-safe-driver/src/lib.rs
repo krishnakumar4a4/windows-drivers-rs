@@ -106,7 +106,7 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
 }
 
 /// `evt_device_add` is called by the framework in response to AddDevice
-/// call from the PnP manager. We create and initialize a device object to
+/// call from the PNP manager. We create and initialize a device object to
 /// represent a new instance of the device.
 ///
 /// # Arguments

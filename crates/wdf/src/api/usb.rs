@@ -870,7 +870,7 @@ impl UsbControlSetupPacket {
         unsafe { &*((self as *const Self).cast::<[u8; mem::size_of::<Self>()]>()) }
     }
 
-    pub fn bm_recepient(&self) -> UsbBmRequestRecipient {
+    pub fn bm_recipient(&self) -> UsbBmRequestRecipient {
         let recip_bits: u8 = self.bm & Self::RECIPIENT_MASK;
         unsafe { mem::transmute(recip_bits) }
     }
@@ -903,13 +903,13 @@ impl UsbControlSetupPacket {
 
     fn to_bm(
         recipient: UsbBmRequestRecipient,
-        typ: UsbBmRequestType,
-        dir: UsbBmRequestDirection,
+        request_type: UsbBmRequestType,
+        direction: UsbBmRequestDirection,
     ) -> u8 {
         let mut bm = 0;
         bm |= (recipient as u8) & Self::RECIPIENT_MASK;
-        bm |= ((typ as u8) & Self::REQUEST_TYPE_MASK) << Self::REQUEST_TYPE_SHIFT_BITS;
-        bm |= ((dir as u8) & Self::DIRECTION_MASK) << Self::DIRECTION_SHIFT_BITS;
+        bm |= ((request_type as u8) & Self::REQUEST_TYPE_MASK) << Self::REQUEST_TYPE_SHIFT_BITS;
+        bm |= ((direction as u8) & Self::DIRECTION_MASK) << Self::DIRECTION_SHIFT_BITS;
         bm
     }
 }

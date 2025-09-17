@@ -24,7 +24,7 @@ fn evt_usb_interrupt_pipe_read_complete(
     println!("Interrupt read complete callback called");
 
     if num_bytes_transferred == 0 {
-        println!("Zero length read occured on the Interrupt Pipe's Continuous Reader");
+        println!("Zero length read occurred on the Interrupt Pipe's Continuous Reader");
         return;
     }
 
