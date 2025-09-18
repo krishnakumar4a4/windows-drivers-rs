@@ -253,7 +253,16 @@ pub fn call_safe_driver_entry(
 
     let reg_path = to_rust_str(reg_path);
     match safe_entry(&mut safe_driver, &reg_path) {
-        Ok(_) => 0,
+        Ok(_) => {
+            if let Some(evt_device_add) = safe_driver.evt_device_add {
+                unsafe {
+                    EVT_DEVICE_ADD
+                        .set(evt_device_add)
+                        .expect("device add callback should not be already set");
+                }
+            }
+            0
+        }
         Err(e) => {
             clean_up_tracing();
             e.code()
