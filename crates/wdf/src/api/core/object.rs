@@ -183,7 +183,7 @@ pub unsafe fn attach_context<H: Handle, C: ObjectContext>(
                     WdfObjectAllocateContext,
                     handle.as_ptr(),
                     &mut attributes,
-                    core::mem::transmute(&mut wdf_context),
+                    (&mut wdf_context as *mut *mut C).cast(),
                 )
             };
 
