@@ -309,6 +309,7 @@ pub unsafe fn drop_context<C: ObjectContext>(handle: WDFOBJECT) {
             handle,
             &context_metadata.0
         )
+        .cast::<C>()
     };
 
     if !context.is_null() {
