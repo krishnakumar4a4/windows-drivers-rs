@@ -1,4 +1,7 @@
-use core::{default::Default, sync::atomic::AtomicUsize};
+use core::{
+    default::Default,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
@@ -34,7 +37,7 @@ use super::{
     object::{impl_ref_counted_handle, Handle},
     request::RequestType,
     resource::CmResList,
-    result::{NtResult, StatusCodeExt},
+    result::{to_status_code, NtResult, StatusCodeExt},
     string::{to_unicode_string, to_utf16_buf},
     TriState,
 };
@@ -81,6 +84,7 @@ impl Device {
                 device,
                 DeviceContext {
                     ref_count: AtomicUsize::new(0),
+                    is_operational: AtomicBool::new(false),
                     pnp_power_callbacks,
                 },
             )?;
@@ -297,6 +301,7 @@ impl Default for DevicePnpCapabilities {
 #[object_context_with_ref_count_check(Device)]
 struct DeviceContext {
     ref_count: AtomicUsize,
+    is_operational: AtomicBool, // Is true if device is in D0 or higher power state
     pnp_power_callbacks: Option<PnpPowerEventCallbacks>,
 }
 
@@ -484,8 +489,7 @@ macro_rules! unsafe_pnp_power_callback {
     (@impl $callback_name:ident, ($($param_name:ident: $param_type:ty => $conversion:expr),*), ($($return_type:tt)?)) => {
         paste::paste! {
             pub extern "C" fn [<__ $callback_name>](device: WDFDEVICE $(, $param_name: $param_type)*) -> unsafe_pnp_power_callback!(@ret_type $($return_type)*) {
-                let device: &mut Device = unsafe { &mut *(device.cast()) };
-                let ctxt = DeviceContext::get(device);
+                let (device, ctxt) = get_device_and_ctxt(device);
 
                 if let Some(callbacks) = &ctxt.pnp_power_callbacks {
                     if let Some(callback) = callbacks.$callback_name {
@@ -522,9 +526,7 @@ macro_rules! unsafe_pnp_power_callback_call_and_return {
     };
 }
 
-unsafe_pnp_power_callback!(evt_device_d0_entry(previous_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(previous_state)) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_d0_entry_post_interrupts_enabled(previous_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(previous_state)) -> NTSTATUS);
-unsafe_pnp_power_callback!(evt_device_d0_exit(target_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(target_state)) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_d0_exit_pre_interrupts_disabled(target_state: WDF_POWER_DEVICE_STATE => to_rust_power_state_enum(target_state)) -> NTSTATUS);
 unsafe_pnp_power_callback!(evt_device_prepare_hardware(
     resources_raw: WDFCMRESLIST => unsafe { &*(resources_raw.cast::<CmResList>()) },
@@ -546,6 +548,60 @@ unsafe_pnp_power_callback!(evt_device_usage_notification(notification_type: WDF_
 unsafe_pnp_power_callback!(evt_device_relations_query(relation_type: DEVICE_RELATION_TYPE => to_rust_device_relation_type_enum(relation_type)));
 unsafe_pnp_power_callback!(evt_device_usage_notification_ex(notification_type: WDF_SPECIAL_FILE_TYPE => to_rust_special_file_type_enum(notification_type), is_in_notification_path: BOOLEAN => is_in_notification_path == 1) -> NTSTATUS);
 
+pub extern "C" fn __evt_device_d0_entry(
+    device: WDFDEVICE,
+    previous_state: WDF_POWER_DEVICE_STATE,
+) -> NTSTATUS {
+    let (device, ctxt) = get_device_and_ctxt(device);
+
+    // Set the device as operational before entering D0 so that
+    // the user's code ceases to get unique access to framework objects
+    ctxt.is_operational.store(true, Ordering::Release); // TODO: Do we really need Release here?
+
+    if let Some(callbacks) = &ctxt.pnp_power_callbacks {
+        if let Some(callback) = callbacks.evt_device_d0_entry {
+            let previous_state = to_rust_power_state_enum(previous_state);
+
+            return to_status_code(&callback(device, previous_state));
+        }
+    }
+
+    panic!(
+        "User did not provide callback {} but we subscribed to it",
+        stringify!(evt_device_d0_entry)
+    );
+}
+
+pub extern "C" fn __evt_device_d0_exit(
+    device: WDFDEVICE,
+    target_state: WDF_POWER_DEVICE_STATE,
+) -> NTSTATUS {
+    let (device, ctxt) = get_device_and_ctxt(device);
+
+    let mut user_callback_result = None;
+
+    if let Some(callbacks) = &ctxt.pnp_power_callbacks {
+        if let Some(callback) = callbacks.evt_device_d0_exit {
+            let target_state = to_rust_power_state_enum(target_state);
+            user_callback_result = Some(callback(device, target_state));
+        }
+    }
+
+    // Set the device as non operational after exiting D0 so that
+    // the user's code in subsequent PNP callbacks (like EventDeviceHardwareRelease)
+    // can again start to gain unique access to framework objects
+    ctxt.is_operational.store(false, Ordering::Release); // TODO: Do we really need Release here?
+
+    if let Some(res) = user_callback_result {
+        to_status_code(&res)
+    } else {
+        panic!(
+            "User did not provide callback {} but we subscribed to it",
+            stringify!(evt_device_d0_exit)
+        );
+    }
+}
+
 fn to_rust_power_state_enum(state: WDF_POWER_DEVICE_STATE) -> PowerDeviceState {
     PowerDeviceState::try_from(state)
         .expect("framework should not send invalid WDF_POWER_DEVICE_STATE")
@@ -559,6 +615,13 @@ fn to_rust_special_file_type_enum(file_type: WDF_SPECIAL_FILE_TYPE) -> SpecialFi
 fn to_rust_device_relation_type_enum(relation_type: DEVICE_RELATION_TYPE) -> DeviceRelationType {
     DeviceRelationType::try_from(relation_type)
         .expect("framework should not send invalid DEVICE_RELATION_TYPE")
+}
+
+#[inline]
+fn get_device_and_ctxt<'a>(device: WDFDEVICE) -> (&'a Device, &'a DeviceContext) {
+    let device = unsafe { &*(device.cast()) };
+    let ctxt = DeviceContext::get(device);
+    (device, ctxt)
 }
 
 pub struct DevicePowerPolicyIdleSettings {
