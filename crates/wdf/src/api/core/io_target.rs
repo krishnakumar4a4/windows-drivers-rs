@@ -16,7 +16,7 @@ use super::{
     device::Device,
     enum_mapping,
     memory::{Memory, MemoryOffset, OwnedMemory},
-    object::{impl_ref_counted_handle, Handle},
+    object::{impl_ref_counted_handle, GetDevice, Handle},
     request::Request,
     result::{status_codes, NtResult, StatusCodeExt},
     sync::Arc,
@@ -119,6 +119,12 @@ impl IoTarget {
             )
         }
         .ok()
+    }
+}
+
+impl GetDevice for IoTarget {
+    fn get_device(&self) -> &Device {
+        self.get_device()
     }
 }
 

@@ -14,7 +14,7 @@ use wdk_sys::{
 use super::{
     device::Device,
     init_wdf_struct,
-    object::{impl_ref_counted_handle, Handle},
+    object::{impl_ref_counted_handle, GetDevice, Handle},
     request::{Request, RequestId, RequestStopActionFlags},
     result::{status_codes, NtResult, StatusCodeExt},
     sync::Arc,
@@ -85,6 +85,12 @@ impl IoQueue {
             )
         }
         .map(|| unsafe { Request::from_raw(request) })
+    }
+}
+
+impl GetDevice for IoQueue {
+    fn get_device(&self) -> &Device {
+        self.get_device()
     }
 }
 

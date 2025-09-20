@@ -6,7 +6,7 @@ use wdk_sys::{call_unsafe_wdf_function_binding, WDFTIMER, WDF_TIMER_CONFIG};
 use super::{
     device::Device,
     init_wdf_struct,
-    object::{impl_ref_counted_handle, init_attributes, Handle},
+    object::{impl_ref_counted_handle, init_attributes, GetDevice, Handle},
     result::{NtResult, StatusCodeExt},
     sync::Arc,
 };
@@ -85,6 +85,12 @@ impl Timer {
         }
 
         unsafe { &*parent.cast::<Device>() }
+    }
+}
+
+impl GetDevice for Timer {
+    fn get_device(&self) -> &Device {
+        self.get_device()
     }
 }
 
