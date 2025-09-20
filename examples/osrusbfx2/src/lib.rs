@@ -29,7 +29,6 @@ use wdf::{
     RequestId,
     RequestType,
     SentRequest,
-    Slot,
     SpinLock,
     TriState,
     driver_entry,
@@ -51,10 +50,10 @@ const USBD_CLIENT_CONTRACT_VERSION_602: u32 = 0x602;
 
 #[object_context(Device)]
 struct DeviceContext {
-    usb_device: Slot<Arc<UsbDevice>>,
+    usb_device: Option<Arc<UsbDevice>>,
     usb_device_traits: SpinLock<UsbDeviceTraits>,
     current_switch_state: SpinLock<SwitchState>,
-    interrupt_msg_queue: Slot<Arc<IoQueue>>,
+    interrupt_msg_queue: Arc<IoQueue>,
     sent_requests: SpinLock<Vec<SentRequest>>, // TODO: change to HashMap when available
 }
 
@@ -86,7 +85,7 @@ impl DeviceContext {
     }
 
     fn get_usb_pipe<F: Fn(&UsbDeviceContext) -> u8>(&self, pipe_index: F) -> &UsbPipe {
-        let usb_device = self.usb_device.get().expect("USB device should be set");
+        let usb_device = self.usb_device.as_ref().expect("USB device should be set");
         let usb_device_context = UsbDeviceContext::get(&usb_device);
         let usb_interface = usb_device
             .get_interface(0)
@@ -199,10 +198,10 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     let interrupt_msg_queue = IoQueue::create(device, &queue_config)?;
 
     let context = DeviceContext {
-        usb_device: Slot::try_new(None)?,
+        usb_device: None,
         usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
         current_switch_state: SpinLock::create(SwitchState::empty())?,
-        interrupt_msg_queue: Slot::try_new(Some(interrupt_msg_queue))?,
+        interrupt_msg_queue,
         sent_requests: SpinLock::create(Vec::new())?,
     };
 
@@ -253,7 +252,11 @@ fn evt_device_prepare_hardware(
 
     select_interface(usb_device.get_mut())?;
 
-    device_ctxt.usb_device.set(Some(usb_device));
+    // Have to get context again instead of using the one
+    // from above due to borrow checker issues
+    let device_ctxt = DeviceContext::get_mut(device);
+
+    device_ctxt.usb_device = Some(usb_device);
     *device_ctxt.usb_device_traits.lock() = info.traits;
 
     Ok(())

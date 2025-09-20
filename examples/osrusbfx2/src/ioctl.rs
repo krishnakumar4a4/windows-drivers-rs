@@ -231,7 +231,7 @@ fn get_config_descriptor(device_context: &DeviceContext, request: &mut Request) 
 
     let usb_device = device_context
         .usb_device
-        .get()
+        .as_ref()
         .expect("USB device should be set");
 
     let required_size = usb_device
@@ -254,7 +254,7 @@ fn reset_device(device_context: &DeviceContext) -> NtResult<usize> {
 
     let usb_device = device_context
         .usb_device
-        .get()
+        .as_ref()
         .expect("USB device should be set");
     usb_device.reset_port_synchronously()?;
 
@@ -418,13 +418,8 @@ fn get_interrupt_message(
 
     *request_pending = false;
 
-    let interrupt_queue = device_context
-        .interrupt_msg_queue
-        .get()
-        .expect("Interrupt message queue should be set");
-
     request
-        .forward_to_io_queue(&interrupt_queue)
+        .forward_to_io_queue(&device_context.interrupt_msg_queue)
         .inspect(|_| *request_pending = true)?;
 
     Ok(0)
@@ -437,15 +432,11 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
     );
 
     let device_context = DeviceContext::get(device);
-    let interrupt_msg_queue = device_context
-        .interrupt_msg_queue
-        .get()
-        .expect("Interrupt message queue should be set");
 
     // Complete all pending requests
     let mut bytes_returned;
     loop {
-        match interrupt_msg_queue.retrieve_next_request() {
+        match device_context.interrupt_msg_queue.retrieve_next_request() {
             Ok(mut request) => {
                 let (request_status, bytes_returned) = match request
                     .retrieve_output_buffer(size_of::<SwitchState>())
@@ -546,7 +537,7 @@ fn send_vendor_command(
 
     let usb_device = device_context
         .usb_device
-        .get()
+        .as_ref()
         .expect("USB device should be set");
 
     let bytes_transferred = usb_device.send_control_transfer_synchronously(
