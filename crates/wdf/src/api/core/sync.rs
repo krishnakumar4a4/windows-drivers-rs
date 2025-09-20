@@ -12,7 +12,7 @@ use wdk::println;
 use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFSPINLOCK};
 
 use super::{
-    object::{bug_check, init_attributes, Handle, RefCountedHandle},
+    object::{bug_check, init_attributes, GetDevice, Handle, RefCountedHandle},
     result::{NtResult, StatusCodeExt},
 };
 
@@ -158,6 +158,27 @@ impl<T: RefCountedHandle> Arc<T> {
             ptr,
             _marker: PhantomData,
         }
+    }
+
+    /// Returns a mutable reference to the inner value
+    ///
+    /// A mutable reference to the inner value is returned only
+    /// if the `Device` associated with `T` is in D0 state or higher
+    ///
+    /// # Panics
+    /// Panics if the `Device` associated with `T` is not operational
+    pub fn get_mut(&mut self) -> &mut T
+    where
+        Self: GetDevice,
+    {
+        if !self.get_device().is_operational() {
+            panic!(
+                "Attempt to get mutable reference to {} when its device is not operational",
+                Self::type_name()
+            );
+        }
+
+        unsafe { &mut *self.as_ptr().cast::<T>() }
     }
 }
 

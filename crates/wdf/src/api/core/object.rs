@@ -19,7 +19,7 @@ use wdk_sys::{
     _WDF_SYNCHRONIZATION_SCOPE,
 };
 
-use super::{init_wdf_struct, result::NtResult};
+use super::{device::Device, init_wdf_struct, result::NtResult};
 
 pub trait Handle {
     fn as_ptr(&self) -> WDFOBJECT;
@@ -75,6 +75,11 @@ macro_rules! impl_ref_counted_handle {
 
 pub(crate) use impl_handle;
 pub(crate) use impl_ref_counted_handle;
+
+/// A trait for framework handles that can return the device they belong to.
+pub(crate) trait GetDevice: Handle {
+    fn get_device(&self) -> &Device;
+}
 
 #[derive(Debug)]
 #[repr(transparent)]
