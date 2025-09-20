@@ -219,6 +219,11 @@ impl UsbDevice {
     }
 }
 
+impl GetDevice for UsbDevice {
+    fn get_device(&self) -> &Device {
+        self.get_io_target().get_device()
+    }
+}
 #[object_context_with_ref_count_check(UsbDevice)]
 struct UsbDeviceContext {
     ref_count: AtomicUsize,
