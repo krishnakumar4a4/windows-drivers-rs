@@ -49,7 +49,7 @@ impl Device {
         device_init: &'a mut DeviceInit,
         pnp_power_callbacks: Option<PnpPowerEventCallbacks>,
         pnp_capabilities: Option<&DevicePnpCapabilities>,
-    ) -> NtResult<&'a Self> {
+    ) -> NtResult<&'a mut Self> {
         if let Some(ref pnp_power_callbacks) = pnp_power_callbacks {
             let mut pnp_power_callbacks = pnp_power_callbacks.into();
 
@@ -88,7 +88,7 @@ impl Device {
                     pnp_power_callbacks,
                 },
             )?;
-            Ok(device as &Device)
+            Ok(device)
         })
     }
 
