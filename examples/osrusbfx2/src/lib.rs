@@ -226,12 +226,11 @@ fn evt_device_prepare_hardware(
     }
 
     // No UsbDevice created so create a new one and store it context
-    let usb_device = UsbDevice::create(
+    let mut usb_device = UsbDevice::create(
         device,
         &UsbDeviceCreateConfig {
             usbd_client_contract_version: USBD_CLIENT_CONTRACT_VERSION_602,
         },
-        select_interface,
     )?;
 
     let info = usb_device.retrieve_information()?;
@@ -251,6 +250,8 @@ fn evt_device_prepare_hardware(
     if info.traits.contains(UsbDeviceTraits::REMOTE_WAKE_CAPABLE) {
         set_power_policy(device)?;
     }
+
+    select_interface(usb_device.get_mut())?;
 
     device_ctxt.usb_device.set(Some(usb_device));
     *device_ctxt.usb_device_traits.lock() = info.traits;

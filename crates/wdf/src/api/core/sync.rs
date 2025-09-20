@@ -169,7 +169,7 @@ impl<T: RefCountedHandle> Arc<T> {
     /// Panics if the `Device` associated with `T` is not operational
     pub fn get_mut(&mut self) -> &mut T
     where
-        Self: GetDevice,
+        T: GetDevice,
     {
         if !self.get_device().is_operational() {
             panic!(

@@ -45,7 +45,7 @@ use super::core::{
     init_wdf_struct,
     io_target::{to_buffer_ptrs, IoTarget, RequestFormatBuffer},
     memory::{Memory, MemoryDescriptor, MemoryDescriptorMut},
-    object::{impl_handle, impl_ref_counted_handle, Handle},
+    object::{impl_handle, impl_ref_counted_handle, GetDevice, Handle},
     request::Request,
     result::{status_codes, NtResult, NtStatus, StatusCodeExt},
     sync::Arc,
@@ -55,11 +55,7 @@ use super::core::{
 impl_ref_counted_handle!(UsbDevice, UsbDeviceContext);
 
 impl UsbDevice {
-    pub fn create<F: Fn(&mut Self) -> NtResult<()>>(
-        device: &Device,
-        config: &UsbDeviceCreateConfig,
-        configure: F,
-    ) -> NtResult<Arc<Self>> {
+    pub fn create(device: &Device, config: &UsbDeviceCreateConfig) -> NtResult<Arc<Self>> {
         let mut usb_device: WDFUSBDEVICE = core::ptr::null_mut();
         let mut config = config.into();
 
@@ -78,14 +74,16 @@ impl UsbDevice {
             };
 
             UsbDeviceContext::attach(unsafe { &*(usb_device.cast()) }, ctxt)?;
-
-            let usb_device_mut_ref = unsafe { &mut *(usb_device.cast()) };
-            configure(usb_device_mut_ref)?;
-
             let usb_device = unsafe { Arc::from_raw(usb_device.cast()) };
 
             Ok(usb_device)
         })
+    }
+
+    pub fn get_io_target(&self) -> &IoTarget {
+        // SAFETY: Every UsbDevice is a WDFIOTARGET so this
+        // cast is valid
+        unsafe { &*(self.as_ptr().cast::<IoTarget>()) }
     }
 
     pub fn retrieve_config_descriptor(
