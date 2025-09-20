@@ -217,20 +217,30 @@ fn evt_device_prepare_hardware(
 ) -> NtResult<()> {
     println!("Device prepare hardware callback called");
 
-    let device_ctxt = DeviceContext::get(device);
+    // In this function we have to get DeviceContext multiple times
+    // in order to prevent borrow checker issues.
+    // TODO: try to simplify this
 
-    // Create a UsbDevice only if it does not already exist
-    if device_ctxt.usb_device.is_some() {
-        return Ok(());
+    // Create a UsbDevice if it does not already exist
+    let usb_device_exists = DeviceContext::get(device).usb_device.is_some();
+
+    if !usb_device_exists {
+        let usb_device = UsbDevice::create(
+            device,
+            &UsbDeviceCreateConfig {
+                usbd_client_contract_version: USBD_CLIENT_CONTRACT_VERSION_602,
+            },
+        )?;
+
+        let device_ctxt = DeviceContext::get_mut(device);
+        device_ctxt.usb_device = Some(usb_device);
     }
 
-    // No UsbDevice created so create a new one and store it context
-    let mut usb_device = UsbDevice::create(
-        device,
-        &UsbDeviceCreateConfig {
-            usbd_client_contract_version: USBD_CLIENT_CONTRACT_VERSION_602,
-        },
-    )?;
+    let device_ctxt = DeviceContext::get(device);
+    let usb_device = device_ctxt
+        .usb_device
+        .as_ref()
+        .expect("USB device should be set");
 
     let info = usb_device.retrieve_information()?;
     println!(
@@ -250,13 +260,13 @@ fn evt_device_prepare_hardware(
         set_power_policy(device)?;
     }
 
+    let device_ctxt = DeviceContext::get_mut(device);
+    let usb_device = device_ctxt
+        .usb_device
+        .as_mut()
+        .expect("USB device should be set");
     select_interface(usb_device.get_mut())?;
 
-    // Have to get context again instead of using the one
-    // from above due to borrow checker issues
-    let device_ctxt = DeviceContext::get_mut(device);
-
-    device_ctxt.usb_device = Some(usb_device);
     *device_ctxt.usb_device_traits.lock() = info.traits;
 
     Ok(())
