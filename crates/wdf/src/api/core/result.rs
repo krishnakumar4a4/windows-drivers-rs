@@ -1,4 +1,4 @@
-use wdk_sys::{NT_ERROR, NT_INFORMATION, NT_SUCCESS, NT_WARNING};
+use wdk_sys::{NTSTATUS, NT_ERROR, NT_INFORMATION, NT_SUCCESS, NT_WARNING};
 
 // TODO: Needs redesign. Currently we are treating
 // warnings as success (see `NtSStatusNonError` and the
@@ -26,7 +26,7 @@ impl NtStatus {
     }
 
     /// Return the raw NTSTATUS value for this typed status.
-    pub fn code(&self) -> i32 {
+    pub fn code(&self) -> NTSTATUS {
         match *self {
             Self::NonError(c) => c.code(),
             Self::Error(c) => c.code(),
@@ -183,6 +183,19 @@ impl Into<i32> for NtStatusError {
 }
 
 pub type NtResult<T> = Result<T, NtStatusError>;
+
+impl<T> Into<NtStatus> for &NtResult<T> {
+    fn into(self) -> NtStatus {
+        to_status_code(self).into()
+    }
+}
+
+pub fn to_status_code<T>(status: &NtResult<T>) -> NTSTATUS {
+    match status {
+        Ok(_) => 0, // STATUS_SUCCESS
+        Err(e) => e.code(),
+    }
+}
 
 /// Extension trait to convert an NTSTATUS (i32) into NtResult combinators
 pub trait StatusCodeExt {
