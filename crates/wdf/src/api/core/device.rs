@@ -186,6 +186,39 @@ impl Device {
         }
         .ok()
     }
+
+    /// Returns true if the device is operational,
+    /// that is in D0 or higher power state
+    pub(crate) fn is_operational(&self) -> bool {
+        let ctxt = DeviceContext::get(self);
+        ctxt.is_operational.load(Ordering::Acquire)
+    }
+
+    /// Converts a WDFDEVICE handle to `&Device`.
+    ///
+    /// The converstion is safe only when the device is operational
+    /// because during the non-operational state PNP methods might be accessing
+    /// the device through an exclusive reference (`&mut Device``) and therefore
+    /// returning a shared reference here would violate Rust's aliasing rules.
+    ///
+    /// There are WDF object types such as `IoQueue` that return a `&Device`.
+    /// All such types must convert from `WDFDEVICE` to `&Device` by
+    /// calling this function in order to ensure safety.
+    ///
+    /// # Panics
+    /// Panics if the device is not operational
+    ///
+    /// # Safety
+    /// The passed pointer must be a valid WDFDEVICE handle
+    pub(crate) unsafe fn to_ref<'a>(device: WDFDEVICE) -> &'a Device {
+        let device: &Device = unsafe { &*(device.cast()) };
+
+        if device.is_operational() {
+            device
+        } else {
+            panic!("Attempt to access &Device when device is not operational");
+        }
+    }
 }
 
 pub struct DeviceInit(*mut WDFDEVICE_INIT);
