@@ -47,6 +47,8 @@ use bulkrwr::{evt_io_read, evt_io_stop, evt_io_write};
 use interrupt::cont_reader_for_interrupt_endpoint;
 use ioctl::{SwitchState, evt_io_device_control, usb_ioctl_get_interrupt_message};
 
+const USBD_CLIENT_CONTRACT_VERSION_602: u32 = 0x602;
+
 #[object_context(Device)]
 struct DeviceContext {
     usb_device: Slot<Arc<UsbDevice>>,
@@ -227,7 +229,7 @@ fn evt_device_prepare_hardware(
     let usb_device = UsbDevice::create(
         device,
         &UsbDeviceCreateConfig {
-            usbd_client_contract_version: 0x0100_0000,
+            usbd_client_contract_version: USBD_CLIENT_CONTRACT_VERSION_602,
         },
         select_interface,
     )?;
