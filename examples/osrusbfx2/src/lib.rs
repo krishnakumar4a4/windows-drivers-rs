@@ -55,6 +55,11 @@ struct DeviceContext {
     current_switch_state: SpinLock<SwitchState>,
     interrupt_msg_queue: Arc<IoQueue>,
     sent_requests: SpinLock<Vec<SentRequest>>, // TODO: change to HashMap when available
+    // Below three queue are never used.
+    // They're  stored here only to keep them alive
+    _default_queue: Arc<IoQueue>,
+    _read_queue: Arc<IoQueue>,
+    _write_queue: Arc<IoQueue>,
 }
 
 impl DeviceContext {
@@ -165,7 +170,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let _ = IoQueue::create(device, &queue_config)?;
+    let default_queue = IoQueue::create(device, &queue_config)?;
 
     let queue_config = IoQueueConfig {
         dispatch_type: IoQueueDispatchType::Sequential,
@@ -201,6 +206,9 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         usb_device: None,
         usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
         current_switch_state: SpinLock::create(SwitchState::empty())?,
+        _default_queue: default_queue,
+        _read_queue: read_queue,
+        _write_queue: write_queue,
         interrupt_msg_queue,
         sent_requests: SpinLock::create(Vec::new())?,
     };
