@@ -187,7 +187,7 @@ impl Device {
         interface_guid: &Guid,
         reference_string: Option<&OwnedUnicodeString>,
     ) -> NtResult<WString> {
-        let mut wdf_string = WString::create()?;
+        let wdf_string = WString::create()?;
         let reference_string_ptr =
             reference_string.map_or(core::ptr::null(), |s| s.as_raw() as *const _);
 
