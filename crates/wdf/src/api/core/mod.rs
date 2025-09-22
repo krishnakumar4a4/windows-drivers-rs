@@ -27,6 +27,7 @@ pub use object::*;
 pub use request::*;
 pub use resource::*;
 pub use result::*;
+pub use string::*;
 pub use sync::*;
 pub use timer::*;
 pub use wdf_macros::*;

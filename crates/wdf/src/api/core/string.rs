@@ -13,7 +13,7 @@ use super::{object::Handle, result::NtResult};
 
 #[derive(Debug)]
 #[repr(transparent)]
-pub(crate) struct WString(WDFSTRING);
+pub struct WString(WDFSTRING);
 
 impl Handle for WString {
     #[inline(always)]
@@ -22,7 +22,7 @@ impl Handle for WString {
     }
 
     fn type_name() -> String {
-        String::from("FwString")
+        String::from("WString")
     }
 }
 
