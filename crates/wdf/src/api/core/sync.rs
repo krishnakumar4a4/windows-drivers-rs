@@ -171,12 +171,10 @@ impl<T: RefCountedHandle> Arc<T> {
     where
         T: GetDevice,
     {
-        if !self.get_device().is_operational() {
-            panic!(
-                "Attempt to get mutable reference to {} when its device is not operational",
-                Self::type_name()
-            );
-        }
+        // This ensures we panic if the device is not operational
+        // instead of returning an unsafe reference.
+        // See the documentation `Device::cast_if_operational` for details.
+        let _device = self.get_device(); //
 
         unsafe { &mut *self.as_ptr().cast::<T>() }
     }

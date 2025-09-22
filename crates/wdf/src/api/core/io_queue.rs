@@ -57,9 +57,13 @@ impl IoQueue {
 
     pub fn get_device(&self) -> &Device {
         unsafe {
-            let device =
+            let device_ptr =
                 call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr().cast());
-            &*(device.cast())
+
+            // This ensures we panic if the device is not operational
+            // instead of returning an unsafe reference.
+            // See the documentation `cast_if_operational` for details.
+            Device::cast_if_operational(device_ptr)
         }
     }
 

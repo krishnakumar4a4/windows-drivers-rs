@@ -1,7 +1,7 @@
 use core::{ptr::null_mut, sync::atomic::AtomicUsize, time::Duration};
 
 use wdf_macros::object_context_with_ref_count_check;
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFTIMER, WDF_TIMER_CONFIG};
+use wdk_sys::{call_unsafe_wdf_function_binding, WDFDEVICE, WDFTIMER, WDF_TIMER_CONFIG};
 
 use super::{
     device::Device,
@@ -80,11 +80,16 @@ impl Timer {
             call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr().cast())
         };
 
-        if parent.is_null() {
+        let device = parent as WDFDEVICE;
+
+        if device.is_null() {
             panic!("Timer has no parent device");
         }
 
-        unsafe { &*parent.cast::<Device>() }
+        // This ensures we panic if the device is not operational
+        // instead of returning an unsafe reference.
+        // See the documentation `cast_if_operational` for details.
+        unsafe { Device::cast_if_operational(device) }
     }
 }
 
