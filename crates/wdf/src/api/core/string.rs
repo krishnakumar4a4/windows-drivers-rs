@@ -95,7 +95,7 @@ pub struct OwnedUnicodeString {
 }
 
 impl OwnedUnicodeString {
-    pub fn new(rust_str: &str) -> Self {
+    pub fn from_rust_str(rust_str: &str) -> Self {
         let buf = Self::to_utf16_buf(rust_str);
         let unicode_str = Self::create_raw_unicode_string_from(&buf);
         Self {
