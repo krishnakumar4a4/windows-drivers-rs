@@ -45,14 +45,10 @@ impl WString {
         }
     }
 
-    pub fn to_rust_string(&self) -> Option<String> {
-        if self.0.is_null() {
-            return None;
-        }
-
+    pub fn get_unicode_string(&self) -> UNICODE_STRING {
         let mut unicode_string = UNICODE_STRING::default();
 
-        // SAFETY: The contract of the FwString type constructor
+        // SAFETY: The contract of the `Wstring` constructor
         // requires that the underlying pointer is a valid WDFOBJECT.
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -60,7 +56,17 @@ impl WString {
                 self.0,
                 &mut unicode_string
             )
-        };
+        }
+
+        unicode_string
+    }
+
+    pub fn to_rust_string(&self) -> Option<String> {
+        let unicode_string = self.get_unicode_string();
+
+        if unicode_string.Buffer.is_null() {
+            return None;
+        }
 
         Some(to_rust_str(unicode_string))
     }
