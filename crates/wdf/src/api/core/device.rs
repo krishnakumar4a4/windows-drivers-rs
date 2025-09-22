@@ -38,7 +38,7 @@ use super::{
     request::RequestType,
     resource::CmResList,
     result::{to_status_code, NtResult, StatusCodeExt},
-    string::UnicodeString,
+    string::OwnedUnicodeString,
     TriState,
 };
 
@@ -92,7 +92,7 @@ impl Device {
         interaface_class_guid: &Guid,
         reference_string: Option<&str>,
     ) -> NtResult<()> {
-        let ref_str_buf = reference_string.map(UnicodeString::new);
+        let ref_str_buf = reference_string.map(OwnedUnicodeString::new);
         let unicode_string_ptr = ref_str_buf.map_or(core::ptr::null(), |s| s.as_raw() as *const _);
 
         unsafe {

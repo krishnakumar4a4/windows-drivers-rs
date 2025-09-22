@@ -77,12 +77,12 @@ impl Drop for WString {
 }
 
 /// A Rust representation of a UNICODE_STRING with an owned buffer.
-pub struct UnicodeString {
+pub struct OwnedUnicodeString {
     _buf: Box<[u16]>, // `_buf` exists only to keep the buffer alive
     unicode_str: UNICODE_STRING,
 }
 
-impl UnicodeString {
+impl OwnedUnicodeString {
     pub fn new(rust_str: &str) -> Self {
         let buf = Self::to_utf16_buf(rust_str);
         let unicode_str = Self::create_raw_unicode_string_from(&buf);

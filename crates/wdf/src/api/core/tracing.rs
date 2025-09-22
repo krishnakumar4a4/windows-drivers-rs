@@ -24,7 +24,7 @@ use wdk_sys::{
     USHORT,
 };
 
-use crate::api::{guid::Guid, string::UnicodeString};
+use crate::api::{guid::Guid, string::OwnedUnicodeString};
 
 /// These globals are expected by IFR functionality such as the
 /// windbg extensions used to read IFR logs
@@ -43,7 +43,7 @@ extern "C" {
 
 macro_rules! get_routine_addr {
     ($name:expr, $callback_type:ty) => {{
-        let name_unicode_string = UnicodeString::new($name);
+        let name_unicode_string = OwnedUnicodeString::new($name);
         let name_unicode_string_raw = name_unicode_string.as_raw();
 
         let addr = unsafe {
