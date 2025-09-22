@@ -38,7 +38,7 @@ use super::{
     request::RequestType,
     resource::CmResList,
     result::{to_status_code, NtResult, StatusCodeExt},
-    string::{OwnedUnicodeString, WString},
+    string::{UnicodeString, WString},
     TriState,
 };
 
@@ -90,7 +90,7 @@ impl Device {
     pub fn create_interface(
         &self,
         interaface_class_guid: &Guid,
-        reference_string: Option<&OwnedUnicodeString>,
+        reference_string: Option<&UnicodeString>,
     ) -> NtResult<()> {
         let reference_string_ptr =
             reference_string.map_or(core::ptr::null(), |s| s.as_raw() as *const _);
@@ -185,7 +185,7 @@ impl Device {
     pub fn retrieve_device_interface_string(
         &self,
         interface_guid: &Guid,
-        reference_string: Option<&OwnedUnicodeString>,
+        reference_string: Option<&UnicodeString>,
     ) -> NtResult<WString> {
         let wdf_string = WString::create()?;
         let reference_string_ptr =
