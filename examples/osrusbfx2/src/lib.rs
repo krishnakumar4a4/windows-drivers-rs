@@ -155,12 +155,14 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     device_init.set_io_type(&io_type);
 
+    let device = Device::create(device_init, Some(pnp_power_callbacks))?;
+
     let pnp_caps = DevicePnpCapabilities {
         surprise_removal_ok: TriState::True,
         ..Default::default()
     };
 
-    let device = Device::create(device_init, Some(pnp_power_callbacks), Some(&pnp_caps))?;
+    device.set_pnp_capabilities(&pnp_caps);
 
     let queue_config = IoQueueConfig {
         dispatch_type: IoQueueDispatchType::Parallel {

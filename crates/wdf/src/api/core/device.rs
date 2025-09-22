@@ -48,7 +48,6 @@ impl Device {
     pub fn create<'a>(
         device_init: &'a mut DeviceInit,
         pnp_power_callbacks: Option<PnpPowerEventCallbacks>,
-        pnp_capabilities: Option<&DevicePnpCapabilities>,
     ) -> NtResult<&'a mut Self> {
         if let Some(ref pnp_power_callbacks) = pnp_power_callbacks {
             let mut pnp_power_callbacks = pnp_power_callbacks.into();
@@ -75,10 +74,6 @@ impl Device {
         }
         .and_then(|| {
             let device: &mut Device = unsafe { &mut *(device.cast()) };
-
-            if let Some(caps) = pnp_capabilities {
-                device.set_pnp_capabilities(caps);
-            }
 
             DeviceContext::attach(
                 device,
@@ -144,7 +139,7 @@ impl Device {
         .ok()
     }
 
-    fn set_pnp_capabilities(&mut self, capabilities: &DevicePnpCapabilities) {
+    pub fn set_pnp_capabilities(&mut self, capabilities: &DevicePnpCapabilities) {
         let mut caps = capabilities.into();
         unsafe {
             call_unsafe_wdf_function_binding!(
