@@ -368,6 +368,7 @@ dependencies = [
  "bitflags",
  "wdf",
  "wdk-build",
+ "wdk-sys",
 ]
 
 [[package]]

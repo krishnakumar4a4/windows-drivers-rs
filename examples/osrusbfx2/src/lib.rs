@@ -265,14 +265,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     let interrupt_msg_queue = IoQueue::create(device, &queue_config)
         .inspect_err(|e| println!("Failed to create interrupt message queue: {:?}", e))?;
 
-    // Register a device interface so that the app can find our device and talk to
-    // it.
-    let interface_guid = Guid::parse(GUID_DEVINTERFACE_OSRUSBFX2)
-        .expect("GUID_DEVINTERFACE_OSRUSBFX2 should be valid");
-    device
-        .create_interface(&interface_guid, None)
-        .inspect_err(|e| println!("Failed to create device interface: {:?}", e))?;
-
+    // Attach device context
     let context = DeviceContext {
         usb_device: None,
         usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
@@ -285,6 +278,47 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     };
 
     DeviceContext::attach(device, context)?;
+
+    // Register a device interface so that the app can find our device and talk to
+    // it.
+    let interface_guid = Guid::parse(GUID_DEVINTERFACE_OSRUSBFX2)
+        .expect("GUID_DEVINTERFACE_OSRUSBFX2 should be valid");
+    device
+        .create_device_interface(&interface_guid, None)
+        .inspect_err(|e| println!("Failed to create device interface: {:?}", e))?;
+
+    // Get the string for the device interface and set the restricted
+    // property on it to allow applications bound with device metadata
+    // to access the interface.
+
+    let symbolic_link_name = device
+        .retrieve_device_interface_string(&interface_guid, None)
+        .inspect_err(|e| println!("Failed to get device interface symbolic link name: {:?}", e))?;
+
+    set_device_interface_property_restricted(&symbolic_link_name).inspect_err(|e| {
+        println!(
+            "Failed to set restricted property on device interface: {:?}",
+            e
+        )
+    })?;
+
+    // Adding Custom Capability:
+    //
+    // Adds a custom capability to device interface instance that allows a Windows
+    // Store device app to access this interface using Windows.Devices.Custom
+    // namespace. This capability can be defined either in INF or here as shown
+    // below. In order to define it from the INF, uncomment the section "OsrUsb
+    // Interface installation" from the INF and remove the block of code below.
+    set_device_interface_property_unrestricted_device_capabilities(
+        &symbolic_link_name,
+        "microsoft.hsaTestCustomCapability_q536wpkpf5cy2",
+    )
+    .inspect_err(|e| {
+        println!(
+            "Failed to set unrestricted property on device interface: {:?}",
+            e
+        )
+    })?;
 
     Ok(())
 }
