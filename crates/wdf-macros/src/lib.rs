@@ -174,18 +174,11 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
     );
 
     let mut wrappers: TokenStream = quote! {
-        use wdf::{
-            call_safe_driver_entry,
-            DRIVER_OBJECT,
-            NTSTATUS,
-            PCUNICODE_STRING,
-        };
-
         #[link_section = "INIT"]
         #[export_name = "DriverEntry"] // WDF expects a symbol with the name DriverEntry
-        extern "system" fn __driver_entry(driver: &mut DRIVER_OBJECT, registry_path: PCUNICODE_STRING,) -> NTSTATUS {
+        extern "system" fn __driver_entry(driver: &mut ::wdf::DRIVER_OBJECT, registry_path: ::wdf::PCUNICODE_STRING,) -> ::wdf::NTSTATUS {
             let tracing_control_guid = #parse_tracing_control_guid;
-            call_safe_driver_entry(driver, registry_path, #safe_driver_entry, tracing_control_guid)
+            ::wdf::call_safe_driver_entry(driver, registry_path, #safe_driver_entry, tracing_control_guid)
         }
     }
     .into();
