@@ -11,6 +11,12 @@ use wdk_sys::{
 
 use super::{object::Handle, result::NtResult};
 
+// TODO: We assume that WDFSTRING always owns
+// the underlying buffer. If that's not the case
+// we need to change the implementation.
+/// Represents a framework string object corresponding to WDFSTRING
+///
+/// Implements RAII to ensure proper resource management.
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct WString(WDFSTRING);
