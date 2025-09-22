@@ -40,10 +40,15 @@ use wdf::{
 };
 
 mod bulkrwr;
+mod dev_prop;
 mod interrupt;
 mod ioctl;
 
 use bulkrwr::{evt_io_read, evt_io_stop, evt_io_write};
+use dev_prop::{
+    set_device_interface_property_restricted,
+    set_device_interface_property_unrestricted_device_capabilities,
+};
 use interrupt::cont_reader_for_interrupt_endpoint;
 use ioctl::{SwitchState, evt_io_device_control, usb_ioctl_get_interrupt_message};
 

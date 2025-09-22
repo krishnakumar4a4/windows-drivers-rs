@@ -87,7 +87,7 @@ impl Device {
         })
     }
 
-    pub fn create_interface(
+    pub fn create_device_interface(
         &self,
         interaface_class_guid: &Guid,
         reference_string: Option<&UnicodeString>,
