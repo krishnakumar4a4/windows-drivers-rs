@@ -38,7 +38,7 @@ use super::{
     request::RequestType,
     resource::CmResList,
     result::{to_status_code, NtResult, StatusCodeExt},
-    string::{to_unicode_string, to_utf16_buf},
+    string::UnicodeString,
     TriState,
 };
 
@@ -92,15 +92,15 @@ impl Device {
         interaface_class_guid: &Guid,
         reference_string: Option<&str>,
     ) -> NtResult<()> {
-        let ref_str_buf = reference_string.map(to_utf16_buf);
-        let unicode_ref_str = ref_str_buf.map(|b| to_unicode_string(b.as_ref()));
+        let ref_str_buf = reference_string.map(UnicodeString::new);
+        let unicode_string_ptr = ref_str_buf.map_or(core::ptr::null(), |s| s.as_raw() as *const _);
 
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceCreateDeviceInterface,
                 self.as_ptr().cast(),
                 interaface_class_guid.as_lpcguid(),
-                unicode_ref_str.map_or(core::ptr::null(), |s| &s)
+                unicode_string_ptr
             )
         }
         .ok()

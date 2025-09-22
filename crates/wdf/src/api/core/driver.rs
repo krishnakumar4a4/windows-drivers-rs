@@ -57,7 +57,9 @@ impl Driver {
             return Err(status.into());
         }
 
-        Ok(string.to_rust_string())
+        Ok(string
+            .to_rust_string()
+            .expect("version string should exist"))
     }
 
     pub fn is_version_available(&self, major_version: u32, minor_version: u32) -> bool {

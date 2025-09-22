@@ -45,7 +45,11 @@ impl WString {
         }
     }
 
-    pub fn to_rust_string(&self) -> String {
+    pub fn to_rust_string(&self) -> Option<String> {
+        if self.0.is_null() {
+            return None;
+        }
+
         let mut unicode_string = UNICODE_STRING::default();
 
         // SAFETY: The contract of the FwString type constructor
@@ -58,7 +62,7 @@ impl WString {
             )
         };
 
-        to_rust_str(unicode_string)
+        Some(to_rust_str(unicode_string))
     }
 }
 
@@ -72,12 +76,58 @@ impl Drop for WString {
     }
 }
 
-pub fn to_unicode_string(buf: &[u16]) -> UNICODE_STRING {
-    let byte_len = (buf.len() * 2) as u16;
-    UNICODE_STRING {
-        Length: byte_len - 2, // Length excluding the null terminator
-        MaximumLength: byte_len,
-        Buffer: buf.as_ptr().cast_mut().cast(),
+/// A Rust representation of a UNICODE_STRING with an owned buffer.
+pub struct UnicodeString {
+    _buf: Box<[u16]>, // `_buf` exists only to keep the buffer alive
+    unicode_str: UNICODE_STRING,
+}
+
+impl UnicodeString {
+    pub fn new(rust_str: &str) -> Self {
+        let buf = Self::to_utf16_buf(rust_str);
+        let unicode_str = Self::create_raw_unicode_string_from(&buf);
+        Self {
+            _buf: buf,
+            unicode_str,
+        }
+    }
+
+    pub unsafe fn from_raw(unicode_str: UNICODE_STRING) -> Self {
+        let buf = core::slice::from_raw_parts(
+            unicode_str.Buffer,
+            (unicode_str.MaximumLength / 2) as usize,
+        )
+        .to_vec()
+        .into_boxed_slice();
+        Self {
+            _buf: buf,
+            unicode_str,
+        }
+    }
+
+    pub fn to_rust_string(&self) -> String {
+        to_rust_str(self.unicode_str)
+    }
+
+    pub fn as_raw(&self) -> &UNICODE_STRING {
+        &self.unicode_str
+    }
+
+    fn create_raw_unicode_string_from(buf: &[u16]) -> UNICODE_STRING {
+        let byte_len = (buf.len() * 2) as u16;
+        UNICODE_STRING {
+            Length: byte_len - 2, // Length excluding the null terminator
+            MaximumLength: byte_len,
+            Buffer: buf.as_ptr().cast_mut().cast(),
+        }
+    }
+
+    fn to_utf16_buf(rust_str: &str) -> Box<[u16]> {
+        let utf16_vec = rust_str
+            .encode_utf16()
+            .chain(core::iter::once(0)) // Append null terminator
+            .collect::<Vec<_>>();
+        utf16_vec.into_boxed_slice()
     }
 }
 
@@ -85,12 +135,4 @@ pub fn to_rust_str(unicode_str: UNICODE_STRING) -> String {
     let unicode_slice =
         unsafe { core::slice::from_raw_parts(unicode_str.Buffer, unicode_str.Length as usize / 2) };
     String::from_utf16_lossy(unicode_slice)
-}
-
-pub fn to_utf16_buf(rust_str: &str) -> Box<[u16]> {
-    let utf16_vec = rust_str
-        .encode_utf16()
-        .chain(core::iter::once(0)) // Append null terminator
-        .collect::<Vec<_>>();
-    utf16_vec.into_boxed_slice()
 }

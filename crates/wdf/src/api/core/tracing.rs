@@ -20,13 +20,11 @@ use wdk_sys::{
     UCHAR,
     ULONG,
     ULONG64,
+    UNICODE_STRING,
     USHORT,
 };
 
-use crate::api::{
-    guid::Guid,
-    string::{to_unicode_string, to_utf16_buf},
-};
+use crate::api::{guid::Guid, string::UnicodeString};
 
 /// These globals are expected by IFR functionality such as the
 /// windbg extensions used to read IFR logs
@@ -45,9 +43,12 @@ extern "C" {
 
 macro_rules! get_routine_addr {
     ($name:expr, $callback_type:ty) => {{
-        let name = to_utf16_buf($name);
-        let mut name = to_unicode_string(name.as_ref());
-        let addr = unsafe { MmGetSystemRoutineAddress(&mut name) };
+        let name_unicode_string = UnicodeString::new($name);
+        let name_unicode_string_raw = name_unicode_string.as_raw();
+
+        let addr = unsafe {
+            MmGetSystemRoutineAddress((name_unicode_string_raw as *const UNICODE_STRING).cast_mut())
+        };
         unsafe { mem::transmute::<PVOID, Option<$callback_type>>(addr) }
     }};
 }
