@@ -11,6 +11,8 @@ use wdk_sys::{
 
 use super::{object::Handle, result::NtResult};
 
+#[derive(Debug)]
+#[repr(transparent)]
 pub(crate) struct WString(WDFSTRING);
 
 impl Handle for WString {
