@@ -290,7 +290,6 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     // Get the string for the device interface and set the restricted
     // property on it to allow applications bound with device metadata
     // to access the interface.
-
     let symbolic_link_name = device
         .retrieve_device_interface_string(&interface_guid, None)
         .inspect_err(|e| println!("Failed to get device interface symbolic link name: {:?}", e))?;
