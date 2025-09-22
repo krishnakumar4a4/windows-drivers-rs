@@ -38,7 +38,7 @@ use super::{
     request::RequestType,
     resource::CmResList,
     result::{to_status_code, NtResult, StatusCodeExt},
-    string::OwnedUnicodeString,
+    string::{OwnedUnicodeString, WString},
     TriState,
 };
 
@@ -90,17 +90,17 @@ impl Device {
     pub fn create_interface(
         &self,
         interaface_class_guid: &Guid,
-        reference_string: Option<&str>,
+        reference_string: Option<&OwnedUnicodeString>,
     ) -> NtResult<()> {
-        let ref_str_buf = reference_string.map(OwnedUnicodeString::new);
-        let unicode_string_ptr = ref_str_buf.map_or(core::ptr::null(), |s| s.as_raw() as *const _);
+        let reference_string_ptr =
+            reference_string.map_or(core::ptr::null(), |s| s.as_raw() as *const _);
 
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfDeviceCreateDeviceInterface,
                 self.as_ptr().cast(),
                 interaface_class_guid.as_lpcguid(),
-                unicode_string_ptr
+                reference_string_ptr
             )
         }
         .ok()
@@ -180,6 +180,27 @@ impl Device {
             )
         }
         .ok()
+    }
+
+    pub fn retrieve_device_interface_string(
+        &self,
+        interface_guid: &Guid,
+        reference_string: Option<&OwnedUnicodeString>,
+    ) -> NtResult<WString> {
+        let mut wdf_string = WString::create()?;
+        let reference_string_ptr =
+            reference_string.map_or(core::ptr::null(), |s| s.as_raw() as *const _);
+
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfDeviceRetrieveDeviceInterfaceString,
+                self.as_ptr().cast(),
+                interface_guid.as_lpcguid(),
+                reference_string_ptr,
+                wdf_string.as_ptr().cast(),
+            )
+        }
+        .and_then(|| Ok(wdf_string))
     }
 
     /// Returns true if the device is operational,
