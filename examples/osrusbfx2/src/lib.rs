@@ -15,6 +15,7 @@ use wdf::{
     DevicePowerPolicyIdleSettings,
     DevicePowerPolicyWakeSettings,
     Driver,
+    Guid,
     IoQueue,
     IoQueueConfig,
     IoQueueDispatchType,
@@ -46,6 +47,7 @@ use bulkrwr::{evt_io_read, evt_io_stop, evt_io_write};
 use interrupt::cont_reader_for_interrupt_endpoint;
 use ioctl::{SwitchState, evt_io_device_control, usb_ioctl_get_interrupt_message};
 
+const GUID_DEVINTERFACE_OSRUSBFX2: &str = "573e8c73-0cb4-4471-a1bf-fab26c31d384";
 const USBD_CLIENT_CONTRACT_VERSION_602: u32 = 0x602;
 
 #[object_context(Device)]
@@ -137,6 +139,10 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     Ok(())
 }
 
+/// `evt_device_add` is called by the framework in response to AddDevice
+/// call from the PnP manager. We create and initialize a device object to
+/// represent a new instance of the device. All the software resources
+/// should be allocated in this callback.
 fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     println!("Device add callback called");
 
@@ -155,7 +161,8 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     device_init.set_io_type(&io_type);
 
-    let device = Device::create(device_init, Some(pnp_power_callbacks))?;
+    let device = Device::create(device_init, Some(pnp_power_callbacks))
+        .inspect_err(|e| println!("Failed to create device: {:?}", e))?;
 
     let pnp_caps = DevicePnpCapabilities {
         surprise_removal_ok: TriState::True,
@@ -164,6 +171,23 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     device.set_pnp_capabilities(&pnp_caps);
 
+    // Create a parallel default queue and register an event callback to
+    // receive ioctl requests. We will create separate queues for
+    // handling read and write requests. All other requests will be
+    // completed with error status automatically by the framework.
+
+    // If the driver has not explicitly set PowerManaged to WdfFalse, the
+    // framework creates power-managed queues when the device is not a filter
+    // driver. Normally the EvtIoStop is required for power-managed queues,
+    // but for this driver it is not needed b/c the driver doesn't hold on
+    // to the requests for long time or forward them to other drivers.
+    // If the EvtIoStop callback is not implemented, the framework waits for
+    // all driver-owned requests to be done before moving in the Dx/sleep
+    // states or before removing the device, which is the correct behavior
+    // for this type of driver. If the requests were taking an indeterminate
+    // amount of time to complete, or if the driver forwarded the requests
+    // to a lower driver/another stack, the queue should have an
+    // EvtIoStop/EvtIoResume.
     let queue_config = IoQueueConfig {
         dispatch_type: IoQueueDispatchType::Parallel {
             presented_requests_limit: None,
@@ -172,8 +196,13 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let default_queue = IoQueue::create(device, &queue_config)?;
+    let default_queue = IoQueue::create(device, &queue_config)
+        .inspect_err(|e| println!("Failed to create default queue: {:?}", e))?;
 
+    // We will create a separate sequential queue and configure it
+    // to receive read requests.  We also need to register a EvtIoStop
+    // handler so that we can acknowledge requests that are pending
+    // at the target driver.
     let queue_config = IoQueueConfig {
         dispatch_type: IoQueueDispatchType::Sequential,
         evt_io_read: Some(evt_io_read),
@@ -181,10 +210,20 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let read_queue = IoQueue::create(device, &queue_config)?;
+    let read_queue = IoQueue::create(device, &queue_config)
+        .inspect_err(|e| println!("Failed to create read queue: {:?}", e))?;
 
-    device.configure_request_dispatching(&read_queue, RequestType::Read)?;
+    device
+        .configure_request_dispatching(&read_queue, RequestType::Read)
+        .inspect_err(|e| {
+            println!(
+                "Failed to configure request dispatching for the read queue: {:?}",
+                e
+            )
+        })?;
 
+    // We will create another sequential queue and configure it
+    // to receive write requests.
     let queue_config = IoQueueConfig {
         dispatch_type: IoQueueDispatchType::Sequential,
         evt_io_write: Some(evt_io_write),
@@ -192,17 +231,42 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..Default::default()
     };
 
-    let write_queue = IoQueue::create(device, &queue_config)?;
+    let write_queue = IoQueue::create(device, &queue_config)
+        .inspect_err(|e| println!("Failed to create write queue: {:?}", e))?;
 
-    device.configure_request_dispatching(&write_queue, RequestType::Write)?;
+    device
+        .configure_request_dispatching(&write_queue, RequestType::Write)
+        .inspect_err(|e| {
+            println!(
+                "Failed to configure request dispatching for the write queue: {:?}",
+                e
+            )
+        })?;
 
+    // Register a manual I/O queue for handling Interrupt Message Read Requests.
+    // This queue will be used for storing Requests that need to wait for an
+    // interrupt to occur before they can be completed.
     let queue_config = IoQueueConfig {
         dispatch_type: IoQueueDispatchType::Manual,
+        // This queue is used for requests that don't directly access the device. The
+        // requests in this queue are serviced only when the device is in a fully
+        // powered state and sends an interrupt. So we can use a non-power managed
+        // queue to park the requests since we don't care whether the device is idle
+        // or fully powered up.
         power_managed: TriState::False,
         ..Default::default()
     };
 
-    let interrupt_msg_queue = IoQueue::create(device, &queue_config)?;
+    let interrupt_msg_queue = IoQueue::create(device, &queue_config)
+        .inspect_err(|e| println!("Failed to create interrupt message queue: {:?}", e))?;
+
+    // Register a device interface so that the app can find our device and talk to
+    // it.
+    let interface_guid = Guid::parse(GUID_DEVINTERFACE_OSRUSBFX2)
+        .expect("GUID_DEVINTERFACE_OSRUSBFX2 should be valid");
+    device
+        .create_interface(&interface_guid, None)
+        .inspect_err(|e| println!("Failed to create device interface: {:?}", e))?;
 
     let context = DeviceContext {
         usb_device: None,
