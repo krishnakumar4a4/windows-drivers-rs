@@ -314,7 +314,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     )
     .inspect_err(|e| {
         println!(
-            "Failed to set unrestricted property on device interface: {:?}",
+            "Failed to set custom capabilities property on device interface: {:?}",
             e
         )
     })?;
