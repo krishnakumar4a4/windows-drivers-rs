@@ -19,42 +19,6 @@ use wdk_sys::{
 const IO_SET_DEVICE_INTERFACE_PROPERTY_DATA: &str = "IoSetDeviceInterfacePropertyData";
 const DEVPROP_TRUE: DEVPROP_BOOLEAN = -1;
 
-pub struct DevPropKey(DEVPROPKEY);
-
-impl DevPropKey {
-    pub const fn new(fmt_id: DEVPROPGUID, pid: u32) -> Self {
-        Self(DEVPROPKEY { fmtid: fmt_id, pid })
-    }
-
-    pub const fn restricted() -> Self {
-        Self::new(
-            DEVPROPGUID {
-                Data1: 0x026E516E,
-                Data2: 0xB814,
-                Data3: 0x414B,
-                Data4: [0x83, 0xCD, 0x85, 0x6D, 0x6F, 0xEF, 0x48, 0x22],
-            },
-            6,
-        )
-    }
-
-    pub const fn unrestricted_device_capabilities() -> Self {
-        Self::new(
-            DEVPROPGUID {
-                Data1: 0x026E516E,
-                Data2: 0xB814,
-                Data3: 0x414B,
-                Data4: [0x83, 0xCD, 0x85, 0x6D, 0x6F, 0xEF, 0x48, 0x22],
-            },
-            8,
-        )
-    }
-
-    pub fn as_ptr(&self) -> PDEVPROPKEY {
-        (&self.0 as *const DEVPROPKEY).cast_mut()
-    }
-}
-
 type IoSetDeviceInterfacePropertyData = extern "system" fn(
     symbolic_link_name: *mut UNICODE_STRING,
     property_key: *const DEVPROPKEY,
@@ -72,7 +36,7 @@ unsafe extern "C" {
 pub fn set_device_interface_property_restricted(symbolic_link_name: &WString) -> NtResult<()> {
     set_device_interface_property_data(
         symbolic_link_name,
-        &DevPropKey::restricted(),
+        &restricted_prop_key(),
         DEVPROP_TYPE_BOOLEAN,
         size_of::<DEVPROP_BOOLEAN>() as ULONG,
         &DEVPROP_TRUE as *const DEVPROP_BOOLEAN as PVOID,
@@ -94,7 +58,7 @@ pub fn set_device_interface_property_unrestricted_device_capabilities(
 
     set_device_interface_property_data(
         symbolic_link_name,
-        &DevPropKey::unrestricted_device_capabilities(),
+        &unrestricted_device_capabilities_prop_key(),
         DEVPROP_TYPE_STRING_LIST,
         capabilities_size as ULONG,
         capabilities.as_ptr() as PVOID,
@@ -103,7 +67,7 @@ pub fn set_device_interface_property_unrestricted_device_capabilities(
 
 fn set_device_interface_property_data(
     symbolic_link_name: &WString,
-    property_key: &DevPropKey,
+    property_key: &DEVPROPKEY,
     data_type: DEVPROPTYPE,
     size: ULONG,
     data: PVOID,
@@ -117,7 +81,7 @@ fn set_device_interface_property_data(
 
     let status = set_device_interface_property_data(
         &mut symbolic_link_name as *mut UNICODE_STRING,
-        property_key.as_ptr(),
+        property_key as *const DEVPROPKEY as PDEVPROPKEY,
         0, // lcid
         0, // flags
         data_type,
@@ -133,6 +97,30 @@ fn set_device_interface_property_data(
             status
         );
         Err(NtStatusError::from(status))
+    }
+}
+
+pub const fn restricted_prop_key() -> DEVPROPKEY {
+    DEVPROPKEY {
+        fmtid: DEVPROPGUID {
+            Data1: 0x026E516E,
+            Data2: 0xB814,
+            Data3: 0x414B,
+            Data4: [0x83, 0xCD, 0x85, 0x6D, 0x6F, 0xEF, 0x48, 0x22],
+        },
+        pid: 6,
+    }
+}
+
+pub const fn unrestricted_device_capabilities_prop_key() -> DEVPROPKEY {
+    DEVPROPKEY {
+        fmtid: DEVPROPGUID {
+            Data1: 0x026E516E,
+            Data2: 0xB814,
+            Data3: 0x414B,
+            Data4: [0x83, 0xCD, 0x85, 0x6D, 0x6F, 0xEF, 0x48, 0x22],
+        },
+        pid: 8,
     }
 }
 
