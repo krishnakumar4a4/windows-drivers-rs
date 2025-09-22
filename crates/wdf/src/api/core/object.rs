@@ -77,7 +77,7 @@ pub(crate) use impl_handle;
 pub(crate) use impl_ref_counted_handle;
 
 /// A trait for framework handles that can return the device they belong to.
-pub(crate) trait GetDevice: Handle {
+pub trait GetDevice: Handle { // TODO: this trait is not the final design. We need something more coherent
     fn get_device(&self) -> &Device;
 }
 
