@@ -15,6 +15,7 @@ use wdk_sys::{
     USB_REQUEST_GET_STATUS,
     USB_REQUEST_SET_FEATURE,
     WDFCONTEXT,
+    WDFDEVICE,
     WDFMEMORY,
     WDFMEMORY_OFFSET,
     WDFUSBDEVICE,
@@ -220,10 +221,11 @@ impl UsbDevice {
 }
 
 impl GetDevice for UsbDevice {
-    fn get_device(&self) -> &Device {
-        self.get_io_target().get_device()
+    fn get_device_ptr(&self) -> WDFDEVICE {
+        self.get_io_target().get_device_ptr()
     }
 }
+
 #[object_context_with_ref_count_check(UsbDevice)]
 struct UsbDeviceContext {
     ref_count: AtomicUsize,

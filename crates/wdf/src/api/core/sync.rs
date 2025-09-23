@@ -12,6 +12,7 @@ use wdk::println;
 use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFSPINLOCK};
 
 use super::{
+    device::Device,
     object::{bug_check, init_attributes, GetDevice, Handle, RefCountedHandle},
     result::{NtResult, StatusCodeExt},
 };
@@ -163,18 +164,31 @@ impl<T: RefCountedHandle> Arc<T> {
     /// Returns a mutable reference to the inner value
     ///
     /// A mutable reference to the inner value is returned only
-    /// if the `Device` associated with `T` is in D0 state or higher
+    /// if the `Device` associated with `T` is in on operational
+    /// state (i.e. D0 power state or higher)
     ///
     /// # Panics
-    /// Panics if the `Device` associated with `T` is not operational
+    /// Panics if the `Device` associated with `T` is operational
     pub fn get_mut(&mut self) -> &mut T
     where
         T: GetDevice,
     {
-        // This ensures we panic if the device is not operational
-        // instead of returning an unsafe reference.
-        // See the documentation `Device::cast_if_operational` for details.
-        let _device = self.get_device(); //
+        let device_ptr = self.get_device_ptr();
+
+        if unsafe { Device::is_operational(device_ptr) } {
+            // When the device is operational its callbacks
+            // are running and they receive their arguments
+            // as normal references `&T` not as `Arc<T>`.
+            // Therefore even if the `Arc<T>` ref count is 1,
+            // during this state other kinds of references
+            // may still be active and it's unsafe to return
+            // an exclusive reference to `T`.
+            panic!(
+                "Cannot get mutable reference to {} because the associated device is in \
+                 operational state",
+                T::type_name()
+            );
+        }
 
         unsafe { &mut *self.as_ptr().cast::<T>() }
     }

@@ -3,6 +3,7 @@ use core::sync::atomic::AtomicUsize;
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
+    WDFDEVICE,
     WDFQUEUE,
     WDFREQUEST,
     WDF_IO_QUEUE_CONFIG,
@@ -56,15 +57,7 @@ impl IoQueue {
     }
 
     pub fn get_device(&self) -> &Device {
-        unsafe {
-            let device_ptr =
-                call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr().cast());
-
-            // This ensures we panic if the device is not operational
-            // instead of returning an unsafe reference.
-            // See the documentation `cast_if_operational` for details.
-            Device::cast_if_operational(device_ptr)
-        }
+        self.get_device_safely()
     }
 
     pub fn start(&self) {
@@ -93,8 +86,8 @@ impl IoQueue {
 }
 
 impl GetDevice for IoQueue {
-    fn get_device(&self) -> &Device {
-        self.get_device()
+    fn get_device_ptr(&self) -> WDFDEVICE {
+        unsafe { call_unsafe_wdf_function_binding!(WdfIoQueueGetDevice, self.as_ptr().cast()) }
     }
 }
 

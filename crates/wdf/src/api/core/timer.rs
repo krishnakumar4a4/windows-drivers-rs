@@ -76,26 +76,22 @@ impl Timer {
     }
 
     pub fn get_device(&self) -> &Device {
-        let parent = unsafe {
-            call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr().cast())
-        };
-
-        let device = parent as WDFDEVICE;
-
-        if device.is_null() {
-            panic!("Timer has no parent device");
-        }
-
-        // This ensures we panic if the device is not operational
-        // instead of returning an unsafe reference.
-        // See the documentation `cast_if_operational` for details.
-        unsafe { Device::cast_if_operational(device) }
+        self.get_device_safely()
     }
 }
 
 impl GetDevice for Timer {
-    fn get_device(&self) -> &Device {
-        self.get_device()
+    fn get_device_ptr(&self) -> WDFDEVICE {
+        let device_ptr = unsafe {
+            call_unsafe_wdf_function_binding!(WdfTimerGetParentObject, self.as_ptr().cast())
+                as WDFDEVICE
+        };
+
+        if device_ptr.is_null() {
+            panic!("Timer has no parent device");
+        }
+
+        device_ptr
     }
 }
 
