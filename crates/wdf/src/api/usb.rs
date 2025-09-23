@@ -366,7 +366,7 @@ impl UsbInterface {
         pipe_index: u8,
         get_info: bool,
     ) -> Option<(*mut UsbPipe, Option<UsbPipeInformation>)> {
-        let mut pipe_info = WDF_USB_PIPE_INFORMATION::default();
+        let mut pipe_info = init_wdf_struct!(WDF_USB_PIPE_INFORMATION);
         let pipe_info_ptr = if get_info {
             &raw mut pipe_info
         } else {
