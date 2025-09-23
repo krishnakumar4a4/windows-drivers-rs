@@ -79,7 +79,7 @@ pub(crate) use impl_ref_counted_handle;
 
 /// A trait for framework handles that can return the device they belong to
 // TODO: this trait is not the final design. We may need something more coherent
-pub(crate) trait GetDevice: Handle {
+pub trait GetDevice: Handle {
     /// Gets the `WDFDEVICE` pointer to device that this object belongs to
     ///
     /// The implementing type needs to implement only this method.
