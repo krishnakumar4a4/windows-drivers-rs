@@ -62,8 +62,8 @@ struct DeviceContext {
     current_switch_state: SpinLock<SwitchState>,
     interrupt_msg_queue: Arc<IoQueue>,
     sent_requests: SpinLock<Vec<SentRequest>>, // TODO: change to HashMap when available
-    // Below three queue are never used.
-    // They're  stored here only to keep them alive
+    // Below three variables are never used.
+    // They're placed here only to keep the queues alive
     _default_queue: Arc<IoQueue>,
     _read_queue: Arc<IoQueue>,
     _write_queue: Arc<IoQueue>,
