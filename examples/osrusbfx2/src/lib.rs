@@ -418,8 +418,6 @@ fn evt_device_self_managed_io_flush(device: &Device) {
 }
 
 fn set_power_policy(device: &Device) -> NtResult<()> {
-    println!("Set power policy callback called");
-
     let mut idle_settings = DevicePowerPolicyIdleSettings::from_caps(
         PowerPolicyS0IdleCapabilities::UsbSelectiveSuspend,
     );
