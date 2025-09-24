@@ -317,7 +317,7 @@ fn set_bar_graph_display(device_context: &DeviceContext, request: &Request) -> N
     let buf_mut = &mut [buffer[0]; 1];
 
     let bytes_transferred = send_vendor_command(
-        UsbBmRequestDirection::DeviceToHost,
+        UsbBmRequestDirection::HostToDevice,
         USBFX2LK_SET_BARGRAPH_DISPLAY,
         Some(buf_mut),
         device_context,
@@ -372,7 +372,7 @@ fn set_seven_segment_display(device_context: &DeviceContext, request: &Request) 
     let buf_mut = &mut [buffer[0]; 1];
 
     let bytes_transferred = send_vendor_command(
-        UsbBmRequestDirection::DeviceToHost,
+        UsbBmRequestDirection::HostToDevice,
         USBFX2LK_SET_7SEGMENT_DISPLAY,
         Some(buf_mut),
         device_context,
