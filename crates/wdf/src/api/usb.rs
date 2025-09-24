@@ -944,6 +944,7 @@ impl Into<WDF_USB_CONTROL_SETUP_PACKET> for &UsbControlSetupPacket {
     }
 }
 
+#[derive(Debug)]
 pub enum UsbControlTransferMemoryDescriptor<'a> {
     HostToDevice(Option<&'a MemoryDescriptor<'a>>),
     DeviceToHost(&'a MemoryDescriptorMut<'a>),
@@ -962,6 +963,7 @@ impl Into<UsbBmRequestDirection> for &UsbControlTransferMemoryDescriptor<'_> {
     }
 }
 
+#[derive(Debug)]
 pub enum UsbControlTransfer<'a> {
     Class {
         recipient: UsbBmRequestRecipient,

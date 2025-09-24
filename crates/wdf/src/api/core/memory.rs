@@ -154,6 +154,7 @@ impl DerefMut for OwnedMemory {
 
 /// An type specifying different
 /// kinds of memory buffers
+#[derive(Debug)]
 pub enum MemoryDescriptor<'a> {
     Buffer(&'a [u8]),
     Mdl {
@@ -187,6 +188,7 @@ impl<'a> Into<WDF_MEMORY_DESCRIPTOR> for &MemoryDescriptor<'a> {
     }
 }
 
+#[derive(Debug)]
 pub enum MemoryDescriptorMut<'a> {
     Buffer(&'a mut [u8]),
     Mdl {
@@ -252,6 +254,7 @@ fn set_handle(
 // plus buffer length to prevent
 // buffer overflows
 #[repr(C)]
+#[derive(Debug)]
 pub struct Mdl {
     _private: [u8; 0], // Prevents instantiation of the struct from driver code
 }
