@@ -87,24 +87,19 @@ impl UsbDevice {
         unsafe { &*(self.as_ptr().cast::<IoTarget>()) }
     }
 
-    pub fn retrieve_config_descriptor(
-        &self,
-        config_descriptor: Option<&mut [u8]>,
-    ) -> NtResult<u16> {
+    pub fn retrieve_config_descriptor(&self, buffer: Option<&mut [u8]>) -> NtResult<u16> {
         let mut length: u16 = 0;
-        let config_descriptor_is_none = config_descriptor.is_none();
+        let buffer_is_none = buffer.is_none();
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceRetrieveConfigDescriptor,
                 self.as_ptr().cast(),
-                config_descriptor
-                    .map_or(ptr::null_mut(), |b| b.as_mut_ptr())
-                    .cast(),
+                buffer.map_or(ptr::null_mut(), |b| b.as_mut_ptr()).cast(),
                 &mut length
             )
         };
 
-        if status == status_codes::STATUS_BUFFER_TOO_SMALL && config_descriptor_is_none {
+        if status == status_codes::STATUS_BUFFER_TOO_SMALL && buffer_is_none {
             Ok(length)
         } else {
             Err(status.into())
