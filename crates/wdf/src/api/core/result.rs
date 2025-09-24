@@ -1,3 +1,5 @@
+use core::fmt::Debug;
+
 use wdk_sys::{NTSTATUS, NT_ERROR, NT_INFORMATION, NT_SUCCESS, NT_WARNING};
 
 // TODO: Needs redesign. Currently we are treating
@@ -153,13 +155,16 @@ impl Into<i32> for NtStatusNonError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct NtStatusError(i32);
 
 impl NtStatusError {
     pub fn from(code: i32) -> Self {
         if !NT_ERROR(code) {
-            panic!("NtStatusError::fromcalled with non-error code: {:#X}", code);
+            panic!(
+                "NtStatusError::from called with non-error code: {:#X}",
+                code
+            );
         }
 
         Self(code)
@@ -179,6 +184,13 @@ impl From<i32> for NtStatusError {
 impl Into<i32> for NtStatusError {
     fn into(self) -> i32 {
         self.code()
+    }
+}
+
+// Debug implemented manually to print the code in hex
+impl Debug for NtStatusError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "NtStatusError({:#X})", self.0)
     }
 }
 
