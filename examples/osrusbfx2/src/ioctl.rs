@@ -176,7 +176,10 @@ pub fn evt_io_device_control(
     _input_buffer_length: usize,
     control_code: u32,
 ) {
-    println!("I/O device control callback called. Control code: {:#X}", control_code);
+    println!(
+        "I/O device control callback called. Control code: {:#X}",
+        control_code
+    );
 
     let device = queue.get_device();
     let device_context = DeviceContext::get(device);
