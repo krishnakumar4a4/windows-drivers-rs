@@ -241,5 +241,5 @@ macro_rules! unsafe_request_handler {
 unsafe_request_handler!(evt_io_default);
 unsafe_request_handler!(evt_io_read, length: usize);
 unsafe_request_handler!(evt_io_write, length: usize);
-unsafe_request_handler!(evt_io_device_control,  OutputBufferLength: usize, InputBufferLength: usize, IoControlCode: u32);
+unsafe_request_handler!(evt_io_device_control, OutputBufferLength: usize, InputBufferLength: usize, IoControlCode: u32);
 unsafe_request_handler!(evt_io_stop, req => req.id(), ActionFlags: u32 => RequestStopActionFlags::from_bits_retain(ActionFlags));
