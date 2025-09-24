@@ -193,13 +193,10 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     // amount of time to complete, or if the driver forwarded the requests
     // to a lower driver/another stack, the queue should have an
     // EvtIoStop/EvtIoResume.
-    let queue_config = IoQueueConfig {
-        dispatch_type: IoQueueDispatchType::Parallel {
-            presented_requests_limit: None,
-        },
-        evt_io_device_control: Some(evt_io_device_control),
-        ..Default::default()
-    };
+    let mut queue_config = IoQueueConfig::new_default(IoQueueDispatchType::Parallel {
+        presented_requests_limit: None,
+    });
+    queue_config.evt_io_device_control = Some(evt_io_device_control);
 
     let default_queue = IoQueue::create(device, &queue_config)
         .inspect_err(|e| println!("Failed to create default queue: {:?}", e))?;
@@ -208,12 +205,9 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     // to receive read requests.  We also need to register a EvtIoStop
     // handler so that we can acknowledge requests that are pending
     // at the target driver.
-    let queue_config = IoQueueConfig {
-        dispatch_type: IoQueueDispatchType::Sequential,
-        evt_io_read: Some(evt_io_read),
-        evt_io_stop: Some(evt_io_stop),
-        ..Default::default()
-    };
+    let mut queue_config = IoQueueConfig::new(IoQueueDispatchType::Sequential);
+    queue_config.evt_io_read = Some(evt_io_read);
+    queue_config.evt_io_stop = Some(evt_io_stop);
 
     let read_queue = IoQueue::create(device, &queue_config)
         .inspect_err(|e| println!("Failed to create read queue: {:?}", e))?;
@@ -229,12 +223,9 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     // We will create another sequential queue and configure it
     // to receive write requests.
-    let queue_config = IoQueueConfig {
-        dispatch_type: IoQueueDispatchType::Sequential,
-        evt_io_write: Some(evt_io_write),
-        evt_io_stop: Some(evt_io_stop),
-        ..Default::default()
-    };
+    let mut queue_config = IoQueueConfig::new(IoQueueDispatchType::Sequential);
+    queue_config.evt_io_write = Some(evt_io_write);
+    queue_config.evt_io_stop = Some(evt_io_stop);
 
     let write_queue = IoQueue::create(device, &queue_config)
         .inspect_err(|e| println!("Failed to create write queue: {:?}", e))?;
@@ -251,16 +242,13 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     // Register a manual I/O queue for handling Interrupt Message Read Requests.
     // This queue will be used for storing Requests that need to wait for an
     // interrupt to occur before they can be completed.
-    let queue_config = IoQueueConfig {
-        dispatch_type: IoQueueDispatchType::Manual,
-        // This queue is used for requests that don't directly access the device. The
-        // requests in this queue are serviced only when the device is in a fully
-        // powered state and sends an interrupt. So we can use a non-power managed
-        // queue to park the requests since we don't care whether the device is idle
-        // or fully powered up.
-        power_managed: TriState::False,
-        ..Default::default()
-    };
+    let mut queue_config = IoQueueConfig::new(IoQueueDispatchType::Manual);
+    // This queue is used for requests that don't directly access the device. The
+    // requests in this queue are serviced only when the device is in a fully
+    // powered state and sends an interrupt. So we can use a non-power managed
+    // queue to park the requests since we don't care whether the device is idle
+    // or fully powered up.
+    queue_config.power_managed = TriState::False;
 
     let interrupt_msg_queue = IoQueue::create(device, &queue_config)
         .inspect_err(|e| println!("Failed to create interrupt message queue: {:?}", e))?;

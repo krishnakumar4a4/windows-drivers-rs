@@ -126,10 +126,11 @@ pub struct IoQueueConfig {
     pub evt_io_stop: Option<fn(&IoQueue, RequestId, RequestStopActionFlags)>,
 }
 
-impl Default for IoQueueConfig {
-    fn default() -> Self {
+impl IoQueueConfig {
+    /// Create a new `IoQueueConfig` with the specified dispatch type
+    pub fn new(dispatch_type: IoQueueDispatchType) -> Self {
         Self {
-            dispatch_type: IoQueueDispatchType::Sequential,
+            dispatch_type,
             power_managed: TriState::UseDefault,
             allow_zero_length_requests: false,
             default_queue: false,
@@ -139,6 +140,14 @@ impl Default for IoQueueConfig {
             evt_io_device_control: None,
             evt_io_stop: None,
         }
+    }
+
+    /// Create a new `IoQueueConfig` with the specified dispatch type
+    /// and with `default_queue` set to `true`
+    pub fn new_default(dispatch_type: IoQueueDispatchType) -> Self {
+        let mut queue = Self::new(dispatch_type);
+        queue.default_queue = true;
+        queue
     }
 }
 
