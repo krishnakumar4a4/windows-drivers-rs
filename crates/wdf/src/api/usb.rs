@@ -2,6 +2,7 @@ use core::{mem, ptr, sync::atomic::AtomicUsize};
 
 use bitflags::bitflags;
 use wdf_macros::{object_context, object_context_with_ref_count_check};
+use wdk::nt_success;
 use wdk_sys::{
     _WdfUsbTargetDeviceSelectConfigType,
     _WdfUsbTargetDeviceSelectSettingType,
@@ -88,19 +89,20 @@ impl UsbDevice {
     }
 
     pub fn retrieve_config_descriptor(&self, buffer: Option<&mut [u8]>) -> NtResult<u16> {
-        let mut length: u16 = 0;
-        let buffer_is_none = buffer.is_none();
+        let (buf_ptr, mut buf_len) =
+            buffer.map_or((ptr::null_mut(), 0), |b| (b.as_mut_ptr(), b.len() as u16));
         let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetDeviceRetrieveConfigDescriptor,
                 self.as_ptr().cast(),
-                buffer.map_or(ptr::null_mut(), |b| b.as_mut_ptr()).cast(),
-                &mut length
+                buf_ptr.cast(),
+                &mut buf_len
             )
         };
 
-        if status == status_codes::STATUS_BUFFER_TOO_SMALL && buffer_is_none {
-            Ok(length)
+        let length_requested = status == status_codes::STATUS_BUFFER_TOO_SMALL && buf_ptr.is_null();
+        if nt_success(status) || length_requested {
+            Ok(buf_len)
         } else {
             Err(status.into())
         }
