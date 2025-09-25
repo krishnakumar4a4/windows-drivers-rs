@@ -72,7 +72,7 @@ impl IoQueue {
         }
     }
 
-    pub fn retrieve_next_request(&self) -> NtResult<Request> {
+    pub fn retrieve_next_request(&self) -> NtResult<Option<Request>> {
         let mut request: WDFREQUEST = core::ptr::null_mut();
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -81,7 +81,13 @@ impl IoQueue {
                 &mut request
             )
         }
-        .map(|| unsafe { Request::from_raw(request) })
+        .map(|| unsafe {
+            if !request.is_null() {
+                Some(Request::from_raw(request))
+            } else {
+                None
+            }
+        })
     }
 }
 

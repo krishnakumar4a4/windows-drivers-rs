@@ -440,7 +440,7 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
     let mut bytes_returned;
     loop {
         match device_context.interrupt_msg_queue.retrieve_next_request() {
-            Ok(mut request) => {
+            Ok(Some(mut request)) => {
                 let (request_status, bytes_returned) = match request
                     .retrieve_output_buffer(size_of::<SwitchState>())
                 {
@@ -462,6 +462,10 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
                 };
 
                 request.complete_with_information(request_status, bytes_returned);
+            }
+            Ok(None) => {
+                // No more requests to process
+                break;
             }
             Err(e) if e.code() == status_codes::STATUS_NO_MORE_ENTRIES => {
                 // No more requests to process
