@@ -214,6 +214,7 @@ fn is_valid_offset(buffer_len: usize, offset: &Option<MemoryOffset>) -> bool {
 
 /// Specifies the buffer used while formatting
 /// a request
+#[derive(Debug)]
 pub enum RequestFormatBuffer {
     /// Do not use any buffer
     None,

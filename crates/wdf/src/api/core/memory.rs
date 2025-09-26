@@ -259,8 +259,8 @@ pub struct Mdl {
     _private: [u8; 0], // Prevents instantiation of the struct from driver code
 }
 
-#[derive(Debug)]
 #[repr(C)] // To allow casting to WDFMEMORY_OFFSET
+#[derive(Debug)]
 pub struct MemoryOffset {
     pub buffer_offset: usize,
     pub buffer_length: usize,
