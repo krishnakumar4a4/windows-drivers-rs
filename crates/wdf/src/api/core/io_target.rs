@@ -131,14 +131,20 @@ pub(crate) fn to_buffer_ptrs(
     raw_buffer_offset: &mut WDFMEMORY_OFFSET,
     is_input_buffer: bool,
 ) -> NtResult<(WDFMEMORY, PWDFMEMORY_OFFSET)> {
-    let (buffer_ptr, buffer_len, buffer_offset) = match buffer {
+    let (mem_ptr, buffer_len, buffer_offset) = match buffer {
         RequestFormatBuffer::None => (ptr::null_mut(), 0, None),
         RequestFormatBuffer::RequestBuffer(offset) => {
-            let (ptr, len) = get_request_buf_ptr_and_len(request, is_input_buffer)?;
+            let mem: &Memory = if is_input_buffer {
+                request.retrieve_input_memory()?
+            } else {
+                request.retrieve_output_memory()?
+            };
+            let (ptr, len) = get_memory_ptr_and_len(mem);
+
             (ptr, len, offset)
         }
-        RequestFormatBuffer::UserBuffer(mut mem, offset) => {
-            let (ptr, len) = get_memory_buf_ptr_and_len(&mut mem);
+        RequestFormatBuffer::UserBuffer(mem, offset) => {
+            let (ptr, len) = get_memory_ptr_and_len(&mem);
 
             // IMPORTANT: Save the buffer in the request
             // so that it stays alive while the request
@@ -160,7 +166,7 @@ pub(crate) fn to_buffer_ptrs(
         ptr::null_mut()
     };
 
-    Ok((buffer_ptr.cast(), raw_buffer_offset_ptr))
+    Ok((mem_ptr, raw_buffer_offset_ptr))
 }
 
 fn to_device_offset_ptr(device_offset: Option<i64>) -> *mut i64 {
@@ -182,22 +188,12 @@ fn set_request_user_buffer(
     Ok(())
 }
 
-fn get_request_buf_ptr_and_len(
-    request: &mut Request,
-    is_input_buffer: bool,
-) -> NtResult<(*mut u8, usize)> {
-    let memory: &Memory = if is_input_buffer {
-        request.retrieve_input_memory()?
-    } else {
-        request.retrieve_output_memory()?
-    };
-
-    Ok(get_memory_buf_ptr_and_len(memory))
-}
-
-fn get_memory_buf_ptr_and_len(memory: &Memory) -> (*mut u8, usize) {
+/// Gets the raw pointer corresponding to the given
+/// `Memory` reference along with the length of its
+/// underlying buffer
+fn get_memory_ptr_and_len(memory: &Memory) -> (WDFMEMORY, usize) {
     let buffer = memory.get_buffer();
-    (buffer.as_ptr().cast_mut(), buffer.len())
+    (memory.as_ptr() as WDFMEMORY, buffer.len())
 }
 
 fn is_valid_offset(buffer_len: usize, offset: &Option<MemoryOffset>) -> bool {
