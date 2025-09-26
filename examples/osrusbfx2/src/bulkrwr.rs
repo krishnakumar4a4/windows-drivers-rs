@@ -4,7 +4,7 @@ use wdf::{
     Request,
     RequestCompletionParamDetails,
     RequestCompletionToken,
-    RequestFormatBuffer,
+    RequestFormatMemory,
     RequestId,
     RequestStopActionFlags,
     println,
@@ -32,7 +32,7 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     let pipe = device_context.get_bulk_read_pipe();
 
     if let Err(e) =
-        pipe.format_request_for_read(&mut request, RequestFormatBuffer::RequestBuffer(None))
+        pipe.format_request_for_read(&mut request, RequestFormatMemory::RequestMemory(None))
     {
         println!("Format request for read failed: {:?}", e);
         request.complete_with_information(e.code().into(), 0);
@@ -114,7 +114,7 @@ pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
     let pipe = device_context.get_bulk_write_pipe();
 
     if let Err(e) =
-        pipe.format_request_for_write(&mut request, RequestFormatBuffer::RequestBuffer(None))
+        pipe.format_request_for_write(&mut request, RequestFormatMemory::RequestMemory(None))
     {
         println!("Format request for write failed: {:?}", e);
         request.complete_with_information(e.code().into(), 0);

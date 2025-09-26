@@ -45,7 +45,7 @@ use super::core::{
     device::Device,
     enum_mapping,
     init_wdf_struct,
-    io_target::{to_buffer_ptrs, IoTarget, RequestFormatBuffer},
+    io_target::{to_memory_ptrs, IoTarget, RequestFormatMemory},
     memory::{Memory, MemoryDescriptor, MemoryDescriptorMut},
     object::{impl_handle, impl_ref_counted_handle, GetDevice, Handle},
     request::Request,
@@ -476,19 +476,19 @@ impl UsbPipe {
     pub fn format_request_for_read(
         &self,
         request: &mut Request,
-        output_buffer: RequestFormatBuffer,
+        output_memory: RequestFormatMemory,
     ) -> NtResult<()> {
-        let mut buffer_offset = WDFMEMORY_OFFSET::default();
-        let (buffer_ptr, buffer_offset_ptr) =
-            to_buffer_ptrs(request, output_buffer, &mut buffer_offset, false)?;
+        let mut memory_offset = WDFMEMORY_OFFSET::default();
+        let (memory_ptr, memory_offset_ptr) =
+            to_memory_ptrs(request, output_memory, &mut memory_offset, false)?;
 
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetPipeFormatRequestForRead,
                 self.as_ptr().cast(),
                 request.as_ptr().cast(),
-                buffer_ptr.cast(),
-                buffer_offset_ptr,
+                memory_ptr.cast(),
+                memory_offset_ptr,
             )
         }
         .ok()
@@ -497,19 +497,19 @@ impl UsbPipe {
     pub fn format_request_for_write(
         &self,
         request: &mut Request,
-        input_buffer: RequestFormatBuffer,
+        input_memory: RequestFormatMemory,
     ) -> NtResult<()> {
-        let mut buffer_offset = WDFMEMORY_OFFSET::default();
-        let (buffer_ptr, buffer_offset_ptr) =
-            to_buffer_ptrs(request, input_buffer, &mut buffer_offset, true)?;
+        let mut memory_offset = WDFMEMORY_OFFSET::default();
+        let (memory_ptr, memory_offset_ptr) =
+            to_memory_ptrs(request, input_memory, &mut memory_offset, true)?;
 
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfUsbTargetPipeFormatRequestForRead,
                 self.as_ptr().cast(),
                 request.as_ptr().cast(),
-                buffer_ptr.cast(),
-                buffer_offset_ptr,
+                memory_ptr.cast(),
+                memory_offset_ptr,
             )
         }
         .ok()

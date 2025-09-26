@@ -75,20 +75,20 @@ impl IoTarget {
     pub fn format_request_for_read(
         &self,
         request: &mut Request,
-        output_buffer: RequestFormatBuffer,
+        output_memory: RequestFormatMemory,
         device_offset: Option<i64>,
     ) -> NtResult<()> {
-        let mut buffer_offset = WDFMEMORY_OFFSET::default();
-        let (buffer_ptr, buffer_offset_ptr) =
-            to_buffer_ptrs(request, output_buffer, &mut buffer_offset, false)?;
+        let mut memory_offset = WDFMEMORY_OFFSET::default();
+        let (memory_ptr, memory_offset_ptr) =
+            to_memory_ptrs(request, output_memory, &mut memory_offset, false)?;
 
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoTargetFormatRequestForRead,
                 self.as_ptr().cast(),
                 request.as_ptr().cast(),
-                buffer_ptr.cast(),
-                buffer_offset_ptr,
+                memory_ptr.cast(),
+                memory_offset_ptr,
                 to_device_offset_ptr(device_offset)
             )
         }
@@ -98,20 +98,20 @@ impl IoTarget {
     pub fn format_request_for_write(
         &self,
         request: &mut Request,
-        input_buffer: RequestFormatBuffer,
+        input_memory: RequestFormatMemory,
         device_offset: Option<i64>,
     ) -> NtResult<()> {
-        let mut buffer_offset = WDFMEMORY_OFFSET::default();
-        let (buffer_ptr, buffer_offset_ptr) =
-            to_buffer_ptrs(request, input_buffer, &mut buffer_offset, true)?;
+        let mut memory_offset = WDFMEMORY_OFFSET::default();
+        let (memory_ptr, memory_offset_ptr) =
+            to_memory_ptrs(request, input_memory, &mut memory_offset, true)?;
 
         unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoTargetFormatRequestForWrite,
                 self.as_ptr().cast(),
                 request.as_ptr().cast(),
-                buffer_ptr.cast(),
-                buffer_offset_ptr,
+                memory_ptr.cast(),
+                memory_offset_ptr,
                 to_device_offset_ptr(device_offset)
             )
         }
@@ -125,48 +125,48 @@ impl GetDevice for IoTarget {
     }
 }
 
-pub(crate) fn to_buffer_ptrs(
+pub(crate) fn to_memory_ptrs(
     request: &mut Request,
-    buffer: RequestFormatBuffer,
-    raw_buffer_offset: &mut WDFMEMORY_OFFSET,
-    is_input_buffer: bool,
+    memory: RequestFormatMemory,
+    raw_memory_offset: &mut WDFMEMORY_OFFSET,
+    is_input_memory: bool,
 ) -> NtResult<(WDFMEMORY, PWDFMEMORY_OFFSET)> {
-    let (mem_ptr, buffer_len, buffer_offset) = match buffer {
-        RequestFormatBuffer::None => (ptr::null_mut(), 0, None),
-        RequestFormatBuffer::RequestBuffer(offset) => {
-            let mem: &Memory = if is_input_buffer {
+    let (mem_ptr, buffer_len, offset) = match memory {
+        RequestFormatMemory::None => (ptr::null_mut(), 0, None),
+        RequestFormatMemory::RequestMemory(offset) => {
+            let memory: &Memory = if is_input_memory {
                 request.retrieve_input_memory()?
             } else {
                 request.retrieve_output_memory()?
             };
-            let (ptr, len) = get_memory_ptr_and_len(mem);
+            let (ptr, len) = get_memory_ptr_and_len(memory);
 
             (ptr, len, offset)
         }
-        RequestFormatBuffer::UserBuffer(mem, offset) => {
-            let (ptr, len) = get_memory_ptr_and_len(&mem);
+        RequestFormatMemory::UserBuffer(memory, offset) => {
+            let (ptr, len) = get_memory_ptr_and_len(&memory);
 
             // IMPORTANT: Save the buffer in the request
             // so that it stays alive while the request
             // is being processed
-            set_request_user_buffer(request, mem, is_input_buffer)?;
+            set_request_user_buffer(request, memory, is_input_memory)?;
 
             (ptr, len, offset)
         }
     };
 
-    if !is_valid_offset(buffer_len, &buffer_offset) {
+    if !is_valid_offset(buffer_len, &offset) {
         return Err(status_codes::STATUS_INVALID_PARAMETER.into());
     }
 
-    let raw_buffer_offset_ptr = if let Some(ref offset) = buffer_offset {
-        *raw_buffer_offset = offset.into();
-        raw_buffer_offset as PWDFMEMORY_OFFSET
+    let raw_memory_offset_ptr = if let Some(ref offset) = offset {
+        *raw_memory_offset = offset.into();
+        raw_memory_offset as PWDFMEMORY_OFFSET
     } else {
         ptr::null_mut()
     };
 
-    Ok((mem_ptr, raw_buffer_offset_ptr))
+    Ok((mem_ptr, raw_memory_offset_ptr))
 }
 
 fn to_device_offset_ptr(device_offset: Option<i64>) -> *mut i64 {
@@ -208,17 +208,17 @@ fn is_valid_offset(buffer_len: usize, offset: &Option<MemoryOffset>) -> bool {
     }
 }
 
-/// Specifies the buffer used while formatting
+/// Specifies the memory used while formatting
 /// a request
 #[derive(Debug)]
-pub enum RequestFormatBuffer {
-    /// Do not use any buffer
+pub enum RequestFormatMemory {
+    /// Do not use any memory
     None,
 
-    /// The buffer associated with the request
-    RequestBuffer(Option<MemoryOffset>),
+    /// The memory associated with the request
+    RequestMemory(Option<MemoryOffset>),
 
-    /// An independent buffer provided by user
+    /// An independent memory provided by user
     UserBuffer(OwnedMemory, Option<MemoryOffset>),
 }
 
