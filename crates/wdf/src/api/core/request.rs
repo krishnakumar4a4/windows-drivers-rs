@@ -119,18 +119,9 @@ impl Request {
         &mut self,
         cancel_fn: fn(&RequestCancellationToken),
     ) -> NtResult<()> {
-        if let Some(context) = RequestContext::try_get_mut(self) {
-            context.evt_request_cancel = cancel_fn;
-            Ok(())
-        } else {
-            RequestContext::attach(
-                self,
-                RequestContext {
-                    evt_request_cancel: cancel_fn,
-                    evt_request_completion_routine: None,
-                },
-            )
-        }
+        let context = self.get_context_mut_or_attach_new()?;
+        context.evt_request_cancel = Some(cancel_fn);
+        Ok(())
     }
 
     pub fn get_io_queue(&self) -> &IoQueue {
@@ -207,8 +198,9 @@ impl Request {
     pub fn set_completion_routine(
         &mut self,
         completion_routine: fn(RequestCompletionToken, &IoTarget),
-    ) {
-        let context = RequestContext::get_mut(self);
+    ) -> NtResult<()> {
+        let context = self.get_context_mut_or_attach_new()?;
+
         context.evt_request_completion_routine = Some(completion_routine);
         unsafe {
             call_unsafe_wdf_function_binding!(
@@ -222,6 +214,8 @@ impl Request {
                 ptr::null_mut()
             );
         }
+
+        Ok(())
     }
 
     pub fn send_asynchronously(self, io_target: &IoTarget) -> Result<SentRequest, Request> {
@@ -293,6 +287,20 @@ impl Request {
 
         res != 0
     }
+
+    fn get_context_mut_or_attach_new(&mut self) -> NtResult<&mut RequestContext> {
+        if RequestContext::try_get_mut(self).is_none() {
+            RequestContext::attach(
+                self,
+                RequestContext {
+                    evt_request_cancel: None,
+                    evt_request_completion_routine: None,
+                },
+            )?;
+        }
+
+        Ok(RequestContext::get_mut(self))
+    }
 }
 
 impl Handle for Request {
@@ -354,7 +362,7 @@ impl CancellableRequestStore for Vec<CancellableRequest> {
 
 #[object_context(Request)]
 struct RequestContext {
-    evt_request_cancel: fn(&RequestCancellationToken),
+    evt_request_cancel: Option<fn(&RequestCancellationToken)>,
     evt_request_completion_routine: Option<fn(RequestCompletionToken, &IoTarget)>,
 }
 
@@ -400,7 +408,10 @@ define_user_memory_context!(output);
 pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     let safe_request = unsafe { &Request::from_raw(request as _) };
     let context = RequestContext::get(safe_request);
-    (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
+    let Some(evt_request_cancel) = context.evt_request_cancel else {
+        panic!("Request cancellation callback called but no user callback set");
+    };
+    (evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
 }
 
 pub extern "C" fn __evt_request_completion_routine(

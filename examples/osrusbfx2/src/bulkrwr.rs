@@ -39,7 +39,11 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
         return;
     }
 
-    request.set_completion_routine(evt_request_read_completion_routine);
+    if let Err(e) = request.set_completion_routine(evt_request_read_completion_routine) {
+        println!("Setting completion routine failed: {:?}", e);
+        request.complete_with_information(e.code().into(), 0);
+        return;
+    }
 
     let io_target = pipe.get_io_target();
 
@@ -121,7 +125,11 @@ pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
         return;
     }
 
-    request.set_completion_routine(evt_request_write_completion_routine);
+    if let Err(e) = request.set_completion_routine(evt_request_write_completion_routine) {
+        println!("Setting completion routine failed: {:?}", e);
+        request.complete_with_information(e.code().into(), 0);
+        return;
+    }
 
     let io_target = pipe.get_io_target();
 
