@@ -6,6 +6,8 @@ use wdf_macros::object_context;
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
     IO_STATUS_BLOCK,
+    WDFCONTEXT,
+    WDFIOTARGET,
     WDFMEMORY,
     WDFOBJECT,
     WDFREQUEST,
@@ -208,6 +210,18 @@ impl Request {
     ) {
         let context = RequestContext::get_mut(self);
         context.evt_request_completion_routine = Some(completion_routine);
+        unsafe {
+            call_unsafe_wdf_function_binding!(
+                WdfRequestSetCompletionRoutine,
+                self.as_ptr().cast(),
+                Some(__evt_request_completion_routine),
+                // Currently not supporting context.
+                // For now it is enough to just add context to
+                // the request using the usuaual mechanism
+                // and rely on that
+                ptr::null_mut()
+            );
+        }
     }
 
     pub fn send_asynchronously(self, io_target: &IoTarget) -> Result<SentRequest, Request> {
@@ -389,19 +403,27 @@ pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     (context.evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
 }
 
-pub extern "C" fn __evt_request_read_completion_routine(
+pub extern "C" fn __evt_request_completion_routine(
     request: WDFREQUEST,
-    target: WDFOBJECT,
-    _params: *const WDF_REQUEST_COMPLETION_PARAMS,
-    _context: WDFOBJECT,
+    target: WDFIOTARGET,
+    _params: *mut WDF_REQUEST_COMPLETION_PARAMS,
+    _context: WDFCONTEXT,
 ) {
     let safe_req = unsafe { Request::from_raw(request as _) };
     let context = RequestContext::get(&safe_req);
     if let Some(callback) = context.evt_request_completion_routine {
+        // Not passing on params to user callback because it
+        // could complete the request and then try use the
+        // param value which would be unsafe. Instead the user is
+        // allowed to get access to params only by calling
+        // `Request::get_completion_params` inside their callback.
+        // That way params cannot outlive the request
         callback(unsafe { RequestCompletionToken::new(request) }, unsafe {
             &*(target.cast::<IoTarget>())
         });
     }
+
+    panic!("Request's completion routine called but not user callback was set");
 }
 
 #[derive(Debug)]
