@@ -434,6 +434,10 @@ fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
             return Err(NtStatusError::from(status_codes::STATUS_INTERNAL_ERROR));
         };
 
+        // Tell the framework that it's okay to read less than
+        // MaximumPacketSize
+        pipe.set_no_maximum_packet_size_check();
+
         match pipe_info.pipe_type {
             UsbPipeType::Interrupt => {
                 println!("Interrupt Pipe index: {i}");
