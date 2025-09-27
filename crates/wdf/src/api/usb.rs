@@ -505,7 +505,7 @@ impl UsbPipe {
 
         unsafe {
             call_unsafe_wdf_function_binding!(
-                WdfUsbTargetPipeFormatRequestForRead,
+                WdfUsbTargetPipeFormatRequestForWrite,
                 self.as_ptr().cast(),
                 request.as_ptr().cast(),
                 memory_ptr.cast(),
