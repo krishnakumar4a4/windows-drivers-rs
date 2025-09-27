@@ -251,7 +251,7 @@ impl StatusCodeExt for i32 {
     where
         F: FnOnce() -> T,
     {
-        if !NT_ERROR(self) {
+        if NT_SUCCESS(self) {
             Ok(f())
         } else {
             Err(NtStatusError::from(self))
@@ -262,7 +262,7 @@ impl StatusCodeExt for i32 {
     where
         F: FnOnce() -> NtResult<T>,
     {
-        if !NT_ERROR(self) {
+        if NT_SUCCESS(self) {
             f()
         } else {
             Err(NtStatusError::from(self))
@@ -273,7 +273,7 @@ impl StatusCodeExt for i32 {
     where
         F: FnOnce() -> NtStatusError,
     {
-        if !NT_ERROR(self) {
+        if NT_SUCCESS(self) {
             Ok(())
         } else {
             Err(f())
