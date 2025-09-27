@@ -91,10 +91,12 @@ fn evt_request_read_completion_routine(
     };
 
     if status.is_success() {
-        println!("Number of bytes read: {}", bytes_read);
+        println!("Number of bytes read: {bytes_read}");
+    } else if status == status_codes::STATUS_CANCELLED.into() {
+        println!("Request cancelled. Number of bytes read: {bytes_read}");
     } else {
         println!(
-            "Read failed - request status {:?} UsbdStatus {:?}",
+            "Request failed - request status {:?} UsbdStatus {:?}",
             status, usb_completion_params.usbd_status
         );
     }
@@ -178,10 +180,12 @@ fn evt_request_write_completion_routine(
     };
 
     if status.is_success() {
-        println!("Number of bytes written: {}", bytes_written);
+        println!("Number of bytes written: {bytes_written}");
+    } else if status == status_codes::STATUS_CANCELLED.into() {
+        println!("Request cancelled. Number of bytes written: {bytes_written}");
     } else {
         println!(
-            "Write failed - request status {:?} UsbdStatus {:?}",
+            "Request failed - request status {:?} UsbdStatus {:?}",
             status, usb_completion_params.usbd_status
         );
     }
