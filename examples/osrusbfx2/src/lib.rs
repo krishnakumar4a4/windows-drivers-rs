@@ -436,15 +436,15 @@ fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
 
         match pipe_info.pipe_type {
             UsbPipeType::Interrupt => {
-                println!("Interrupt Pipe is 0x{:x}", i);
+                println!("Interrupt Pipe index: {i}");
                 interrupt_pipe_index = Some(i);
             }
             UsbPipeType::Bulk => {
                 if pipe.is_in_endpoint() {
-                    println!("BulkInput Pipe is 0x{:x}", i);
+                    println!("BulkInput Pipe index: {i}");
                     bulk_read_pipe_index = Some(i);
                 } else if pipe.is_out_endpoint() {
-                    println!("BulkOutput Pipe is 0x{:x}", i);
+                    println!("BulkOutput Pipe index: {i}");
                     bulk_write_pipe_index = Some(i);
                 }
             }
