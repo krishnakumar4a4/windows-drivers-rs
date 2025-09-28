@@ -422,19 +422,19 @@ pub extern "C" fn __evt_request_completion_routine(
 ) {
     let safe_req = unsafe { Request::from_raw(request as _) };
     let context = RequestContext::get(&safe_req);
-    if let Some(callback) = context.evt_request_completion_routine {
-        // Not passing on params to user callback because it
-        // could complete the request and then try use the
-        // param value which would be unsafe. Instead the user is
-        // allowed to get access to params only by calling
-        // `Request::get_completion_params` inside their callback.
-        // That way params cannot outlive the request
-        callback(unsafe { RequestCompletionToken::new(request) }, unsafe {
-            &*(target.cast::<IoTarget>())
-        });
-    }
+    let Some(callback) = context.evt_request_completion_routine else {
+        panic!("Request's completion routine called but not user callback was set");
+    };
 
-    panic!("Request's completion routine called but not user callback was set");
+    // Not passing on params to user callback because it
+    // could complete the request and then try use the
+    // param value which would be unsafe. Instead the user is
+    // allowed to get access to params only by calling
+    // `Request::get_completion_params` inside their callback.
+    // That way params cannot outlive the request
+    callback(unsafe { RequestCompletionToken::new(request) }, unsafe {
+        &*(target.cast::<IoTarget>())
+    });
 }
 
 #[derive(Debug)]
