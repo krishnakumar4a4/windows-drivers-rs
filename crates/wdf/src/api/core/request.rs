@@ -256,7 +256,7 @@ impl Request {
             )
         };
 
-        RequestCompletionParams::from(&raw_params)
+        (&raw_params).into()
     }
 
     pub fn get_status(&self) -> NtStatus {
