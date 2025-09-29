@@ -384,10 +384,12 @@ macro_rules! define_user_memory_context {
         }
 
         impl Request {
-            pub(crate) fn $retrieve_fn(&mut self) -> Option<OwnedMemory> {
-                let context = $ctx_name::get_mut(self);
-                context.memory.take()
-            }
+            // TODO: commented out for now to silence unused warnings.
+            // Uncomment when it's actually used
+            // pub(crate) fn $retrieve_fn(&mut self) -> Option<OwnedMemory> {
+            //     let context = $ctx_name::get_mut(self);
+            //     context.memory.take()
+            // }
 
             pub(crate) fn $set_fn(&mut self, memory: OwnedMemory) -> NtResult<()> {
                 match $ctx_name::try_get_mut(self) {

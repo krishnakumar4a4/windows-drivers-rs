@@ -1,7 +1,6 @@
 use alloc::string::String;
 use core::{
     marker::PhantomData,
-    ops::{Deref, DerefMut},
     ptr,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -124,37 +123,6 @@ pub struct Owned<T: Handle> {
 
 unsafe impl<T: Handle + Sync> Sync for Owned<T> {}
 unsafe impl<T: Handle + Send> Send for Owned<T> {}
-
-impl<T: Handle> Owned<T> {
-    /// Creates a new `Owned<T>` instance.
-    ///
-    /// # Safety
-    ///
-    /// The provided `WDFOBJECT` pointer must be valid and of
-    /// the raw WDF type corresponding to `T` and properly aligned.
-    pub(crate) unsafe fn new(inner: WDFOBJECT) -> Self {
-        Self {
-            inner,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T: Handle> Deref for Owned<T> {
-    type Target = T;
-
-    #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*(self.inner.cast::<Self::Target>()) }
-    }
-}
-
-impl<T: Handle> DerefMut for Owned<T> {
-    #[inline(always)]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { &mut *(self.inner.cast::<Self::Target>()) }
-    }
-}
 
 /// A Rust wrapper over [WDF context type info](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdfobject/ns-wdfobject-_wdf_object_context_type_info)
 /// which is used while setting up an object context.
