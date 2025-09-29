@@ -467,10 +467,6 @@ pub fn usb_ioctl_get_interrupt_message(device: &Device, reader_status: NtStatus)
                 // No more requests to process
                 break;
             }
-            Err(e) if e.code() == status_codes::STATUS_NO_MORE_ENTRIES => {
-                // No more requests to process
-                break;
-            }
             Err(e) => {
                 println!("Failed to retrieve request: {:?}", e);
                 continue;

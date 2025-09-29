@@ -1,6 +1,7 @@
 use core::sync::atomic::AtomicUsize;
 
 use wdf_macros::object_context_with_ref_count_check;
+use wdk::nt_success;
 use wdk_sys::{
     call_unsafe_wdf_function_binding,
     WDFDEVICE,
@@ -17,7 +18,7 @@ use super::{
     init_wdf_struct,
     object::{impl_ref_counted_handle, GetDevice, Handle},
     request::{Request, RequestId, RequestStopActionFlags},
-    result::{status_codes, NtResult, StatusCodeExt},
+    result::{status_codes, NtResult, NtStatusError, StatusCodeExt},
     sync::Arc,
     TriState,
 };
@@ -74,20 +75,25 @@ impl IoQueue {
 
     pub fn retrieve_next_request(&self) -> NtResult<Option<Request>> {
         let mut request: WDFREQUEST = core::ptr::null_mut();
-        unsafe {
+        let status = unsafe {
             call_unsafe_wdf_function_binding!(
                 WdfIoQueueRetrieveNextRequest,
                 self.as_ptr().cast(),
                 &mut request
             )
-        }
-        .map(|| unsafe {
-            if !request.is_null() {
-                Some(Request::from_raw(request))
+        };
+
+        if nt_success(status) || status == status_codes::STATUS_NO_MORE_ENTRIES {
+            let request = if !request.is_null() {
+                Some(unsafe { Request::from_raw(request) })
             } else {
                 None
-            }
-        })
+            };
+
+            Ok(request)
+        } else {
+            Err(NtStatusError::from(status))
+        }
     }
 }
 
