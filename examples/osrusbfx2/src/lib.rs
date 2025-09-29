@@ -1,4 +1,4 @@
-//! USB FX2 sample driver
+//! Kernel model USB device driver for OSR USB-FX2 Learning Kit 
 
 #![no_std]
 
@@ -55,6 +55,7 @@ use ioctl::{SwitchState, evt_io_device_control, usb_ioctl_get_interrupt_message}
 const GUID_DEVINTERFACE_OSRUSBFX2: &str = "573e8c73-0cb4-4471-a1bf-fab26c31d384";
 const USBD_CLIENT_CONTRACT_VERSION_602: u32 = 0x602;
 
+/// Object context for the `Device` object
 #[object_context(Device)]
 struct DeviceContext {
     usb_device: Option<Arc<UsbDevice>>,
@@ -108,6 +109,7 @@ impl DeviceContext {
     }
 }
 
+/// Object context for the `UsbDevice`` objec
 #[object_context(UsbDevice)]
 struct UsbDeviceContext {
     interrupt_pipe_index: u8,
@@ -148,9 +150,18 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
 /// call from the PnP manager. We create and initialize a device object to
 /// represent a new instance of the device. All the software resources
 /// should be allocated in this callback.
+/// 
+/// # Arguments
+/// 
+/// * `device_init` - Frameork allocated `DeviceInit` object used
+/// to initialize the device object
 fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     println!("Device add callback called");
 
+    // Initialize the PNP and power callbacks structure.  If you don't
+    // supply any callbacks, the Framework will take appropriate default
+    // actions based on whether DeviceInit is initialized to be an FDO,
+    // a PDO or a filter device object.
     let pnp_power_callbacks = PnpPowerEventCallbacks {
         evt_device_prepare_hardware: Some(evt_device_prepare_hardware),
         evt_device_d0_entry: Some(evt_device_d0_entry),
@@ -159,6 +170,9 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         ..PnpPowerEventCallbacks::default()
     };
 
+    // Specify the I/O type for the device.
+    // This driver uses buffered I/O for
+    // all I/O operations.
     let io_type = IoTypeConfig {
         read_write_io_type: DeviceIoType::Buffered,
         ..Default::default()
@@ -166,6 +180,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 
     device_init.set_io_type(&io_type);
 
+    // Create the device object
     let device = Device::create(device_init, Some(pnp_power_callbacks))
         .inspect_err(|e| println!("Failed to create device: {:?}", e))?;
 
@@ -243,6 +258,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     // This queue will be used for storing Requests that need to wait for an
     // interrupt to occur before they can be completed.
     let mut queue_config = IoQueueConfig::new(IoQueueDispatchType::Manual);
+
     // This queue is used for requests that don't directly access the device. The
     // requests in this queue are serviced only when the device is in a fully
     // powered state and sends an interrupt. So we can use a non-power managed
@@ -310,10 +326,22 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     Ok(())
 }
 
+/// In this callback, the driver does whatever is necessary to make the
+/// hardware ready to use.  In the case of a USB device, this involves
+/// reading and selecting descriptors.
+/// 
+/// # Arguments
+/// 
+/// * `device` - `Device` object
+/// * `resources_list` - A resource-list objec that identifies the raw
+/// hardware resources that the PnP manager has assigned to the device.
+/// * `resources_list_translated` - A resource-list object that identifies
+/// the translated hardware resources that the PnP manager has assigned to
+/// the device.
 fn evt_device_prepare_hardware(
     device: &mut Device,
-    _resources_raw: &CmResList,
-    _resources_translated: &CmResList,
+    _resources_list: &CmResList,
+    _resources_list_translated: &CmResList,
 ) -> NtResult<()> {
     println!("Device prepare hardware callback called");
 
@@ -325,12 +353,26 @@ fn evt_device_prepare_hardware(
     let usb_device_exists = DeviceContext::get(device).usb_device.is_some();
 
     if !usb_device_exists {
+        // Create a USB device handle so that we can communicate with the
+        // underlying USB stack. The `UsbDevice` object is used to query,
+        // configure, and manage all aspects of the USB device.
+        // These aspects include device properties, bus properties,
+        // and I/O creation and synchronization. We only create device the first
+        // the PrepareHardware is called. If the device is restarted by pnp manager
+        // for resource rebalance, we will use the same device handle but then select
+        // the interfaces again because the USB stack could reconfigure the device on
+        // restart.
         let usb_device = UsbDevice::create(
             device,
             &UsbDeviceCreateConfig {
                 usbd_client_contract_version: USBD_CLIENT_CONTRACT_VERSION_602,
             },
         )?;
+
+        // TODO: If you are fetching configuration descriptor from device for
+        // selecting a configuration or to parse other descriptors, call
+        // USBD_ValidateConfigurationDescriptor to do basic validation on
+        // the descriptors before you access them .
 
         let device_ctxt = DeviceContext::get_mut(device);
         device_ctxt.usb_device = Some(usb_device);
@@ -418,6 +460,8 @@ fn set_power_policy(device: &Device) -> NtResult<()> {
     Ok(())
 }
 
+/// This helper routine selects the configuration, interface and
+/// creates a context for every pipe (end point) in that interface.
 fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
     let interface_info = usb_device.select_config_single_interface()?;
 
