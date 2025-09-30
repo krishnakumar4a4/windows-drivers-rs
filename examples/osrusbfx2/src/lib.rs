@@ -1,4 +1,4 @@
-//! Kernel model USB device driver for OSR USB-FX2 Learning Kit 
+//! Kernel model USB device driver for OSR USB-FX2 Learning Kit
 
 #![no_std]
 
@@ -150,9 +150,9 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
 /// call from the PnP manager. We create and initialize a device object to
 /// represent a new instance of the device. All the software resources
 /// should be allocated in this callback.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `device_init` - Frameork allocated `DeviceInit` object used
 /// to initialize the device object
 fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
@@ -329,9 +329,9 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 /// In this callback, the driver does whatever is necessary to make the
 /// hardware ready to use.  In the case of a USB device, this involves
 /// reading and selecting descriptors.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `device` - `Device` object
 /// * `resources_list` - A resource-list objec that identifies the raw
 /// hardware resources that the PnP manager has assigned to the device.
@@ -346,7 +346,7 @@ fn evt_device_prepare_hardware(
     println!("Device prepare hardware callback called");
 
     // In this function we have to get DeviceContext multiple times
-    // in order to prevent borrow checker issues.
+    // in order to prevent borrow checker errors.
     // TODO: try to simplify this
 
     // Create a UsbDevice if it does not already exist
@@ -372,7 +372,7 @@ fn evt_device_prepare_hardware(
         // TODO: If you are fetching configuration descriptor from device for
         // selecting a configuration or to parse other descriptors, call
         // USBD_ValidateConfigurationDescriptor to do basic validation on
-        // the descriptors before you access them .
+        // the descriptors before you access them.
 
         let device_ctxt = DeviceContext::get_mut(device);
         device_ctxt.usb_device = Some(usb_device);
@@ -402,14 +402,9 @@ fn evt_device_prepare_hardware(
         set_power_policy(device)?;
     }
 
-    let device_ctxt = DeviceContext::get_mut(device);
-    let usb_device = device_ctxt
-        .usb_device
-        .as_mut()
-        .expect("USB device should be set");
-    select_interface(usb_device.get_mut())?;
-
     *device_ctxt.usb_device_traits.lock() = info.traits;
+
+    select_interface(device)?;
 
     Ok(())
 }
@@ -462,8 +457,35 @@ fn set_power_policy(device: &Device) -> NtResult<()> {
 
 /// This helper routine selects the configuration, interface and
 /// creates a context for every pipe (end point) in that interface.
-fn select_interface(usb_device: &mut UsbDevice) -> NtResult<()> {
-    let interface_info = usb_device.select_config_single_interface()?;
+fn select_interface(device: &mut Device) -> NtResult<()> {
+    let device_ctxt = DeviceContext::get_mut(device);
+    let usb_device = device_ctxt
+        .usb_device
+        .as_mut()
+        .expect("USB device should be set")
+        .get_mut();
+
+    let interface_info = usb_device
+        .select_config_single_interface()
+        .inspect_err(|e| {
+            println!("Failed to select USB device config: {:?}", e);
+
+            // Since the Osr USB fx2 device is capable of working at high speed, the only
+            // reason the device would not be working at high speed is if the
+            // port doesn't support it. If the port doesn't support high speed
+            // it is a 1.1 port
+            if !device_ctxt
+                .usb_device_traits
+                .lock()
+                .contains(UsbDeviceTraits::AT_HIGH_SPEED)
+            {
+                println!(
+                    " On a 1.1 USB port on Windows Vista this is expected as the OSR USB Fx2 \
+                     board's Interrupt EndPoint descriptor doesn't conform to the USB \
+                     specification. Windows Vista detects this and returns an error."
+                );
+            }
+        })?;
 
     let mut interrupt_pipe_index = None;
     let mut bulk_read_pipe_index = None;
