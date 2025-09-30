@@ -1,3 +1,5 @@
+//! This module contains routines to set device interface properties
+
 use alloc::vec::Vec;
 
 use wdf::{NtResult, NtStatusError, UnicodeString, WString, println, status_codes};

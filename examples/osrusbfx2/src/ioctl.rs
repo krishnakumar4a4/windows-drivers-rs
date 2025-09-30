@@ -1,3 +1,5 @@
+//! This module contains routines to handle IOCTLs
+
 use core::mem::size_of;
 
 use wdf::{
@@ -30,6 +32,7 @@ use crate::DeviceContext;
 const IOCTL_INDEX: u32 = 0x800;
 const FILE_DEVICE_OSRUSBFX2: u32 = 65500;
 
+// The IOCTLs supported by our device
 const IOCTL_OSRUSBFX2_GET_CONFIG_DESCRIPTOR: u32 = ctl_code(
     FILE_DEVICE_OSRUSBFX2,
     IOCTL_INDEX,
@@ -94,7 +97,6 @@ const IOCTL_OSRUSBFX2_GET_INTERRUPT_MESSAGE: u32 = ctl_code(
 );
 
 // The vendor commands supported by our device
-
 const USBFX2LK_READ_7SEGMENT_DISPLAY: u8 = 0xD4;
 const USBFX2LK_READ_SWITCHES: u8 = 0xD6;
 const USBFX2LK_READ_BARGRAPH_DISPLAY: u8 = 0xD7;
@@ -169,6 +171,20 @@ bitflags::bitflags! {
     }
 }
 
+/// This event is called when the framework receives IRP_MJ_DEVICE_CONTROL
+/// requests from the system.
+///
+/// # Arguments
+///
+/// * `queue` - the framework queue object that is associated
+/// with the I/O request.
+/// * `request` - A framework request object.
+/// * `output_buffer_length` - length of the request's output buffer,
+/// if an output buffer is available.
+/// * `input_buffer_length` - length of the request's input buffer,
+/// if an input buffer is available.
+/// * `io_control_code` - the driver-defined or system-defined I/O control code
+/// (IOCTL) that is associated with the request.
 pub fn evt_io_device_control(
     queue: &IoQueue,
     mut request: Request,
@@ -421,6 +437,8 @@ fn get_interrupt_message(
 
     *request_pending = false;
 
+    // Forward the request to an interrupt message queue and don't complete
+    // the request until an interrupt from the USB device occurs
     request
         .forward_to_io_queue(&device_context.interrupt_msg_queue)
         .inspect(|_| *request_pending = true)?;

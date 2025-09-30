@@ -1,3 +1,6 @@
+//! This module has routines to perform reads and writes.
+//! The read and writes are targeted to bulk endpoints.
+
 use wdf::{
     IoQueue,
     IoTarget,
@@ -16,6 +19,13 @@ use crate::DeviceContext;
 
 const TEST_BOARD_TRANSFER_BUFFER_SIZE: usize = 64 * 1024;
 
+/// Called by the framework when it receives read requests.
+///
+/// # Arguments
+///
+/// * `queue` - The queue object which sent the request
+/// * `request` - The request object
+/// * `length` - Length of the data buffer associated with the request.
 pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     println!("I/O read callback called");
 
@@ -31,6 +41,9 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     let device_context = DeviceContext::get(queue.get_device());
     let pipe = device_context.get_bulk_read_pipe();
 
+    // The format call validates to make sure that you are reading or
+    // writing to the right pipe type, sets the appropriate transfer flags,
+    // creates an URB and initializes the request.
     if let Err(e) =
         pipe.format_request_for_read(&mut request, RequestFormatMemory::RequestMemory(None))
     {
@@ -47,6 +60,7 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 
     let io_target = pipe.get_io_target();
 
+    // Send the request asynchronously.
     match request.send_asynchronously(&io_target) {
         Ok(sent_request) => device_context.add_sent_request(sent_request),
         Err(request) => {
@@ -57,12 +71,22 @@ pub fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     }
 }
 
+/// This is the completion routine for reads
+///
+/// # Arguments
+///
+/// * `completion_token`` - The completion token for the request.
+/// It allows you to get back the `Request` object from the
+/// `SentRequest` object stored in the device context.
+/// * `target` - The I/O target to which the request was sent.
 fn evt_request_read_completion_routine(
     completion_token: RequestCompletionToken,
     _target: &IoTarget,
 ) {
     println!("Read completion routine called");
 
+    // Redeem the completion token to get back the request object
+    // stored in device conteext
     let Some(request) = get_request(completion_token) else {
         println!("Received completion token for unknown request");
         return;
@@ -104,6 +128,13 @@ fn evt_request_read_completion_routine(
     request.complete_with_information(status.into(), bytes_read);
 }
 
+/// Called by the framework when it receives write requests
+///
+/// # Arguments
+///
+/// * `queue`` - The queue object which sent the request
+/// * `request` - The request object
+/// * `length` - Length of the data buffer associated with the request.
 pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
     println!("I/O write callback called");
 
@@ -145,6 +176,14 @@ pub fn evt_io_write(queue: &IoQueue, mut request: Request, length: usize) {
     }
 }
 
+/// This is the completion routine for writes
+///
+/// # Arguments
+///
+/// * `completion_token` - The completion token for the request.
+/// It allows you to get back the `Request` object from the
+/// `SentRequest` object stored in the device context.
+/// * `target` - The I/O target to which the request was sent.
 fn evt_request_write_completion_routine(
     completion_token: RequestCompletionToken,
     _target: &IoTarget,
@@ -193,6 +232,20 @@ fn evt_request_write_completion_routine(
     request.complete_with_information(status.into(), bytes_written);
 }
 
+/// This callback is invoked for every inflight request when the device
+/// is suspended or removed. Since our inflight read and write requests
+/// are actually pending in the target device, we will just acknowledge
+/// its presence. Until we acknowledge, complete, or requeue the requests
+/// framework will wait before allowing the device suspend or remove to
+/// proceed. When the underlying USB stack gets the request to suspend or
+/// remove, it will fail all the pending requests.
+///
+/// # Arguments
+///
+/// * `queue` - Queue object that is associated with the I/O request
+/// * `request` - Request object
+/// * `action_flags` - Bitwise OR of one or more flags in
+///   `RequestStopActionFlags`
 pub fn evt_io_stop(queue: &IoQueue, request_id: RequestId, action_flags: RequestStopActionFlags) {
     println!("I/O stop callback called");
 
