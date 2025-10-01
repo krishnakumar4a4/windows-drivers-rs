@@ -1,4 +1,4 @@
-//! Kernel model USB device driver for OSR USB-FX2 Learning Kit
+//! Kernel mode USB device driver for OSR USB-FX2 Learning Kit
 
 #![no_std]
 
