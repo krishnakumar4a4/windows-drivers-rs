@@ -409,6 +409,27 @@ fn evt_device_prepare_hardware(
     Ok(())
 }
 
+/// `evt_device_d0_entry` event callback must perform any operations that are
+/// necessary before the specified device is used.  It will be called every
+/// time the hardware needs to be (re-)initialized.
+///
+/// This function is not marked pageable because this function is in the
+/// device power up path. When a function is marked pagable and the code
+/// section is paged out, it will generate a page fault which could impact
+/// the fast resume behavior because the client driver will have to wait
+/// until the system drivers can service this page fault.
+///
+/// This function runs at PASSIVE_LEVEL, even though it is not paged.  A
+/// driver can optionally make this function pageable if DO_POWER_PAGABLE
+/// is set.  Even if DO_POWER_PAGABLE isn't set, this function still runs
+/// at PASSIVE_LEVEL. In this case, though, the function absolutely must
+/// not do anything that will cause a page fault.
+///
+/// # Arguments
+///
+/// * `device` - Handle to a framework device object.
+/// * `previous_state` - Device power state which the device was in most
+/// recently. If the device is being newly started, this will be `Unspecified`
 fn evt_device_d0_entry(device: &Device, _previous_state: PowerDeviceState) -> NtResult<()> {
     println!("Device D0 entry callback called");
     let io_target = get_interrupt_io_target(device);
@@ -422,7 +443,35 @@ fn evt_device_d0_entry(device: &Device, _previous_state: PowerDeviceState) -> Nt
     Ok(())
 }
 
-fn evt_device_d0_exit(device: &Device, _next_state: PowerDeviceState) -> NtResult<()> {
+/// This routine undoes anything done in `evt_device_d0_entry`. It is called
+/// whenever the device leaves the D0 state, which happens when the device is
+/// stopped, when it is removed, and when it is powered off.
+///
+/// The device is still in D0 when this callback is invoked, which means that
+/// the driver can still touch hardware in this routine.
+///
+/// `evt_device_d0_exit` event callback must perform any operations that are
+/// necessary before the specified device is moved out of the D0 state. If the
+/// driver needs to save hardware state before the device is powered down, then
+/// that should be done here.
+///
+/// This function runs at PASSIVE_LEVEL, though it is generally not paged. A
+/// driver can optionally make this function pageable if DO_POWER_PAGABLE is
+/// set.
+///
+/// Even if DO_POWER_PAGABLE isn't set, this function still runs at
+/// PASSIVE_LEVEL. In this case, though, the function absolutely must not do
+/// anything that will cause a page fault.
+///
+/// When this routine returns `Ok(())`, it implies that the device can be used.
+/// A failure will result in the device stack being torn down.
+///
+/// # Arguments
+///
+/// * `device` - The framework device object
+/// * `target_state` - Device power state which the device will be put in once
+///   this callback is complete.
+fn evt_device_d0_exit(device: &Device, _target_state: PowerDeviceState) -> NtResult<()> {
     println!("Device D0 exit callback called");
 
     let io_target = get_interrupt_io_target(device);
