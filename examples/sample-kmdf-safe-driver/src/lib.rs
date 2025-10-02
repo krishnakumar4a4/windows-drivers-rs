@@ -99,7 +99,7 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     }
 
     // Set up the device add callback
-    driver.on_evt_device_add(evt_device_add);
+    driver.set_evt_device_add(evt_device_add);
 
     trace("Trace: Safe Rust driver entry complete");
 

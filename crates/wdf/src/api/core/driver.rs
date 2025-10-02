@@ -79,7 +79,7 @@ impl Driver {
     }
 
     /// Registers a callback for the `EvtDeviceAdd` event
-    pub fn on_evt_device_add(&mut self, callback: fn(&mut DeviceInit) -> NtResult<()>) {
+    pub fn set_evt_device_add(&mut self, callback: fn(&mut DeviceInit) -> NtResult<()>) {
         self.evt_device_add = Some(callback);
     }
 }
