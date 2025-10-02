@@ -61,8 +61,8 @@ struct DeviceContext {
     usb_device: Option<Arc<UsbDevice>>,
     usb_device_traits: SpinLock<UsbDeviceTraits>,
     current_switch_state: SpinLock<SwitchState>,
-    interrupt_msg_queue: Arc<IoQueue>,
     sent_requests: SpinLock<Vec<SentRequest>>, // TODO: change to HashMap when available
+    interrupt_msg_queue: Arc<IoQueue>,
     // Below three variables are never used.
     // They're placed here only to keep the queues alive
     _default_queue: Arc<IoQueue>,
@@ -274,11 +274,11 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
         usb_device: None,
         usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
         current_switch_state: SpinLock::create(SwitchState::empty())?,
+        sent_requests: SpinLock::create(Vec::new())?,
+        interrupt_msg_queue,
         _default_queue: default_queue,
         _read_queue: read_queue,
         _write_queue: write_queue,
-        interrupt_msg_queue,
-        sent_requests: SpinLock::create(Vec::new())?,
     };
 
     DeviceContext::attach(device, context)?;
