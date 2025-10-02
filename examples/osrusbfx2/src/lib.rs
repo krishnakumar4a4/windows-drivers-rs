@@ -59,7 +59,7 @@ const USBD_CLIENT_CONTRACT_VERSION_602: u32 = 0x602;
 #[object_context(Device)]
 struct DeviceContext {
     usb_device: Option<Arc<UsbDevice>>,
-    usb_device_traits: SpinLock<UsbDeviceTraits>,
+    usb_device_traits: UsbDeviceTraits,
     current_switch_state: SpinLock<SwitchState>,
     sent_requests: SpinLock<Vec<SentRequest>>, // TODO: change to HashMap when available
     interrupt_msg_queue: Arc<IoQueue>,
@@ -272,7 +272,7 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     // Attach device context
     let context = DeviceContext {
         usb_device: None,
-        usb_device_traits: SpinLock::create(UsbDeviceTraits::empty())?,
+        usb_device_traits: UsbDeviceTraits::empty(),
         current_switch_state: SpinLock::create(SwitchState::empty())?,
         sent_requests: SpinLock::create(Vec::new())?,
         interrupt_msg_queue,
@@ -378,13 +378,16 @@ fn evt_device_prepare_hardware(
         device_ctxt.usb_device = Some(usb_device);
     }
 
-    let device_ctxt = DeviceContext::get(device);
+    let device_ctxt = DeviceContext::get_mut(device);
     let usb_device = device_ctxt
         .usb_device
         .as_ref()
         .expect("USB device should be set");
 
     let info = usb_device.retrieve_information()?;
+
+    device_ctxt.usb_device_traits = info.traits;
+
     println!(
         "IsDeviceHighSpeed: {}",
         info.traits.contains(UsbDeviceTraits::AT_HIGH_SPEED)
@@ -401,8 +404,6 @@ fn evt_device_prepare_hardware(
     if info.traits.contains(UsbDeviceTraits::REMOTE_WAKE_CAPABLE) {
         set_power_policy(device)?;
     }
-
-    *device_ctxt.usb_device_traits.lock() = info.traits;
 
     select_interface(device)?;
 
@@ -525,7 +526,6 @@ fn select_interface(device: &mut Device) -> NtResult<()> {
             // it is a 1.1 port
             if !device_ctxt
                 .usb_device_traits
-                .lock()
                 .contains(UsbDeviceTraits::AT_HIGH_SPEED)
             {
                 println!(
