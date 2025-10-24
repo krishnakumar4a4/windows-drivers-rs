@@ -216,7 +216,18 @@ fn object_context_impl(
     let fw_obj_type_name = parse_macro_input!(attr as Ident);
     let context_struct = parse_macro_input!(item as ItemStruct);
 
-    // Make sure the struct is not generic
+    // Make sure the struct is not generic.
+    // This check is crucial to prevent fields of reference types
+    // (e.g. `field: &SomeType`) from being used in context structs.
+    // It is unsafe to allow reference fields in contexts because
+    // they can dangle once the context is attached to the WDF object
+    // and moved into the WDF heap.
+    // The way this works is a bit indirect. By disallowing generics
+    // we disallow lifetime annotations (e.g. `<'a>` in `Context<'a>``)
+    // which in turn makes it impossible to have reference type
+    // fields in the struct.
+    // In addition to safety, generic context structs may also be
+    // harder to reason about in general so it's good to just avoid them.
     if !context_struct.generics.params.is_empty() {
         return Error::new_spanned(
             context_struct,
