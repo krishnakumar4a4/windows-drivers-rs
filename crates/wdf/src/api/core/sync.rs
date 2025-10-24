@@ -135,7 +135,7 @@ impl<T: RefCountedHandle> Arc<T> {
     /// `ptr` must be a valid WDF object pointer that implements
     /// `RefCountedHandle`.
     pub(crate) unsafe fn from_raw(ptr: WDFOBJECT) -> Self {
-        let obj = &*ptr.cast::<T>();
+        let obj = unsafe { &*ptr.cast::<T>() };
         let ref_count = obj.get_ref_count();
 
         // Relaxed ordering is fine here since we do not care if

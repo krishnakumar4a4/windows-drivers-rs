@@ -28,15 +28,15 @@ use crate::api::{guid::Guid, string::UnicodeString};
 
 /// These globals are expected by IFR functionality such as the
 /// windbg extensions used to read IFR logs
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static mut WPP_GLOBAL_Control: *mut WPP_PROJECT_CONTROL_BLOCK = ptr::null_mut();
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static mut WPP_RECORDER_INITIALIZED: *mut WPP_PROJECT_CONTROL_BLOCK = ptr::null_mut();
 
 const WPP_FLAG_LEN: UCHAR = 1;
 
-extern "C" {
+unsafe extern "C" {
     fn MmGetSystemRoutineAddress(SystemRoutineName: PUNICODE_STRING) -> PVOID;
     fn strlen(str: *const core::ffi::c_char) -> usize;
 }
@@ -316,7 +316,7 @@ type EtwRegisterClassicProvider = extern "C" fn(
 ) -> NTSTATUS;
 type EtwUnregister = extern "C" fn(RegHandle: REGHANDLE) -> NTSTATUS;
 
-extern "C" {
+unsafe extern "C" {
     fn WppAutoLogStart(
         WppCb: *mut WPP_PROJECT_CONTROL_BLOCK,
         DrvObj: PDRIVER_OBJECT,

@@ -272,7 +272,7 @@ pub fn call_safe_driver_entry(
     }
 }
 
-#[link_section = "PAGE"]
+#[unsafe(link_section = "PAGE")]
 extern "C" fn evt_driver_device_add(
     _driver: WDFDRIVER,
     device_init: *mut WDFDEVICE_INIT,

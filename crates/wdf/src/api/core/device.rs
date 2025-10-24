@@ -210,7 +210,7 @@ impl Device {
     /// # Safety
     /// The passed pointer must be a valid WDFDEVICE handle
     pub(crate) unsafe fn is_operational(device_ptr: WDFDEVICE) -> bool {
-        let device = &*(device_ptr.cast::<Device>());
+        let device = unsafe { &*(device_ptr.cast::<Device>()) };
         let ctxt = DeviceContext::get(device);
         ctxt.is_operational.load(Ordering::Acquire)
     }

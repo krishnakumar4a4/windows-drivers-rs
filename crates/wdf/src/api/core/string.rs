@@ -105,10 +105,10 @@ impl UnicodeString {
     }
 
     pub unsafe fn from_raw(unicode_str: UNICODE_STRING) -> Self {
-        let buf = core::slice::from_raw_parts(
+        let buf = unsafe { core::slice::from_raw_parts(
             unicode_str.Buffer,
             (unicode_str.MaximumLength / 2) as usize,
-        )
+        ) }
         .to_vec()
         .into_boxed_slice();
         Self {

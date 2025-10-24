@@ -413,7 +413,8 @@ pub extern "C" fn __evt_request_cancel(request: WDFREQUEST) {
     let Some(evt_request_cancel) = context.evt_request_cancel else {
         panic!("Request cancellation callback called but no user callback set");
     };
-    (evt_request_cancel)(unsafe { &RequestCancellationToken::new(request as _) });
+    let token = unsafe { RequestCancellationToken::new(request as _) };
+    (evt_request_cancel)(&token);
 }
 
 pub extern "C" fn __evt_request_completion_routine(

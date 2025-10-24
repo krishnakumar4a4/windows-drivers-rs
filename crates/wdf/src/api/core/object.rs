@@ -216,7 +216,7 @@ pub unsafe fn create_with_context<T: Handle, U: ObjectContext>(
         context,
         |attributes| {
             let obj = create(attributes)?;
-            let raw_context = get_context_raw::<U>(obj.as_ptr());
+            let raw_context = unsafe { get_context_raw::<U>(obj.as_ptr()) };
             if raw_context.is_null() {
                 return Err(STATUS_INVALID_PARAMETER.into());
             }
