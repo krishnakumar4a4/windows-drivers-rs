@@ -1,12 +1,12 @@
 use core::{ptr::null_mut, sync::atomic::AtomicUsize, time::Duration};
 
 use wdf_macros::object_context_with_ref_count_check;
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFDEVICE, WDFTIMER, WDF_TIMER_CONFIG};
+use wdk_sys::{WDF_TIMER_CONFIG, WDFDEVICE, WDFTIMER, call_unsafe_wdf_function_binding};
 
 use super::{
     device::Device,
     init_wdf_struct,
-    object::{impl_ref_counted_handle, init_attributes, GetDevice, Handle},
+    object::{GetDevice, Handle, impl_ref_counted_handle, init_attributes},
     result::{NtResult, StatusCodeExt},
     sync::Arc,
 };

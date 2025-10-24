@@ -5,15 +5,15 @@ use core::{
     marker::PhantomData,
     ops::Deref,
     ptr::NonNull,
-    sync::atomic::{fence, AtomicUsize, Ordering},
+    sync::atomic::{AtomicUsize, Ordering, fence},
 };
 
 use wdk::println;
-use wdk_sys::{call_unsafe_wdf_function_binding, WDFOBJECT, WDFSPINLOCK};
+use wdk_sys::{WDFOBJECT, WDFSPINLOCK, call_unsafe_wdf_function_binding};
 
 use super::{
     device::Device,
-    object::{bug_check, init_attributes, GetDevice, Handle, RefCountedHandle},
+    object::{GetDevice, Handle, RefCountedHandle, bug_check, init_attributes},
     result::{NtResult, StatusCodeExt},
 };
 

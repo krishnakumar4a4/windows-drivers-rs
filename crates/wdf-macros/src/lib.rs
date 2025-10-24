@@ -5,7 +5,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{meta::parser, parse_macro_input, Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit};
+use syn::{Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit, meta::parser, parse_macro_input};
 
 /// A procedural macro that when placed on a safe Rust impl of a driver
 /// generates the relevant FFI wrappers

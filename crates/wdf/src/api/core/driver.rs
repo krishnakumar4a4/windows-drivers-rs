@@ -1,24 +1,24 @@
 use alloc::string::String;
 use core::{cell::UnsafeCell, ptr};
 
-use wdk_sys::{
-    call_unsafe_wdf_function_binding,
-    UNICODE_STRING,
-    WDFDEVICE_INIT,
-    WDFDRIVER,
-    WDF_DRIVER_CONFIG,
-    WDF_DRIVER_VERSION_AVAILABLE_PARAMS,
-    WDF_NO_OBJECT_ATTRIBUTES,
-};
 #[doc(hidden)]
 pub use wdk_sys::{
     DRIVER_OBJECT,
-    NTSTATUS,
     NT_SUCCESS,
+    NTSTATUS,
     PCUNICODE_STRING,
-    WDFOBJECT,
     WDF_OBJECT_ATTRIBUTES,
     WDF_OBJECT_CONTEXT_TYPE_INFO,
+    WDFOBJECT,
+};
+use wdk_sys::{
+    UNICODE_STRING,
+    WDF_DRIVER_CONFIG,
+    WDF_DRIVER_VERSION_AVAILABLE_PARAMS,
+    WDF_NO_OBJECT_ATTRIBUTES,
+    WDFDEVICE_INIT,
+    WDFDRIVER,
+    call_unsafe_wdf_function_binding,
 };
 
 use super::{
@@ -26,8 +26,8 @@ use super::{
     guid::Guid,
     init_wdf_struct,
     object::Handle,
-    result::{status_codes, NtResult},
-    string::{to_rust_str, WString},
+    result::{NtResult, status_codes},
+    string::{WString, to_rust_str},
     tracing::TraceWriter,
 };
 use crate::println;

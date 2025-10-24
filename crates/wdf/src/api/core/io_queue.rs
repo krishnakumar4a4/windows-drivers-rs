@@ -3,24 +3,24 @@ use core::sync::atomic::AtomicUsize;
 use wdf_macros::object_context_with_ref_count_check;
 use wdk::nt_success;
 use wdk_sys::{
-    call_unsafe_wdf_function_binding,
-    WDFDEVICE,
-    WDFQUEUE,
-    WDFREQUEST,
+    _WDF_IO_QUEUE_DISPATCH_TYPE,
     WDF_IO_QUEUE_CONFIG,
     WDF_IO_QUEUE_DISPATCH_TYPE,
     WDF_NO_OBJECT_ATTRIBUTES,
-    _WDF_IO_QUEUE_DISPATCH_TYPE,
+    WDFDEVICE,
+    WDFQUEUE,
+    WDFREQUEST,
+    call_unsafe_wdf_function_binding,
 };
 
 use super::{
+    TriState,
     device::Device,
     init_wdf_struct,
-    object::{impl_ref_counted_handle, GetDevice, Handle},
+    object::{GetDevice, Handle, impl_ref_counted_handle},
     request::{Request, RequestId, RequestStopActionFlags},
-    result::{status_codes, NtResult, NtStatusError, StatusCodeExt},
+    result::{NtResult, NtStatusError, StatusCodeExt, status_codes},
     sync::Arc,
-    TriState,
 };
 
 impl_ref_counted_handle!(IoQueue, IoQueueContext);

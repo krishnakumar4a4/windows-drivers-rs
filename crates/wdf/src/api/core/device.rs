@@ -5,14 +5,10 @@ use core::{
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
-    call_unsafe_wdf_function_binding,
     BOOLEAN,
     DEVICE_POWER_STATE,
     DEVICE_RELATION_TYPE,
     NTSTATUS,
-    WDFCMRESLIST,
-    WDFDEVICE,
-    WDFDEVICE_INIT,
     WDF_DEVICE_IO_TYPE,
     WDF_DEVICE_PNP_CAPABILITIES,
     WDF_DEVICE_POWER_POLICY_IDLE_SETTINGS,
@@ -27,19 +23,23 @@ use wdk_sys::{
     WDF_POWER_POLICY_S0_IDLE_USER_CONTROL,
     WDF_POWER_POLICY_SX_WAKE_USER_CONTROL,
     WDF_SPECIAL_FILE_TYPE,
+    WDFCMRESLIST,
+    WDFDEVICE,
+    WDFDEVICE_INIT,
+    call_unsafe_wdf_function_binding,
 };
 
 use super::{
+    TriState,
     enum_mapping,
     guid::Guid,
     init_wdf_struct,
     io_queue::IoQueue,
-    object::{impl_ref_counted_handle, Handle},
+    object::{Handle, impl_ref_counted_handle},
     request::RequestType,
     resource::CmResList,
-    result::{to_status_code, NtResult, StatusCodeExt},
+    result::{NtResult, StatusCodeExt, to_status_code},
     string::{UnicodeString, WString},
-    TriState,
 };
 
 impl_ref_counted_handle!(Device, DeviceContext);

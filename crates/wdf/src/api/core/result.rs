@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use wdk_sys::{NTSTATUS, NT_ERROR, NT_INFORMATION, NT_SUCCESS, NT_WARNING};
+use wdk_sys::{NT_ERROR, NT_INFORMATION, NT_SUCCESS, NT_WARNING, NTSTATUS};
 
 // TODO: Needs redesign. Currently we are treating
 // warnings as success (see `NtSStatusNonError` and the
@@ -273,11 +273,7 @@ impl StatusCodeExt for i32 {
     where
         F: FnOnce() -> NtStatusError,
     {
-        if NT_SUCCESS(self) {
-            Ok(())
-        } else {
-            Err(f())
-        }
+        if NT_SUCCESS(self) { Ok(()) } else { Err(f()) }
     }
 }
 

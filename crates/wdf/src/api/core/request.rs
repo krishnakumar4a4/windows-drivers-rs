@@ -4,15 +4,15 @@ use core::{ptr, slice};
 use bitflags::bitflags;
 use wdf_macros::object_context;
 use wdk_sys::{
-    call_unsafe_wdf_function_binding,
     IO_STATUS_BLOCK,
+    WDF_REQUEST_COMPLETION_PARAMS,
+    WDF_REQUEST_TYPE,
     WDFCONTEXT,
     WDFIOTARGET,
     WDFMEMORY,
     WDFOBJECT,
     WDFREQUEST,
-    WDF_REQUEST_COMPLETION_PARAMS,
-    WDF_REQUEST_TYPE,
+    call_unsafe_wdf_function_binding,
 };
 
 use super::{

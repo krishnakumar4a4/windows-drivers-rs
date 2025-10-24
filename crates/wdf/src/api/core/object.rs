@@ -6,17 +6,17 @@ use core::{
 };
 
 use wdk_sys::{
-    call_unsafe_wdf_function_binding,
-    ntddk::KeBugCheckEx,
+    _WDF_EXECUTION_LEVEL,
+    _WDF_SYNCHRONIZATION_SCOPE,
     NT_SUCCESS,
     PCWDF_OBJECT_CONTEXT_TYPE_INFO,
     STATUS_INVALID_PARAMETER,
-    WDFDEVICE,
-    WDFOBJECT,
     WDF_OBJECT_ATTRIBUTES,
     WDF_OBJECT_CONTEXT_TYPE_INFO,
-    _WDF_EXECUTION_LEVEL,
-    _WDF_SYNCHRONIZATION_SCOPE,
+    WDFDEVICE,
+    WDFOBJECT,
+    call_unsafe_wdf_function_binding,
+    ntddk::KeBugCheckEx,
 };
 
 use super::{device::Device, init_wdf_struct, result::NtResult};

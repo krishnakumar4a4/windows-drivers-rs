@@ -5,17 +5,17 @@ use core::{
 };
 
 use wdk_sys::{
-    call_unsafe_wdf_function_binding,
-    MDL,
-    WDFMEMORY,
-    WDFMEMORY_OFFSET,
-    WDF_MEMORY_DESCRIPTOR,
     _POOL_TYPE,
     _WDF_MEMORY_DESCRIPTOR_TYPE,
+    MDL,
+    WDF_MEMORY_DESCRIPTOR,
+    WDFMEMORY,
+    WDFMEMORY_OFFSET,
+    call_unsafe_wdf_function_binding,
 };
 
 use super::{
-    object::{impl_handle, Handle},
+    object::{Handle, impl_handle},
     result::{NtResult, StatusCodeExt},
 };
 

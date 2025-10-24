@@ -1,12 +1,12 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 
 use wdk_sys::{
-    call_unsafe_wdf_function_binding,
     NT_SUCCESS,
     UNICODE_STRING,
+    WDF_NO_OBJECT_ATTRIBUTES,
     WDFOBJECT,
     WDFSTRING,
-    WDF_NO_OBJECT_ATTRIBUTES,
+    call_unsafe_wdf_function_binding,
 };
 
 use super::{object::Handle, result::NtResult};
@@ -105,10 +105,12 @@ impl UnicodeString {
     }
 
     pub unsafe fn from_raw(unicode_str: UNICODE_STRING) -> Self {
-        let buf = unsafe { core::slice::from_raw_parts(
-            unicode_str.Buffer,
-            (unicode_str.MaximumLength / 2) as usize,
-        ) }
+        let buf = unsafe {
+            core::slice::from_raw_parts(
+                unicode_str.Buffer,
+                (unicode_str.MaximumLength / 2) as usize,
+            )
+        }
         .to_vec()
         .into_boxed_slice();
         Self {

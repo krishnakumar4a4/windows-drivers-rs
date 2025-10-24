@@ -2,24 +2,24 @@ use core::{ptr, sync::atomic::AtomicUsize};
 
 use wdf_macros::object_context_with_ref_count_check;
 use wdk_sys::{
-    call_unsafe_wdf_function_binding,
     NT_SUCCESS,
     PWDFMEMORY_OFFSET,
+    WDF_IO_TARGET_SENT_IO_ACTION,
+    WDF_NO_OBJECT_ATTRIBUTES,
     WDFDEVICE,
     WDFIOTARGET,
     WDFMEMORY,
     WDFMEMORY_OFFSET,
-    WDF_IO_TARGET_SENT_IO_ACTION,
-    WDF_NO_OBJECT_ATTRIBUTES,
+    call_unsafe_wdf_function_binding,
 };
 
 use super::{
     device::Device,
     enum_mapping,
     memory::{Memory, MemoryOffset, OwnedMemory},
-    object::{impl_ref_counted_handle, GetDevice, Handle},
+    object::{GetDevice, Handle, impl_ref_counted_handle},
     request::Request,
-    result::{status_codes, NtResult, StatusCodeExt},
+    result::{NtResult, StatusCodeExt, status_codes},
     sync::Arc,
 };
 
