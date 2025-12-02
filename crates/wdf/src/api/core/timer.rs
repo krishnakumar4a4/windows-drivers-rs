@@ -52,13 +52,6 @@ impl Timer {
         })
     }
 
-    // TODO: takes &self instead of &mut self because right now
-    // we don't have a good design for representation thread safey
-    // of WDF objects to the driver code. So we're using &self for
-    // the moment as it lets us put the object in the object context.
-    // When we have a good design for thread safe reprensetation we
-    // will change it back to &mut self
-    // TODO: also support absolute time in addition to duration
     pub fn start(&self, duration: &Duration) -> bool {
         let due_time = -1 * duration.as_nanos() as i64 / 100; // To ticks. -1 is for relative time
 
@@ -68,7 +61,6 @@ impl Timer {
         }
     }
 
-    // TODO: Change to &mut self. See comment on start() method
     pub fn stop(&self, wait: bool) -> bool {
         unsafe {
             call_unsafe_wdf_function_binding!(WdfTimerStop, self.as_ptr().cast(), wait as u8) != 0
