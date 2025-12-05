@@ -146,6 +146,12 @@ pub(crate) fn to_memory_ptrs(
         RequestFormatMemory::UserBuffer(memory, offset) => {
             let (ptr, len) = get_memory_ptr_and_len(&memory);
 
+            // TODO: do we really have to save the buffer in the context?
+            // Can't we just skip the drop of OwnedMemory and recover
+            // it later when the buffer ptr is being given back to the driver?
+            // This will eliminate the need to take &mut Request. We could just
+            // take &Request instead.
+
             // IMPORTANT: Save the buffer in the request
             // so that it stays alive while the request
             // is being processed
