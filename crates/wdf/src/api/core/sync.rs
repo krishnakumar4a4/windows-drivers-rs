@@ -141,7 +141,7 @@ impl<T: RefCountedHandle> Arc<T> {
         // Relaxed ordering is fine here since we do not care if
         // operations on ptr (i.e. the WDF pointer we are carrying)
         // get reordered with respect to fetch_add.
-        // It is totally okay to for an access to ptr to occur after
+        // It is totally okay for an access to ptr to occur after
         // the fetch_add call because the object is guaranteed to be
         // alive thanks to this very ref count increment.
         // Here we also prevent the ref count from overflowing by bugchecking
