@@ -218,7 +218,7 @@ impl TraceWriter {
                     a1_len,
                     a2,
                     a2_len,
-                    0,
+                    core::ptr::null::<core::ffi::c_void>(), // sentinel value for variadic args
                 );
             }
 
@@ -232,7 +232,7 @@ impl TraceWriter {
                 a1_len,
                 a2,
                 a2_len,
-                0,
+                core::ptr::null::<core::ffi::c_void>(), // sentinel value for variadic args
             );
         }
     }
@@ -304,7 +304,7 @@ type WppTraceMessage = extern "C" fn(
     MessageGuid: LPCGUID,
     MessageNumber: USHORT,
     ...
-) -> LONG;
+) -> NTSTATUS;
 type EtwClassicCallback =
     extern "C" fn(Guid: LPCGUID, ControlCode: UCHAR, EnableContext: PVOID, CallbackContext: PVOID);
 type EtwRegisterClassicProvider = extern "C" fn(
@@ -330,7 +330,7 @@ unsafe extern "C" {
         MessageGuid: LPGUID,
         MessageNumber: USHORT,
         ...
-    );
+    ) -> NTSTATUS;
     fn imp_WppRecorderReplay(
         WppCb: PVOID,
         WppTraceHandle: TRACEHANDLE,
