@@ -131,7 +131,7 @@ impl TraceWriter {
         let wpp_trace_message = get_routine_addr!("WmiTraceMessage", WppTraceMessage);
 
         let trace_config = TraceConfig {
-            control_block: &raw mut WPP_MAIN_CB as *mut WPP_PROJECT_CONTROL_BLOCK,
+            control_block: &raw mut WPP_MAIN_CB,
             wpp_trace_message,
             etw_unregister,
         };
