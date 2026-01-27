@@ -159,7 +159,7 @@ impl TraceWriter {
         let control_block_ptr = self.trace_config.control_block;
         unsafe {
             if let Some(etw_unregister) = self.trace_config.etw_unregister {
-                etw_unregister((&(*self.trace_config.control_block).Control).RegHandle);
+                etw_unregister((&(*control_block_ptr).Control).RegHandle);
             }
 
             WppAutoLogStop(control_block_ptr, self.wdm_driver);
@@ -208,9 +208,10 @@ impl TraceWriter {
         };
 
         unsafe {
+            let control_block = &(*self.trace_config.control_block).Control;
             if let Some(wpp_trace_message) = self.trace_config.wpp_trace_message {
                 wpp_trace_message(
-                    (&(*self.trace_config.control_block).Control).Logger,
+                    control_block.Logger,
                     WPP_TRACE_OPTIONS,
                     traceGuid,
                     id,
@@ -223,7 +224,7 @@ impl TraceWriter {
             }
 
             WppAutoLogTrace(
-                (&(*self.trace_config.control_block).Control).AutoLogContext,
+                control_block.AutoLogContext,
                 level,
                 flags,
                 traceGuid.cast_mut().cast(),
