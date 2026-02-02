@@ -119,12 +119,13 @@ impl TraceWriter {
         if let Some(etw_register_provider) = etw_register_classic_provider {
             etw_unregister = get_routine_addr!("EtwUnregister", EtwUnregister);
 
+            let control = unsafe { &mut *WPP_MAIN_CB.Control };
             etw_register_provider(
-                unsafe { (*WPP_MAIN_CB.Control).ControlGuid },
+                control.ControlGuid,
                 0,
                 WppClassicProviderCallback,
-                unsafe { mem::transmute(&mut *WPP_MAIN_CB.Control) },
-                unsafe { &mut (*WPP_MAIN_CB.Control).RegHandle },
+                unsafe { mem::transmute(&mut *control) },
+                &mut control.RegHandle,
             );
         }
 
