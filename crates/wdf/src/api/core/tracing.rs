@@ -96,7 +96,16 @@ impl TraceWriter {
     ///
     /// # Safety
     ///
-    /// The pointers `wdm_driver` and `reg_path` must be valid
+    /// The pointers `wdm_driver` and `reg_path` must be valid.
+    /// 
+    /// This function is implemented in a hacky way to test tracing. It should
+    /// only be called once since it sets up global state for WPP tracing.
+    /// Calling it multiple times may lead to undefined behavior due to multiple
+    /// initializations of the WPP control block and potential conflicts in the
+    /// global state.
+    /// 
+    /// TODO: Create a proper singleton pattern to ensure only one instance
+    /// of `TraceWriter` can exist at a time.
     pub unsafe fn init(
         control_guid: Guid,
         wdm_driver: *mut DRIVER_OBJECT,
