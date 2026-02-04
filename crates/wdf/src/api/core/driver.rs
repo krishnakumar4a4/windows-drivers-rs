@@ -302,14 +302,10 @@ extern "C" fn driver_unload(_driver: *mut DRIVER_OBJECT) {
     println!("Driver unload done");
 }
 
-pub fn trace(message: &str) {
+pub fn get_trace_writer() -> Option<&'static TraceWriter> {
     // SAFETY: This is safe because this call to `get`
     // is not concurrent with any call to `set`. `set` is
     // called only once in the beginning in the user's
     // driver entry function
-    unsafe {
-        if let Some(trace_writer) = TRACE_WRITER.get() {
-            trace_writer.write(message);
-        }
-    }
+    unsafe { TRACE_WRITER.get() }
 }

@@ -56,7 +56,8 @@ const WPP_FLAG_LEN: UCHAR = 1;
 
 unsafe extern "C" {
     fn MmGetSystemRoutineAddress(SystemRoutineName: PUNICODE_STRING) -> PVOID;
-    fn strlen(str: *const core::ffi::c_char) -> usize;
+    /// C runtime strlen function - exposed for macro use
+    pub fn strlen(str: *const core::ffi::c_char) -> usize;
 }
 
 macro_rules! get_routine_addr {
@@ -165,78 +166,6 @@ impl TraceWriter {
             WppAutoLogStop(control_block_ptr, self.wdm_driver);
         }
     }
-
-    /// Writes a trace message to the WPP tracing system.
-    ///
-    /// This function is used to log messages with the WPP tracing system.
-    /// It requires a valid tracing context to be set up beforehand.
-    pub fn write(&self, message: &str) {
-        let message_c_str = alloc::ffi::CString::new(message).unwrap();
-
-        self.wpp_recorder_sf_ds(
-            0,
-            0,
-            0,
-            &TRACE_GUID,
-            42, // printing an arbitrary number for now
-            message_c_str.as_ptr(),
-        );
-    }
-
-    fn wpp_recorder_sf_ds(
-        &self,
-        level: UCHAR,
-        flags: ULONG,
-        id: USHORT,
-        traceGuid: LPCGUID,
-        a1: i32,
-        a2: LPCSTR,
-    ) {
-        let a1_len = mem::size_of::<i32>();
-
-        let null_c_str = alloc::ffi::CString::new("NULL").unwrap();
-        let a2 = if !a2.is_null() {
-            a2
-        } else {
-            null_c_str.as_ptr()
-        };
-
-        let a2_len = if !a2.is_null() {
-            unsafe { strlen(a2) + 1 }
-        } else {
-            5 // length of "NULL" + terminator
-        };
-
-        unsafe {
-            let control_block = &(*self.trace_config.control_block).Control;
-            if let Some(wpp_trace_message) = self.trace_config.wpp_trace_message {
-                wpp_trace_message(
-                    control_block.Logger,
-                    WPP_TRACE_OPTIONS,
-                    traceGuid,
-                    id,
-                    &a1,
-                    a1_len,
-                    a2,
-                    a2_len,
-                    core::ptr::null::<core::ffi::c_void>(), // sentinel value for variadic args
-                );
-            }
-
-            WppAutoLogTrace(
-                control_block.AutoLogContext,
-                level,
-                flags,
-                traceGuid.cast_mut().cast(),
-                id,
-                &a1,
-                a1_len,
-                a2,
-                a2_len,
-                core::ptr::null::<core::ffi::c_void>(), // sentinel value for variadic args
-            );
-        }
-    }
 }
 
 impl Drop for TraceWriter {
@@ -324,7 +253,9 @@ unsafe extern "C" {
         RegPath: PCUNICODE_STRING,
     );
     fn WppAutoLogStop(WppCb: *mut WPP_PROJECT_CONTROL_BLOCK, DrvObj: PDRIVER_OBJECT);
-    fn WppAutoLogTrace(
+    /// WPP Auto Log Trace function - exposed for macro-generated code
+    #[doc(hidden)]
+    pub fn WppAutoLogTrace(
         AutoLogContext: PVOID,
         MessageLevel: UCHAR,
         MessageFlags: ULONG,
@@ -374,9 +305,23 @@ extern "C" fn WppClassicProviderCallback(
 }
 
 const WPP_TRACE_OPTIONS: ULONG = 1 | 2 | 32 | 8;
-const TRACE_GUID: GUID = GUID {
+
+/// Trace GUID used by WPP tracing - exposed for macro use
+#[doc(hidden)]
+pub const TRACE_GUID: GUID = GUID {
     Data1: 0xE7602A7B,
     Data2: 0x5034,
     Data3: 0x321B,
     Data4: [0xD4, 0x50, 0xA9, 0x86, 0x11, 0x3F, 0xC2, 0xE1],
 };
+
+/// Returns the AutoLogContext pointer for WppAutoLogTrace calls.
+/// This is exposed for macro-generated code.
+///
+/// # Safety
+///
+/// The returned pointer is only valid after tracing has been initialized.
+#[doc(hidden)]
+pub unsafe fn get_auto_log_context() -> PVOID {
+    unsafe { (*WPP_MAIN_CB.Control).AutoLogContext }
+}

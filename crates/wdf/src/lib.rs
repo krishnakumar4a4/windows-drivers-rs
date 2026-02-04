@@ -14,6 +14,14 @@ mod api;
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 pub use api::*;
 
+/// Internal module for macro-generated code. Not for public use.
+#[doc(hidden)]
+#[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
+pub mod __internal {
+    pub use crate::tracing::{get_auto_log_context, strlen, WppAutoLogTrace, TRACE_GUID};
+    pub use wdk_sys::{LPCGUID, LPCSTR, LPGUID, UCHAR, ULONG, USHORT};
+}
+
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 extern crate wdk_panic;
 

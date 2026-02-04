@@ -441,6 +441,19 @@ impl TraceArgType {
             TraceArgType::String => "s",
         }
     }
+
+    /// Returns the single-character suffix for method naming
+    fn method_char(&self) -> char {
+        match self {
+            TraceArgType::Long => 'd',
+            TraceArgType::String => 's',
+        }
+    }
+}
+
+/// Generates a method suffix from argument types (e.g., [Long, String] -> "ds")
+fn generate_method_suffix(args: &[TraceArg]) -> String {
+    args.iter().map(|a| a.arg_type.method_char()).collect()
 }
 
 /// Represents a parsed trace argument
@@ -448,6 +461,8 @@ impl TraceArgType {
 struct TraceArg {
     name: String,
     arg_type: TraceArgType,
+    /// The original expression for this argument
+    expr: syn::Expr,
 }
 
 /// Parses the trace! macro input and extracts format string and arguments
@@ -472,7 +487,7 @@ fn parse_trace_args(item: TokenStream) -> Result<(String, Vec<TraceArg>), Error>
     let mut trace_args = Vec::new();
     for (idx, expr) in iter.enumerate() {
         let (name, arg_type) = infer_arg_info(&expr, idx)?;
-        trace_args.push(TraceArg { name, arg_type });
+        trace_args.push(TraceArg { name, arg_type, expr });
     }
     
     Ok((format_str, trace_args))
@@ -643,9 +658,161 @@ pub fn trace(item: TokenStream) -> TokenStream {
     
     annotation_args.push(quote! { "}" });
     
+    // Generate method suffix based on argument types
+    let method_suffix = generate_method_suffix(&args);
+    let method_name = format!("trace_{}", if method_suffix.is_empty() { "empty".to_string() } else { method_suffix.clone() });
+    let method_ident = syn::Ident::new(&method_name, proc_macro2::Span::call_site());
+    
+    // Create unique trait name per signature to avoid conflicts
+    let trait_suffix = if method_suffix.is_empty() { "Empty".to_string() } else { method_suffix.to_uppercase() };
+    let trait_name = format!("TraceWriterExt{}", trait_suffix);
+    let trait_ident = syn::Ident::new(&trait_name, proc_macro2::Span::call_site());
+    
+    // Always generate the trait - Rust will handle duplicate definitions
+    let trait_and_impl = generate_trace_writer_ext_method(&method_ident, &trait_ident, &args);
+    
+    // Generate the method call with arguments
+    let method_call = generate_trace_method_call(&method_ident, &trait_ident, message_id as u16, &args);
+    
     let expanded = quote! {
-        core::hint::codeview_annotation!(#(#annotation_args),*)
+        core::hint::codeview_annotation!(#(#annotation_args),*);
+        #trait_and_impl
+        #method_call
     };
     
     expanded.into()
+}
+
+/// Generates the TraceWriterExt trait method definition and implementation
+fn generate_trace_writer_ext_method(
+    method_ident: &syn::Ident,
+    trait_ident: &syn::Ident,
+    args: &[TraceArg],
+) -> proc_macro2::TokenStream {
+    // Generate parameter declarations for the trait method
+    let param_decls: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
+        let param_name = syn::Ident::new(&format!("a{}", idx + 1), proc_macro2::Span::call_site());
+        match arg.arg_type {
+            TraceArgType::Long => quote! { #param_name: i64 },
+            TraceArgType::String => quote! { #param_name: ::wdf::__internal::LPCSTR },
+        }
+    }).collect();
+    
+    // Generate length calculations for each argument
+    let len_calculations: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
+        let param_name = syn::Ident::new(&format!("a{}", idx + 1), proc_macro2::Span::call_site());
+        let len_name = syn::Ident::new(&format!("a{}_len", idx + 1), proc_macro2::Span::call_site());
+        match arg.arg_type {
+            TraceArgType::Long => quote! {
+                let #len_name = core::mem::size_of::<i64>();
+            },
+            TraceArgType::String => quote! {
+                let #param_name = if !#param_name.is_null() {
+                    #param_name
+                } else {
+                    c"NULL".as_ptr()
+                };
+                let #len_name = unsafe { ::wdf::__internal::strlen(#param_name) + 1 };
+            },
+        }
+    }).collect();
+    
+    // Generate argument pairs for wpp_trace_message and WppAutoLogTrace
+    let arg_pairs: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
+        let param_name = syn::Ident::new(&format!("a{}", idx + 1), proc_macro2::Span::call_site());
+        let len_name = syn::Ident::new(&format!("a{}_len", idx + 1), proc_macro2::Span::call_site());
+        match arg.arg_type {
+            TraceArgType::Long => quote! { &#param_name, #len_name, },
+            TraceArgType::String => quote! { #param_name, #len_name, },
+        }
+    }).collect();
+    
+    quote! {
+        #[doc(hidden)]
+        #[allow(non_camel_case_types)]
+        trait #trait_ident {
+            fn #method_ident(
+                &self,
+                level: ::wdf::__internal::UCHAR,
+                flags: ::wdf::__internal::ULONG,
+                id: ::wdf::__internal::USHORT,
+                trace_guid: ::wdf::__internal::LPCGUID,
+                #(#param_decls),*
+            );
+        }
+        
+        impl #trait_ident for ::wdf::tracing::TraceWriter {
+            fn #method_ident(
+                &self,
+                level: ::wdf::__internal::UCHAR,
+                flags: ::wdf::__internal::ULONG,
+                id: ::wdf::__internal::USHORT,
+                trace_guid: ::wdf::__internal::LPCGUID,
+                #(#param_decls),*
+            ) {
+                #(#len_calculations)*
+                
+                unsafe {
+                    let auto_log_context = ::wdf::__internal::get_auto_log_context();
+                    let _ = ::wdf::__internal::WppAutoLogTrace(
+                        auto_log_context,
+                        level,
+                        flags,
+                        trace_guid.cast_mut().cast(),
+                        id,
+                        #(#arg_pairs)*
+                        core::ptr::null::<core::ffi::c_void>(), // sentinel
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Generates the method call to the TraceWriterExt method
+fn generate_trace_method_call(
+    method_ident: &syn::Ident,
+    trait_ident: &syn::Ident,
+    message_id: u16,
+    args: &[TraceArg],
+) -> proc_macro2::TokenStream {
+    // Generate argument conversions using the original expressions
+    let arg_conversions: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
+        let var_name = syn::Ident::new(&format!("__trace_arg{}", idx), proc_macro2::Span::call_site());
+        let expr = &arg.expr;
+        match arg.arg_type {
+            TraceArgType::Long => quote! {
+                let #var_name: i64 = (#expr) as i64;
+            },
+            TraceArgType::String => quote! {
+                let #var_name = alloc::ffi::CString::new(#expr).unwrap();
+            },
+        }
+    }).collect();
+    
+    let arg_values: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
+        let var_name = syn::Ident::new(&format!("__trace_arg{}", idx), proc_macro2::Span::call_site());
+        match arg.arg_type {
+            TraceArgType::Long => quote! { #var_name },
+            TraceArgType::String => quote! { #var_name.as_ptr() },
+        }
+    }).collect();
+    
+    let message_id_lit = proc_macro2::Literal::u16_unsuffixed(message_id);
+    
+    quote! {
+        {
+            #(#arg_conversions)*
+            if let Some(__trace_writer) = ::wdf::get_trace_writer() {
+                <::wdf::tracing::TraceWriter as #trait_ident>::#method_ident(
+                    __trace_writer,
+                    0,  // level
+                    0,  // flags
+                    #message_id_lit,
+                    &::wdf::__internal::TRACE_GUID,
+                    #(#arg_values),*
+                );
+            }
+        }
+    }
 }
