@@ -25,6 +25,8 @@ use wdk_sys::{
 
 use crate::api::{guid::Guid, string::UnicodeString};
 
+use crate::println;
+
 /// These globals are expected by IFR functionality such as the
 /// windbg extensions used to read IFR logs
 #[unsafe(no_mangle)]
@@ -87,7 +89,7 @@ macro_rules! get_routine_addr {
 pub struct TraceWriter {
     _control_guid: Box<Guid>, /* This field exists only ensure it stays alive because its
                                * address is used in trace_config */
-    trace_config: TraceConfig,
+    pub(crate) trace_config: TraceConfig,
     wdm_driver: *mut DRIVER_OBJECT,
     reg_path: PCUNICODE_STRING,
 }
@@ -120,13 +122,14 @@ impl TraceWriter {
         if let Some(etw_register_provider) = etw_register_classic_provider {
             etw_unregister = get_routine_addr!("EtwUnregister", EtwUnregister);
 
-            etw_register_provider(
+            let status = etw_register_provider(
                 unsafe { (*WPP_MAIN_CB.Control).ControlGuid },
                 0,
                 WppClassicProviderCallback,
                 unsafe { mem::transmute(&mut *WPP_MAIN_CB.Control) },
                 unsafe { &mut (*WPP_MAIN_CB.Control).RegHandle },
             );
+            println!("EtwRegisterClassicProvider status: {status:?}");
         }
 
         let wpp_trace_message = get_routine_addr!("WmiTraceMessage", WppTraceMessage);
@@ -160,10 +163,15 @@ impl TraceWriter {
         let control_block_ptr = self.trace_config.control_block;
         unsafe {
             if let Some(etw_unregister) = self.trace_config.etw_unregister {
-                etw_unregister((&(*control_block_ptr).Control).RegHandle);
+                let status = etw_unregister((&(*control_block_ptr).Control).RegHandle);
+                (&mut (*control_block_ptr).Control).RegHandle = 0;
+                println!("EtwRegisterClassicProvider status: {status:?}");
             }
 
             WppAutoLogStop(control_block_ptr, self.wdm_driver);
+
+            WPP_RECORDER_INITIALIZED = ptr::null_mut();
+            WPP_GLOBAL_Control = ptr::null_mut();
         }
     }
 }
@@ -182,7 +190,7 @@ unsafe impl Sync for TraceWriter {}
 
 #[repr(C)]
 pub union WPP_PROJECT_CONTROL_BLOCK {
-    Control: mem::ManuallyDrop<WPP_TRACE_CONTROL_BLOCK>,
+    pub(crate) Control: mem::ManuallyDrop<WPP_TRACE_CONTROL_BLOCK>,
     ReserveSpace: [UCHAR;
         mem::size_of::<WPP_TRACE_CONTROL_BLOCK>()
             + mem::size_of::<ULONG>() * (WPP_FLAG_LEN as usize - 1)],
@@ -193,7 +201,7 @@ pub struct WPP_TRACE_CONTROL_BLOCK {
     Callback: Option<WMIENTRY_NEW>,
     ControlGuid: LPCGUID,
     Next: *const WPP_TRACE_CONTROL_BLOCK,
-    Logger: TRACEHANDLE,
+    pub(crate) Logger: TRACEHANDLE,
     RegistryPath: PUNICODE_STRING,
     FlagsLen: UCHAR,
     Level: UCHAR,
@@ -201,7 +209,7 @@ pub struct WPP_TRACE_CONTROL_BLOCK {
     Flags: [ULONG; 1],
     ReservedFlags: ULONG,
     RegHandle: REGHANDLE,
-    AutoLogContext: PVOID,
+    pub(crate) AutoLogContext: PVOID,
     AutoLogVerboseEnabled: USHORT,
     AutoLogAttachToMiniDump: USHORT,
 }
@@ -214,10 +222,10 @@ struct WPP_TRACE_ENABLE_CONTEXT {
     EnableFlags: ULONG,
 }
 
-struct TraceConfig {
-    control_block: *mut WPP_PROJECT_CONTROL_BLOCK,
-    wpp_trace_message: Option<WppTraceMessage>,
-    etw_unregister: Option<EtwUnregister>,
+pub(crate) struct TraceConfig {
+    pub(crate) control_block: *mut WPP_PROJECT_CONTROL_BLOCK,
+    pub(crate) wpp_trace_message: Option<WppTraceMessage>,
+    pub(crate) etw_unregister: Option<EtwUnregister>,
 }
 
 type WMIENTRY_NEW = extern "C" fn(
@@ -228,13 +236,17 @@ type WMIENTRY_NEW = extern "C" fn(
     Context: PVOID,
     Size: PULONG,
 ) -> u64;
-type WppTraceMessage = extern "C" fn(
+
+/// WPP Trace Message function - exposed for macro-generated code
+#[doc(hidden)]
+pub type WppTraceMessage = extern "C" fn(
     LoggerHandle: ULONG64,
     MessageFlags: ULONG,
     MessageGuid: LPCGUID,
     MessageNumber: USHORT,
     ...
 ) -> NTSTATUS;
+
 type EtwClassicCallback =
     extern "C" fn(Guid: LPCGUID, ControlCode: UCHAR, EnableContext: PVOID, CallbackContext: PVOID);
 type EtwRegisterClassicProvider = extern "C" fn(
@@ -304,7 +316,9 @@ extern "C" fn WppClassicProviderCallback(
     }
 }
 
-const WPP_TRACE_OPTIONS: ULONG = 1 | 2 | 32 | 8;
+// Trace options used by WPP tracing - exposed for macro use
+#[doc(hidden)]
+pub const WPP_TRACE_OPTIONS: ULONG = 1 | 2 | 32 | 8;
 
 /// Trace GUID used by WPP tracing - exposed for macro use
 #[doc(hidden)]
@@ -314,14 +328,3 @@ pub const TRACE_GUID: GUID = GUID {
     Data3: 0x321B,
     Data4: [0xD4, 0x50, 0xA9, 0x86, 0x11, 0x3F, 0xC2, 0xE1],
 };
-
-/// Returns the AutoLogContext pointer for WppAutoLogTrace calls.
-/// This is exposed for macro-generated code.
-///
-/// # Safety
-///
-/// The returned pointer is only valid after tracing has been initialized.
-#[doc(hidden)]
-pub unsafe fn get_auto_log_context() -> PVOID {
-    unsafe { (*WPP_MAIN_CB.Control).AutoLogContext }
-}

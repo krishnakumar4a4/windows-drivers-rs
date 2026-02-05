@@ -457,7 +457,6 @@ fn generate_method_suffix(args: &[TraceArg]) -> String {
 }
 
 /// Represents a parsed trace argument
-#[derive(Debug)]
 struct TraceArg {
     name: String,
     arg_type: TraceArgType,
@@ -753,7 +752,17 @@ fn generate_trace_writer_ext_method(
                 #(#len_calculations)*
                 
                 unsafe {
-                    let auto_log_context = ::wdf::__internal::get_auto_log_context();
+                    let logger = ::wdf::__internal::get_wpp_logger().unwrap();
+                    let _ = ::wdf::__internal::get_wpp_trace_message().unwrap()(
+                        logger,
+                        ::wdf::__internal::WPP_TRACE_OPTIONS,
+                        trace_guid,
+                        id,
+                        #(#arg_pairs)*
+                        core::ptr::null::<core::ffi::c_void>(), // sentinel
+                    );
+
+                    let auto_log_context = ::wdf::__internal::get_auto_log_context().unwrap();
                     let _ = ::wdf::__internal::WppAutoLogTrace(
                         auto_log_context,
                         level,

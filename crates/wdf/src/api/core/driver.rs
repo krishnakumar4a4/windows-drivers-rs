@@ -7,6 +7,8 @@ pub use wdk_sys::{
     NT_SUCCESS,
     NTSTATUS,
     PCUNICODE_STRING,
+    PVOID,
+    TRACEHANDLE,
     WDF_OBJECT_ATTRIBUTES,
     WDF_OBJECT_CONTEXT_TYPE_INFO,
     WDFOBJECT,
@@ -28,7 +30,7 @@ use super::{
     object::Handle,
     result::{NtResult, status_codes},
     string::{WString, to_rust_str},
-    tracing::TraceWriter,
+    tracing::{TraceWriter, WppTraceMessage},
 };
 use crate::println;
 
@@ -203,6 +205,7 @@ pub fn call_safe_driver_entry(
 
     let mut driver_config = init_wdf_struct!(WDF_DRIVER_CONFIG);
     driver_config.EvtDriverDeviceAdd = Some(evt_driver_device_add);
+    driver_config.EvtDriverUnload = Some(wdf_driver_unload);
 
     let mut wdf_driver: WDFDRIVER = ptr::null_mut();
 
@@ -294,12 +297,14 @@ extern "C" fn evt_driver_device_add(
     }
 }
 
-extern "C" fn driver_unload(_driver: *mut DRIVER_OBJECT) {
-    println!("Driver unload");
-
-    clean_up_tracing();
-
+unsafe extern "C" fn driver_unload(_driver: *mut DRIVER_OBJECT) {
     println!("Driver unload done");
+}
+
+unsafe extern "C" fn wdf_driver_unload(_driver: WDFDRIVER) {
+    println!("WDF Driver unload called");
+    clean_up_tracing();
+    println!("WDF Driver unload done");
 }
 
 pub fn get_trace_writer() -> Option<&'static TraceWriter> {
@@ -308,4 +313,41 @@ pub fn get_trace_writer() -> Option<&'static TraceWriter> {
     // called only once in the beginning in the user's
     // driver entry function
     unsafe { TRACE_WRITER.get() }
+}
+
+/// Returns the AutoLogContext pointer for WppAutoLogTrace calls.
+/// This is exposed for macro-generated code.
+///
+/// # Safety
+///
+/// The returned pointer is only valid after tracing has been initialized.
+#[doc(hidden)]
+pub unsafe fn get_auto_log_context() -> Option<PVOID> {
+    get_trace_writer().map(|tw| unsafe {
+        (&(*tw.trace_config.control_block).Control).AutoLogContext
+    })
+}
+
+/// Returns the TRACEHANDLE logger for WPP tracing.
+/// This is exposed for macro-generated code.
+/// 
+/// # Safety
+/// 
+/// The returned TRACEHANDLE is only valid after tracing has been initialized.
+#[doc(hidden)]
+pub unsafe fn get_wpp_logger() -> Option<TRACEHANDLE> {
+    get_trace_writer().map(|tw| unsafe {
+        (&(*tw.trace_config.control_block).Control).Logger
+    })
+}
+
+/// Returns the WppTraceMessage function pointer for WPP tracing.
+/// This is exposed for macro-generated code.
+/// 
+/// # Safety
+/// 
+/// The returned function pointer is only valid after tracing has been initialized.
+#[doc(hidden)]
+pub unsafe fn get_wpp_trace_message() -> Option<WppTraceMessage> {
+    get_trace_writer().and_then(|tw| tw.trace_config.wpp_trace_message)
 }
