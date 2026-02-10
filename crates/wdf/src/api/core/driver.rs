@@ -201,8 +201,6 @@ pub fn call_safe_driver_entry(
     safe_entry: fn(&mut Driver, &str) -> NtResult<()>,
     tracing_control_guid: Option<Guid>,
 ) -> NTSTATUS {
-    wdm_driver.DriverUnload = Some(driver_unload);
-
     let mut driver_config = init_wdf_struct!(WDF_DRIVER_CONFIG);
     driver_config.EvtDriverDeviceAdd = Some(evt_driver_device_add);
     driver_config.EvtDriverUnload = Some(wdf_driver_unload);
@@ -295,10 +293,6 @@ extern "C" fn evt_driver_device_add(
     } else {
         0
     }
-}
-
-unsafe extern "C" fn driver_unload(_driver: *mut DRIVER_OBJECT) {
-    println!("Driver unload done");
 }
 
 unsafe extern "C" fn wdf_driver_unload(_driver: WDFDRIVER) {

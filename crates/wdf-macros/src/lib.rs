@@ -5,7 +5,8 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit, meta::parser, parse_macro_input};
+use syn::{Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit, Token, Type, meta::parser, parse_macro_input};
+use syn::parse::{Parse, ParseStream};
 
 /// A procedural macro that when placed on a safe Rust impl of a driver
 /// generates the relevant FFI wrappers
@@ -415,8 +416,14 @@ static TRACE_MESSAGE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::Atomi
 /// Represents the type of a trace argument for WPP tracing
 #[derive(Debug, Clone)]
 enum TraceArgType {
-    /// Integer types (i32, u32, i64, u64, etc.) - maps to ItemLong
+    /// Signed integer types up to 32 bits (i8, i16, i32) - maps to ItemLong
     Long,
+    /// Unsigned integer types up to 32 bits (u8, u16, u32) - maps to ItemULong
+    ULong,
+    /// Signed integer types 33-64 bits (i64, isize) - maps to ItemLongLong
+    LongLong,
+    /// Unsigned integer types 33-64 bits (u64, usize) - maps to ItemULongLong
+    ULongLong,
     /// String types (&str, String) - maps to ItemString  
     String,
     // Future: Add more types as needed
@@ -430,6 +437,9 @@ impl TraceArgType {
     fn item_type_name(&self) -> &'static str {
         match self {
             TraceArgType::Long => "ItemLong",
+            TraceArgType::ULong => "ItemULong",
+            TraceArgType::LongLong => "ItemLongLong",
+            TraceArgType::ULongLong => "ItemULongLong",
             TraceArgType::String => "ItemString",
         }
     }
@@ -438,6 +448,9 @@ impl TraceArgType {
     fn format_specifier(&self) -> &'static str {
         match self {
             TraceArgType::Long => "d",
+            TraceArgType::ULong => "u",
+            TraceArgType::LongLong => "I64d",
+            TraceArgType::ULongLong => "I64u",
             TraceArgType::String => "s",
         }
     }
@@ -446,7 +459,21 @@ impl TraceArgType {
     fn method_char(&self) -> char {
         match self {
             TraceArgType::Long => 'd',
+            TraceArgType::ULong => 'u',
+            TraceArgType::LongLong => 'D',
+            TraceArgType::ULongLong => 'U',
             TraceArgType::String => 's',
+        }
+    }
+
+    /// Returns the Rust type used for this trace argument
+    fn rust_type(&self) -> &'static str {
+        match self {
+            TraceArgType::Long => "i32",
+            TraceArgType::ULong => "u32",
+            TraceArgType::LongLong => "i64",
+            TraceArgType::ULongLong => "u64",
+            TraceArgType::String => "LPCSTR",
         }
     }
 }
@@ -464,38 +491,113 @@ struct TraceArg {
     expr: syn::Expr,
 }
 
+/// Represents a trace argument input that may have an explicit type annotation
+/// Syntax: `expr` or `expr: Type`
+struct TraceArgInput {
+    expr: syn::Expr,
+    explicit_type: Option<syn::Type>,
+}
+
+impl Parse for TraceArgInput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let expr: syn::Expr = input.parse()?;
+        
+        // Check if there's a colon followed by a type
+        let explicit_type = if input.peek(Token![:]) {
+            input.parse::<Token![:]>()?;
+            Some(input.parse::<Type>()?)
+        } else {
+            None
+        };
+        
+        Ok(TraceArgInput { expr, explicit_type })
+    }
+}
+
+/// Maps a syn::Type to a TraceArgType
+/// Signed types up to 32 bits → Long, Unsigned up to 32 bits → ULong
+/// Signed 64 bits → LongLong, Unsigned 64 bits → ULongLong
+/// Types over 64 bits (i128, u128) are not supported
+fn type_to_trace_arg_type(ty: &syn::Type) -> Result<TraceArgType, Error> {
+    match ty {
+        Type::Path(type_path) => {
+            let ident = type_path.path.segments.last()
+                .map(|s| s.ident.to_string());
+            
+            match ident.as_deref() {
+                // Signed types up to 32 bits → Long
+                Some("i8" | "i16" | "i32") => Ok(TraceArgType::Long),
+                // Unsigned types up to 32 bits → ULong
+                Some("u8" | "u16" | "u32") => Ok(TraceArgType::ULong),
+                // Signed 64-bit types → LongLong (isize treated as 64-bit)
+                Some("i64" | "isize") => Ok(TraceArgType::LongLong),
+                // Unsigned 64-bit types → ULongLong (usize treated as 64-bit)
+                Some("u64" | "usize") => Ok(TraceArgType::ULongLong),
+                // Types over 64 bits are not supported
+                Some("i128" | "u128") => Err(Error::new_spanned(
+                    ty,
+                    "128-bit integer types (i128, u128) are not supported for tracing"
+                )),
+                // String types
+                Some("str" | "String") => Ok(TraceArgType::String),
+                Some(other) => Err(Error::new_spanned(
+                    ty,
+                    format!("Unsupported type '{}' for tracing. Supported types: i8-i64, u8-u64, isize, usize, &str, String", other)
+                )),
+                None => Err(Error::new_spanned(ty, "Cannot determine type for tracing")),
+            }
+        }
+        Type::Reference(type_ref) => {
+            // Handle &str and &String
+            type_to_trace_arg_type(&type_ref.elem)
+        }
+        _ => Err(Error::new_spanned(ty, "Unsupported type syntax for tracing. Supported types: integer types, &str, String")),
+    }
+}
+
 /// Parses the trace! macro input and extracts format string and arguments
+/// Supports both `trace!("fmt", expr)` and `trace!("fmt", expr: Type)` syntax
 fn parse_trace_args(item: TokenStream) -> Result<(String, Vec<TraceArg>), Error> {
-    use syn::{Expr, ExprLit, Token, punctuated::Punctuated};
+    use syn::{Expr, ExprLit, punctuated::Punctuated};
     
+    // Parse as comma-separated TraceArgInput items
     let args = syn::parse::Parser::parse(
-        Punctuated::<Expr, Token![,]>::parse_terminated,
+        Punctuated::<TraceArgInput, Token![,]>::parse_terminated,
         item,
     )?;
     
     let mut iter = args.into_iter();
     
-    // First argument must be a format string literal
+    // First argument must be a format string literal (no type annotation)
     let format_str = match iter.next() {
-        Some(Expr::Lit(ExprLit { lit: Lit::Str(s), .. })) => s.value(),
-        Some(expr) => return Err(Error::new_spanned(expr, "First argument must be a string literal")),
+        Some(TraceArgInput { expr: Expr::Lit(ExprLit { lit: Lit::Str(s), .. }), explicit_type: None }) => s.value(),
+        Some(TraceArgInput { expr: Expr::Lit(ExprLit { lit: Lit::Str(_), .. }), explicit_type: Some(_) }) => {
+            return Err(Error::new(proc_macro2::Span::call_site(), "Format string should not have a type annotation"));
+        }
+        Some(TraceArgInput { expr, .. }) => return Err(Error::new_spanned(expr, "First argument must be a string literal")),
         None => return Err(Error::new(proc_macro2::Span::call_site(), "trace! requires at least a format string")),
     };
     
-    // Remaining arguments are the trace parameters
+    // Remaining arguments are the trace parameters (with optional type annotations)
     let mut trace_args = Vec::new();
-    for (idx, expr) in iter.enumerate() {
-        let (name, arg_type) = infer_arg_info(&expr, idx)?;
-        trace_args.push(TraceArg { name, arg_type, expr });
+    for (idx, arg_input) in iter.enumerate() {
+        let (name, arg_type) = infer_arg_info(&arg_input.expr, idx, arg_input.explicit_type.as_ref())?;
+        trace_args.push(TraceArg { name, arg_type, expr: arg_input.expr });
     }
     
     Ok((format_str, trace_args))
 }
 
 /// Infers the argument name and type from an expression
-fn infer_arg_info(expr: &syn::Expr, idx: usize) -> Result<(String, TraceArgType), Error> {
+/// If explicit_type is provided, uses that instead of inferring
+fn infer_arg_info(
+    expr: &syn::Expr,
+    idx: usize,
+    explicit_type: Option<&syn::Type>,
+) -> Result<(String, TraceArgType), Error> {
     use syn::Expr;
     
+    // Extract argument name from expression
     let name = match expr {
         Expr::Path(p) => {
             // Variable reference like `my_var`
@@ -521,16 +623,32 @@ fn infer_arg_info(expr: &syn::Expr, idx: usize) -> Result<(String, TraceArgType)
                 format!("arg{}", idx)
             }
         }
+        Expr::Field(f) => {
+            // Field access like `obj.field`
+            match &f.member {
+                syn::Member::Named(ident) => ident.to_string(),
+                syn::Member::Unnamed(index) => format!("field{}", index.index),
+            }
+        }
+        Expr::MethodCall(m) => {
+            // Method call like `obj.method()`
+            m.method.to_string()
+        }
         _ => format!("arg{}", idx),
     };
     
-    // Infer type based on expression structure
-    // For now, default to Long for most expressions, String for string literals and references
+    // If explicit type is provided, use it
+    if let Some(ty) = explicit_type {
+        let arg_type = type_to_trace_arg_type(ty)?;
+        return Ok((name, arg_type));
+    }
+    
+    // Otherwise, infer type based on expression structure
     let arg_type = match expr {
         Expr::Lit(lit) => {
             match &lit.lit {
                 Lit::Str(_) => TraceArgType::String,
-                Lit::Int(_) => TraceArgType::Long,
+                Lit::Int(_) => TraceArgType::ULong,
                 _ => return Err(Error::new_spanned(lit, "Unsupported literal type for tracing")),
             }
         }
@@ -538,10 +656,34 @@ fn infer_arg_info(expr: &syn::Expr, idx: usize) -> Result<(String, TraceArgType)
             // Match only &str (reference to a string literal)
             match r.expr.as_ref() {
                 Expr::Lit(lit) if matches!(&lit.lit, Lit::Str(_)) => TraceArgType::String,
-                _ => return Err(Error::new_spanned(expr, "Only &str references are supported for tracing")),
+                _ => return Err(Error::new_spanned(
+                    expr,
+                    "Cannot infer type for reference. Add explicit type annotation: `&var: &str`"
+                )),
             }
         }
-        _ => return Err(Error::new_spanned(expr, "Unsupported expression type for tracing")),
+        Expr::Path(_) => {
+            return Err(Error::new_spanned(
+                expr,
+                "Cannot infer type for variable. Add explicit type annotation, e.g.: `my_var: i32` or `my_var: &str`"
+            ));
+        }
+        Expr::Field(_) => {
+            return Err(Error::new_spanned(
+                expr,
+                "Cannot infer type for field access. Add explicit type annotation, e.g.: `obj.field: i32`"
+            ));
+        }
+        Expr::MethodCall(_) => {
+            return Err(Error::new_spanned(
+                expr,
+                "Cannot infer type for method call. Add explicit type annotation, e.g.: `obj.method(): i32`"
+            ));
+        }
+        _ => return Err(Error::new_spanned(
+            expr,
+            "Cannot infer type for this expression. Add explicit type annotation, e.g.: `expr: i32` or `expr: &str`"
+        )),
     };
     
     Ok((name, arg_type))
@@ -692,7 +834,10 @@ fn generate_trace_writer_ext_method(
     let param_decls: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
         let param_name = syn::Ident::new(&format!("a{}", idx + 1), proc_macro2::Span::call_site());
         match arg.arg_type {
-            TraceArgType::Long => quote! { #param_name: i64 },
+            TraceArgType::Long => quote! { #param_name: i32 },
+            TraceArgType::ULong => quote! { #param_name: u32 },
+            TraceArgType::LongLong => quote! { #param_name: i64 },
+            TraceArgType::ULongLong => quote! { #param_name: u64 },
             TraceArgType::String => quote! { #param_name: ::wdf::__internal::LPCSTR },
         }
     }).collect();
@@ -703,7 +848,16 @@ fn generate_trace_writer_ext_method(
         let len_name = syn::Ident::new(&format!("a{}_len", idx + 1), proc_macro2::Span::call_site());
         match arg.arg_type {
             TraceArgType::Long => quote! {
+                let #len_name = core::mem::size_of::<i32>();
+            },
+            TraceArgType::ULong => quote! {
+                let #len_name = core::mem::size_of::<u32>();
+            },
+            TraceArgType::LongLong => quote! {
                 let #len_name = core::mem::size_of::<i64>();
+            },
+            TraceArgType::ULongLong => quote! {
+                let #len_name = core::mem::size_of::<u64>();
             },
             TraceArgType::String => quote! {
                 let #param_name = if !#param_name.is_null() {
@@ -721,7 +875,8 @@ fn generate_trace_writer_ext_method(
         let param_name = syn::Ident::new(&format!("a{}", idx + 1), proc_macro2::Span::call_site());
         let len_name = syn::Ident::new(&format!("a{}_len", idx + 1), proc_macro2::Span::call_site());
         match arg.arg_type {
-            TraceArgType::Long => quote! { &#param_name, #len_name, },
+            TraceArgType::Long | TraceArgType::ULong | 
+            TraceArgType::LongLong | TraceArgType::ULongLong => quote! { &#param_name, #len_name, },
             TraceArgType::String => quote! { #param_name, #len_name, },
         }
     }).collect();
@@ -791,7 +946,16 @@ fn generate_trace_method_call(
         let expr = &arg.expr;
         match arg.arg_type {
             TraceArgType::Long => quote! {
+                let #var_name: i32 = (#expr) as i32;
+            },
+            TraceArgType::ULong => quote! {
+                let #var_name: u32 = (#expr) as u32;
+            },
+            TraceArgType::LongLong => quote! {
                 let #var_name: i64 = (#expr) as i64;
+            },
+            TraceArgType::ULongLong => quote! {
+                let #var_name: u64 = (#expr) as u64;
             },
             TraceArgType::String => quote! {
                 let #var_name = alloc::ffi::CString::new(#expr).unwrap();
@@ -802,7 +966,8 @@ fn generate_trace_method_call(
     let arg_values: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
         let var_name = syn::Ident::new(&format!("__trace_arg{}", idx), proc_macro2::Span::call_site());
         match arg.arg_type {
-            TraceArgType::Long => quote! { #var_name },
+            TraceArgType::Long | TraceArgType::ULong |
+            TraceArgType::LongLong | TraceArgType::ULongLong => quote! { #var_name },
             TraceArgType::String => quote! { #var_name.as_ptr() },
         }
     }).collect();
