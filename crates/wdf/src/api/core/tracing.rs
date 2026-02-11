@@ -174,6 +174,40 @@ impl TraceWriter {
             WPP_GLOBAL_Control = ptr::null_mut();
         }
     }
+
+    /// Checks if the specified flag is enabled in the control block.
+    /// 
+    /// # Arguments
+    /// * `control_index` - The index of the control block (0 for the default control block)
+    /// * `flags` - The flag bits to check
+    /// 
+    /// # Returns
+    /// `true` if the flag is enabled, `false` otherwise
+    #[inline]
+    pub fn is_flag_enabled(&self, _control_index: usize, flags: u32) -> bool {
+        let control_block_ptr = self.trace_config.control_block;
+        unsafe {
+            let control = &(*control_block_ptr).Control;
+            // Check if the logger is active and the flags match
+            control.Logger != 0 && (control.Flags[0] & (1 << (flags & 31))) != 0
+        }
+    }
+
+    /// Checks if AutoLogVerboseEnabled is set for the control block.
+    /// 
+    /// # Arguments
+    /// * `control_index` - The index of the control block (0 for the default control block)
+    /// 
+    /// # Returns
+    /// `true` if AutoLogVerboseEnabled is set, `false` otherwise
+    #[inline]
+    pub fn is_auto_log_verbose_enabled(&self, _control_index: usize) -> bool {
+        let control_block_ptr = self.trace_config.control_block;
+        unsafe {
+            let control = &(*control_block_ptr).Control;
+            control.AutoLogVerboseEnabled != 0
+        }
+    }
 }
 
 impl Drop for TraceWriter {

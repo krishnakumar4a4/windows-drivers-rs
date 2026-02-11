@@ -303,6 +303,51 @@ fn generate_wpp_flags_declaration(trace_controls: &[TraceControlDef]) -> proc_ma
     let num_flags = variants.len();
 
     quote! {
+        /// Standard WPP trace levels.
+        /// These correspond to the standard Windows trace levels.
+        #[allow(missing_docs)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[repr(u8)]
+        pub enum TraceLevel {
+            /// No tracing
+            None = 0,
+            /// Critical errors that cause system failure (Fatal is an alias)
+            Critical = 1,
+            /// Non-fatal errors
+            Error = 2,
+            /// Warnings
+            Warning = 3,
+            /// Informational messages
+            Information = 4,
+            /// Verbose debug messages
+            Verbose = 5,
+            /// Reserved level 6
+            Reserved6 = 6,
+            /// Reserved level 7
+            Reserved7 = 7,
+            /// Reserved level 8
+            Reserved8 = 8,
+            /// Reserved level 9
+            Reserved9 = 9,
+        }
+
+        /// Fatal is an alias for Critical
+        pub const Fatal: TraceLevel = TraceLevel::Critical;
+
+        impl TraceLevel {
+            /// Returns the numeric value of the trace level.
+            #[inline]
+            pub const fn value(&self) -> u8 {
+                *self as u8
+            }
+
+            /// Returns true if this level is less than or equal to Verbose.
+            #[inline]
+            pub const fn is_verbose_or_below(&self) -> bool {
+                (*self as u8) <= (TraceLevel::Verbose as u8)
+            }
+        }
+
         /// WPP tracing flags for all trace controls.
         /// Each variant holds a tuple (control_index, flag_index) where both are 0-indexed.
         /// Flag names must be unique across all trace control definitions.
@@ -826,9 +871,32 @@ fn type_to_trace_arg_type(ty: &syn::Type) -> Result<TraceArgType, Error> {
     }
 }
 
-/// Parses the trace! macro input and extracts format string and arguments
-/// Supports both `trace!("fmt", expr)` and `trace!("fmt", expr: Type)` syntax
-fn parse_trace_args(item: TokenStream) -> Result<(String, Vec<TraceArg>), Error> {
+/// Result of parsing trace macro arguments
+struct ParsedTraceArgs {
+    /// Optional flag identifier (e.g., FLAG_ONE)
+    flag: Option<syn::Ident>,
+    /// Optional trace level (e.g., TraceLevel::Information)
+    level: Option<syn::Ident>,
+    /// The format string
+    format_str: String,
+    /// The trace arguments
+    args: Vec<TraceArg>,
+}
+
+/// Known trace level names for validation
+const TRACE_LEVEL_NAMES: &[&str] = &[
+    "None", "Critical", "Fatal", "Error", "Warning", 
+    "Information", "Verbose", "Reserved6", "Reserved7", "Reserved8", "Reserved9"
+];
+
+/// Parses the trace! macro input and extracts optional flag, optional level, format string and arguments
+/// 
+/// Supported syntaxes:
+/// - `trace!("fmt", args...)` - no flag, no level (defaults to TraceLevel::None)
+/// - `trace!(FLAG, "fmt", args...)` - with flag, no level
+/// - `trace!(FLAG, Level, "fmt", args...)` - with flag and level
+/// - `trace!(Level, "fmt", args...)` - with level only (uses default control block)
+fn parse_trace_args(item: TokenStream) -> Result<ParsedTraceArgs, Error> {
     use syn::{Expr, ExprLit, punctuated::Punctuated};
     
     // Parse as comma-separated TraceArgInput items
@@ -837,26 +905,107 @@ fn parse_trace_args(item: TokenStream) -> Result<(String, Vec<TraceArg>), Error>
         item,
     )?;
     
-    let mut iter = args.into_iter();
+    // Convert to Vec for easier manipulation
+    let mut all_args: Vec<TraceArgInput> = args.into_iter().collect();
     
-    // First argument must be a format string literal (no type annotation)
-    let format_str = match iter.next() {
-        Some(TraceArgInput { expr: Expr::Lit(ExprLit { lit: Lit::Str(s), .. }), explicit_type: None }) => s.value(),
-        Some(TraceArgInput { expr: Expr::Lit(ExprLit { lit: Lit::Str(_), .. }), explicit_type: Some(_) }) => {
-            return Err(Error::new(proc_macro2::Span::call_site(), "Format string should not have a type annotation"));
+    if all_args.is_empty() {
+        return Err(Error::new(proc_macro2::Span::call_site(), "trace! requires at least a format string"));
+    }
+    
+    let mut flag: Option<syn::Ident> = None;
+    let mut level: Option<syn::Ident> = None;
+    let format_str: String;
+    let remaining_start_idx: usize;
+    
+    // Determine the pattern based on the first few arguments
+    let first_is_path = matches!(&all_args[0].expr, Expr::Path(_));
+    let first_is_string = matches!(&all_args[0].expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
+    
+    if first_is_string {
+        // Pattern: trace!("fmt", args...)
+        format_str = match &all_args[0].expr {
+            Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value(),
+            _ => unreachable!(),
+        };
+        remaining_start_idx = 1;
+    } else if first_is_path && all_args.len() >= 2 {
+        let second_is_string = matches!(&all_args[1].expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
+        let second_is_path = matches!(&all_args[1].expr, Expr::Path(_));
+        
+        if second_is_string {
+            // Pattern: trace!(IDENT, "fmt", ...) - could be FLAG or Level
+            let ident = extract_path_ident(&all_args[0].expr)?;
+            let ident_str = ident.to_string();
+            
+            if TRACE_LEVEL_NAMES.contains(&ident_str.as_str()) {
+                // It's a level: trace!(Level, "fmt", ...)
+                level = Some(ident);
+            } else {
+                // It's a flag: trace!(FLAG, "fmt", ...)
+                flag = Some(ident);
+            }
+            
+            format_str = match &all_args[1].expr {
+                Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value(),
+                _ => unreachable!(),
+            };
+            remaining_start_idx = 2;
+        } else if second_is_path && all_args.len() >= 3 {
+            let third_is_string = matches!(&all_args[2].expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
+            
+            if third_is_string {
+                // Pattern: trace!(FLAG, Level, "fmt", ...)
+                let first_ident = extract_path_ident(&all_args[0].expr)?;
+                let second_ident = extract_path_ident(&all_args[1].expr)?;
+                
+                // Second should be a level
+                let second_str = second_ident.to_string();
+                if !TRACE_LEVEL_NAMES.contains(&second_str.as_str()) {
+                    return Err(Error::new_spanned(&all_args[1].expr, 
+                        format!("Expected a trace level (one of: {:?}), got '{}'", TRACE_LEVEL_NAMES, second_str)));
+                }
+                
+                flag = Some(first_ident);
+                level = Some(second_ident);
+                
+                format_str = match &all_args[2].expr {
+                    Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value(),
+                    _ => unreachable!(),
+                };
+                remaining_start_idx = 3;
+            } else {
+                return Err(Error::new_spanned(&all_args[0].expr, "Expected a format string"));
+            }
+        } else {
+            return Err(Error::new_spanned(&all_args[0].expr, "Expected a format string"));
         }
-        Some(TraceArgInput { expr, .. }) => return Err(Error::new_spanned(expr, "First argument must be a string literal")),
-        None => return Err(Error::new(proc_macro2::Span::call_site(), "trace! requires at least a format string")),
-    };
+    } else {
+        return Err(Error::new_spanned(&all_args[0].expr, "Expected a format string or flag identifier"));
+    }
     
     // Remaining arguments are the trace parameters (with optional type annotations)
     let mut trace_args = Vec::new();
-    for (idx, arg_input) in iter.enumerate() {
+    for (idx, arg_input) in all_args.into_iter().skip(remaining_start_idx).enumerate() {
         let (name, arg_type) = infer_arg_info(&arg_input.expr, idx, arg_input.explicit_type.as_ref())?;
         trace_args.push(TraceArg { name, arg_type, expr: arg_input.expr });
     }
     
-    Ok((format_str, trace_args))
+    Ok(ParsedTraceArgs {
+        flag,
+        level,
+        format_str,
+        args: trace_args,
+    })
+}
+
+/// Extracts an identifier from a path expression
+fn extract_path_ident(expr: &syn::Expr) -> Result<syn::Ident, Error> {
+    if let syn::Expr::Path(path) = expr {
+        if let Some(seg) = path.path.segments.last() {
+            return Ok(seg.ident.clone());
+        }
+    }
+    Err(Error::new_spanned(expr, "Expected an identifier"))
 }
 
 /// Infers the argument name and type from an expression
@@ -1007,11 +1156,31 @@ fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
 /// A procedural macro for WPP-style tracing that generates codeview annotations.
 ///
 /// # Usage
+/// 
+/// ## Basic usage (no flag, no level - uses default control block and TraceLevel::None):
 /// ```ignore
-/// trace!("My message with value: {} and string: {}", my_int, my_string);
+/// trace!("My message with value: {} and string: {}", my_int: i32, my_string: &str);
+/// ```
+///
+/// ## With flag only:
+/// ```ignore
+/// trace!(FLAG_ONE, "Message with flag {}", value: i32);
+/// ```
+///
+/// ## With flag and level:
+/// ```ignore
+/// trace!(FLAG_ONE, Information, "Informational message {}", value: i32);
+/// ```
+///
+/// ## With level only (uses default control block):
+/// ```ignore
+/// trace!(Warning, "Warning message {}", value: i32);
 /// ```
 ///
 /// This generates a `codeview_annotation!` call with WPP trace metadata.
+/// The wpp_trace_message is conditionally called based on the flag's control block.
+/// The wpp_auto_log_trace is conditionally called based on level (skipped for Verbose
+/// unless AutoLogVerboseEnabled is set on the control block).
 #[proc_macro]
 pub fn trace(item: TokenStream) -> TokenStream {
     let span = proc_macro::Span::call_site();
@@ -1025,10 +1194,12 @@ pub fn trace(item: TokenStream) -> TokenStream {
     let line_number = span.line();
     
     // Parse the macro arguments
-    let (format_str, args) = match parse_trace_args(item) {
+    let parsed = match parse_trace_args(item) {
         Ok(parsed) => parsed,
         Err(e) => return e.to_compile_error().into(),
     };
+    
+    let ParsedTraceArgs { flag, level, format_str, args } = parsed;
     
     // Generate unique message ID
     let message_id = TRACE_MESSAGE_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1083,8 +1254,8 @@ pub fn trace(item: TokenStream) -> TokenStream {
     // Always generate the trait - Rust will handle duplicate definitions
     let trait_and_impl = generate_trace_writer_ext_method(&method_ident, &trait_ident, &args);
     
-    // Generate the method call with arguments
-    let method_call = generate_trace_method_call(&method_ident, &trait_ident, message_id as u16, &args);
+    // Generate the method call with arguments (now with flag and level)
+    let method_call = generate_trace_method_call(&method_ident, &trait_ident, message_id as u16, &args, flag.as_ref(), level.as_ref());
     
     let expanded = quote! {
         core::hint::codeview_annotation!(#(#annotation_args),*);
@@ -1162,6 +1333,8 @@ fn generate_trace_writer_ext_method(
                 flags: ::wdf::__internal::ULONG,
                 id: ::wdf::__internal::USHORT,
                 trace_guid: ::wdf::__internal::LPCGUID,
+                should_trace_wpp: bool,
+                should_auto_log: bool,
                 #(#param_decls),*
             );
         }
@@ -1173,31 +1346,39 @@ fn generate_trace_writer_ext_method(
                 flags: ::wdf::__internal::ULONG,
                 id: ::wdf::__internal::USHORT,
                 trace_guid: ::wdf::__internal::LPCGUID,
+                should_trace_wpp: bool,
+                should_auto_log: bool,
                 #(#param_decls),*
             ) {
                 #(#len_calculations)*
                 
                 unsafe {
-                    let logger = ::wdf::__internal::get_wpp_logger().unwrap();
-                    let _ = ::wdf::__internal::get_wpp_trace_message().unwrap()(
-                        logger,
-                        ::wdf::__internal::WPP_TRACE_OPTIONS,
-                        trace_guid,
-                        id,
-                        #(#arg_pairs)*
-                        core::ptr::null::<core::ffi::c_void>(), // sentinel
-                    );
+                    // Only call wpp_trace_message if should_trace_wpp is true
+                    if should_trace_wpp {
+                        let logger = ::wdf::__internal::get_wpp_logger().unwrap();
+                        let _ = ::wdf::__internal::get_wpp_trace_message().unwrap()(
+                            logger,
+                            ::wdf::__internal::WPP_TRACE_OPTIONS,
+                            trace_guid,
+                            id,
+                            #(#arg_pairs)*
+                            core::ptr::null::<core::ffi::c_void>(), // sentinel
+                        );
+                    }
 
-                    let auto_log_context = ::wdf::__internal::get_auto_log_context().unwrap();
-                    let _ = ::wdf::__internal::WppAutoLogTrace(
-                        auto_log_context,
-                        level,
-                        flags,
-                        trace_guid.cast_mut().cast(),
-                        id,
-                        #(#arg_pairs)*
-                        core::ptr::null::<core::ffi::c_void>(), // sentinel
-                    );
+                    // Only call auto log trace if should_auto_log is true
+                    if should_auto_log {
+                        let auto_log_context = ::wdf::__internal::get_auto_log_context().unwrap();
+                        let _ = ::wdf::__internal::WppAutoLogTrace(
+                            auto_log_context,
+                            level,
+                            flags,
+                            trace_guid.cast_mut().cast(),
+                            id,
+                            #(#arg_pairs)*
+                            core::ptr::null::<core::ffi::c_void>(), // sentinel
+                        );
+                    }
                 }
             }
         }
@@ -1210,6 +1391,8 @@ fn generate_trace_method_call(
     trait_ident: &syn::Ident,
     message_id: u16,
     args: &[TraceArg],
+    flag: Option<&syn::Ident>,
+    level: Option<&syn::Ident>,
 ) -> proc_macro2::TokenStream {
     // Generate argument conversions using the original expressions
     let arg_conversions: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
@@ -1245,16 +1428,66 @@ fn generate_trace_method_call(
     
     let message_id_lit = proc_macro2::Literal::u16_unsuffixed(message_id);
     
+    // Generate level value
+    let level_value = if let Some(level_ident) = level {
+        let level_str = level_ident.to_string();
+        if level_str == "Fatal" {
+            // Fatal is a constant alias for Critical
+            quote! { Fatal as u8 }
+        } else {
+            quote! { TraceLevel::#level_ident as u8 }
+        }
+    } else {
+        quote! { TraceLevel::None as u8 }
+    };
+    
+    // Generate flags value and control index from the WppFlag
+    // Use WppFlag::by_name to look up the flag at compile time
+    let (flags_value, control_index) = if let Some(flag_ident) = flag {
+        let flag_name = flag_ident.to_string();
+        (
+            quote! { 
+                {
+                    let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag");
+                    1u32 << __flag.flag_index()
+                }
+            },
+            quote! {
+                {
+                    let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag");
+                    __flag.control_index()
+                }
+            }
+        )
+    } else {
+        (quote! { 0u32 }, quote! { 0usize })
+    };
+
     quote! {
         {
             #(#arg_conversions)*
+            
+            // Determine if we should trace based on flag's control block
+            let __trace_level: u8 = #level_value;
+            let __trace_flags: u32 = #flags_value;
+            let __control_index: usize = #control_index;
+            
             if let Some(__trace_writer) = ::wdf::get_trace_writer() {
+                // Check if the flag is enabled in the control block
+                let __should_trace_wpp = __trace_writer.is_flag_enabled(__control_index, __trace_flags);
+                
+                // Check if we should call auto log trace
+                // Skip if level > Verbose (5) and AutoLogVerboseEnabled is false
+                let __should_auto_log = __trace_level < 5 || __trace_writer.is_auto_log_verbose_enabled(__control_index);
+                
                 <::wdf::tracing::TraceWriter as #trait_ident>::#method_ident(
                     __trace_writer,
-                    0,  // level
-                    0,  // flags
+                    __trace_level,
+                    __trace_flags,
                     #message_id_lit,
                     &::wdf::__internal::TRACE_GUID,
+                    __should_trace_wpp,
+                    __should_auto_log,
                     #(#arg_values),*
                 );
             }
