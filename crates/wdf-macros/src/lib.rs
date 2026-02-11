@@ -3,10 +3,13 @@
 
 //! A collection of macros used for writing WDF-based drivers in safe Rust
 
+use std::collections::HashSet;
+
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit, Token, Type, meta::parser, parse_macro_input};
 use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
 
 /// A procedural macro that when placed on a safe Rust impl of a driver
 /// generates the relevant FFI wrappers
@@ -128,64 +131,332 @@ pub fn driver_impl(_args: TokenStream, input: TokenStream) -> TokenStream {
     wrappers
 }
 
+/// Represents a single trace control definition with GUID and optional flags
+#[derive(Debug, Clone)]
+struct TraceControlDef {
+    guid: String,
+    flags: Vec<String>,
+}
+
+/// Parser for trace_control argument
+/// Supports two syntaxes:
+/// 1. Just a GUID string: "guid-string"
+/// 2. Tuple with GUID and flags: ("guid-string", [FLAG_ONE, FLAG_TWO]) or ("guid-string", [])
+impl Parse for TraceControlDef {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        // Check if it's a parenthesized tuple or just a string literal
+        if input.peek(syn::token::Paren) {
+            // Tuple format: ("guid", [FLAGS...])
+            let content;
+            syn::parenthesized!(content in input);
+            
+            // Parse GUID string
+            let guid_lit: syn::LitStr = content.parse()?;
+            let guid = guid_lit.value();
+            
+            if !is_valid_guid(&guid) {
+                return Err(Error::new_spanned(guid_lit, "Not a valid GUID"));
+            }
+            
+            // Parse comma separator
+            content.parse::<Token![,]>()?;
+            
+            // Parse flag array [FLAG_ONE, FLAG_TWO, ...] or []
+            let flags_content;
+            syn::bracketed!(flags_content in content);
+            
+            let flags_punctuated: Punctuated<Ident, Token![,]> = 
+                Punctuated::parse_terminated(&flags_content)?;
+            
+            let flags: Vec<String> = flags_punctuated.iter()
+                .map(|ident| ident.to_string())
+                .collect();
+            
+            Ok(TraceControlDef { guid, flags })
+        } else {
+            // Simple string format: "guid"
+            let guid_lit: syn::LitStr = input.parse()?;
+            let guid = guid_lit.value();
+            
+            if !is_valid_guid(&guid) {
+                return Err(Error::new_spanned(guid_lit, "Not a valid GUID"));
+            }
+            
+            Ok(TraceControlDef { guid, flags: Vec::new() })
+        }
+    }
+}
+
+/// Represents all trace control definitions
+struct TraceControlArgs {
+    controls: Vec<TraceControlDef>,
+}
+
+impl Parse for TraceControlArgs {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let controls: Punctuated<TraceControlDef, Token![,]> = 
+            Punctuated::parse_separated_nonempty(input)?;
+        
+        Ok(TraceControlArgs {
+            controls: controls.into_iter().collect(),
+        })
+    }
+}
+
+/// Validates that there are no duplicate flags across all trace controls
+fn validate_no_duplicate_flags(controls: &[TraceControlDef]) -> Result<(), (String, String, String)> {
+    let mut seen_flags: HashSet<String> = HashSet::new();
+    
+    for control in controls {
+        for flag in &control.flags {
+            if !seen_flags.insert(flag.clone()) {
+                // Find which GUID had this flag first
+                for prev_control in controls {
+                    if prev_control.flags.contains(flag) {
+                        return Err((flag.clone(), prev_control.guid.clone(), control.guid.clone()));
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Generates the WppFlag enum declaration
+fn generate_wpp_flags_declaration(trace_controls: &[TraceControlDef]) -> proc_macro2::TokenStream {
+    // Check if there are any flags defined
+    let has_flags = trace_controls.iter().any(|tc| !tc.flags.is_empty());
+    
+    if !has_flags {
+        return quote! {};
+    }
+
+    // Collect all variants with their metadata
+    struct VariantInfo {
+        variant_ident: syn::Ident,
+        flag_name: String,
+        control_idx: usize,
+        flag_idx: usize,
+    }
+
+    let variants: Vec<VariantInfo> = trace_controls.iter()
+        .enumerate()
+        .flat_map(|(control_idx, tc)| {
+            tc.flags.iter().enumerate().map(move |(flag_idx, flag_name)| {
+                let variant_ident = Ident::new(
+                    flag_name,
+                    proc_macro2::Span::call_site(),
+                );
+                
+                VariantInfo {
+                    variant_ident,
+                    flag_name: flag_name.clone(),
+                    control_idx,
+                    flag_idx,
+                }
+            })
+        })
+        .collect();
+
+    // Generate enum variant definitions with tuple types: FLAG_NAME(usize, usize)
+    let enum_variants: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
+        let ident = &v.variant_ident;
+        quote! { #ident(usize, usize) }
+    }).collect();
+
+    // Generate name match arms for by_name lookup
+    let name_match_arms: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
+        let ident = &v.variant_ident;
+        let name = &v.flag_name;
+        let ctrl_idx = proc_macro2::Literal::usize_unsuffixed(v.control_idx);
+        let flag_idx = proc_macro2::Literal::usize_unsuffixed(v.flag_idx);
+        quote! { #name => Some(WppFlag::#ident(#ctrl_idx, #flag_idx)) }
+    }).collect();
+
+    // Generate static array entries
+    let static_entries: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
+        let ident = &v.variant_ident;
+        let ctrl_idx = proc_macro2::Literal::usize_unsuffixed(v.control_idx);
+        let flag_idx = proc_macro2::Literal::usize_unsuffixed(v.flag_idx);
+        quote! { WppFlag::#ident(#ctrl_idx, #flag_idx) }
+    }).collect();
+
+    // Generate match arms for control_index
+    let control_idx_arms: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
+        let ident = &v.variant_ident;
+        quote! { WppFlag::#ident(ctrl, _) => *ctrl }
+    }).collect();
+
+    // Generate match arms for flag_index
+    let flag_idx_arms: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
+        let ident = &v.variant_ident;
+        quote! { WppFlag::#ident(_, flag) => *flag }
+    }).collect();
+
+    // Generate match arms for as_tuple
+    let tuple_arms: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
+        let ident = &v.variant_ident;
+        quote! { WppFlag::#ident(ctrl, flag) => (*ctrl, *flag) }
+    }).collect();
+
+    let num_flags = variants.len();
+
+    quote! {
+        /// WPP tracing flags for all trace controls.
+        /// Each variant holds a tuple (control_index, flag_index) where both are 0-indexed.
+        /// Flag names must be unique across all trace control definitions.
+        #[allow(missing_docs)]
+        #[allow(non_camel_case_types)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[repr(C)]
+        pub enum WppFlag {
+            #(#enum_variants),*
+        }
+
+        impl WppFlag {
+            /// Returns the control index (0-indexed).
+            /// This indicates which trace control GUID this flag belongs to.
+            #[inline]
+            pub const fn control_index(&self) -> usize {
+                match self {
+                    #(#control_idx_arms),*
+                }
+            }
+
+            /// Returns the flag index (0-indexed).
+            /// This is the position of the flag within its trace control definition.
+            #[inline]
+            pub const fn flag_index(&self) -> usize {
+                match self {
+                    #(#flag_idx_arms),*
+                }
+            }
+
+            /// Returns both the control index and flag index as a tuple.
+            #[inline]
+            pub const fn as_tuple(&self) -> (usize, usize) {
+                match self {
+                    #(#tuple_arms),*
+                }
+            }
+
+            /// Looks up a WppFlag by its name.
+            /// Returns `Some(WppFlag)` if found, `None` otherwise.
+            #[inline]
+            pub fn by_name(name: &str) -> Option<WppFlag> {
+                match name {
+                    #(#name_match_arms,)*
+                    _ => None
+                }
+            }
+
+            /// Returns all WPP flags as a slice.
+            #[inline]
+            pub const fn all() -> &'static [WppFlag] {
+                &[#(#static_entries),*]
+            }
+
+            /// Returns the number of flags.
+            #[inline]
+            pub const fn count() -> usize {
+                #num_flags
+            }
+        }
+    }
+}
+
 /// A procedural macro used to mark the entry point of a WDF driver
+/// 
+/// # Supported Attributes
+/// 
+/// ## Simple GUID format (no flags):
+/// ```ignore
+/// #[driver_entry(trace_control = "guid-string")]
+/// ```
+/// 
+/// ## GUID with flags:
+/// ```ignore
+/// #[driver_entry(trace_control = ("guid-string", [FLAG_ONE, FLAG_TWO]))]
+/// ```
+/// 
+/// ## GUID with empty flags:
+/// ```ignore
+/// #[driver_entry(trace_control = ("guid-string", []))]
+/// ```
+/// 
+/// ## Multiple trace controls:
+/// ```ignore
+/// #[driver_entry(trace_control = ("guid1", [FLAG_A, FLAG_B]), ("guid2", [FLAG_C, FLAG_D]))]
+/// ```
+/// 
+/// Note: Flag names must be unique across all trace control definitions.
 #[proc_macro_attribute]
 pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
-    const TRACING_CONTROL_GUID_ATTR_NAME: &str = "tracing_control_guid";
+    const TRACE_CONTROL_ATTR_NAME: &str = "trace_control";
 
     let input_clone = input.clone();
     let item_fn = parse_macro_input!(input_clone as ItemFn);
     let safe_driver_entry = item_fn.sig.ident;
 
-    let mut tracing_control_guid_str: Option<String> = None;
+    let mut trace_controls: Vec<TraceControlDef> = Vec::new();
 
-    let tracing_control_guid_parser = parser(|meta| {
-        if !meta.path.is_ident(TRACING_CONTROL_GUID_ATTR_NAME) {
-            return Err(meta.error(format!("Expected `{TRACING_CONTROL_GUID_ATTR_NAME}`")));
+    let trace_control_parser = parser(|meta| {
+        if meta.path.is_ident(TRACE_CONTROL_ATTR_NAME) {
+            // Format: trace_control = "guid" or trace_control = ("guid", [FLAGS...]), ...
+            meta.input.parse::<Token![=]>()?;
+            
+            let parsed: TraceControlArgs = meta.input.parse()?;
+            trace_controls = parsed.controls;
+            
+            Ok(())
+        } else {
+            Err(meta.error(format!("Expected `{}`", TRACE_CONTROL_ATTR_NAME)))
         }
-
-        let Lit::Str(guid_str_expr) = meta.value()?.parse()? else {
-            return Err(meta.error("Expected tracing control GUID"));
-        };
-
-        let guid_str = guid_str_expr.value();
-
-        if !is_valid_guid(&guid_str) {
-            return Err(Error::new_spanned(guid_str_expr, "Not a valid GUID"));
-        }
-
-        tracing_control_guid_str = Some(guid_str);
-
-        Ok(())
     });
 
-    parse_macro_input!(args with tracing_control_guid_parser);
+    parse_macro_input!(args with trace_control_parser);
 
-    let parse_tracing_control_guid = tracing_control_guid_str.clone().map_or_else(
-        || {
-            quote! {
-                None
-            }
-        },
-        |s| {
-            quote! {
-                Some(wdf::Guid::parse(#s).expect("Not a valid GUID"))
-            }
-        },
-    );
+    // Validate no duplicate flags across trace controls
+    if let Err((flag, guid1, guid2)) = validate_no_duplicate_flags(&trace_controls) {
+        let err = Error::new(
+            proc_macro2::Span::call_site(),
+            format!(
+                "Duplicate flag '{}' found in trace controls. First in GUID '{}', duplicate in GUID '{}'",
+                flag, guid1, guid2
+            )
+        );
+        return err.to_compile_error().into();
+    }
 
-    // Generate codeview annotation if tracing control GUID is provided
-    let codeview_annotation = tracing_control_guid_str.as_ref().map(|s| {
+    // Generate the tracing control GUID for the first control
+    let parse_tracing_control_guid = if let Some(first_control) = trace_controls.first() {
+        let guid = &first_control.guid;
         quote! {
-            core::hint::codeview_annotation!("TMC:", #s, "CtlGuid");
+            Some(wdf::Guid::parse(#guid).expect("Not a valid GUID"))
         }
-    });
+    } else {
+        quote! { None }
+    };
+
+    // Generate codeview annotations for all trace controls
+    let codeview_annotations: Vec<proc_macro2::TokenStream> = trace_controls.iter().map(|tc| {
+        let guid = &tc.guid;
+        quote! {
+            core::hint::codeview_annotation!("TMC:", #guid, "CtlGuid");
+        }
+    }).collect();
+
+    // Generate the WPP flags declaration
+    let wpp_flags_declaration = generate_wpp_flags_declaration(&trace_controls);
 
     let mut wrappers: TokenStream = quote! {
+        #wpp_flags_declaration
+
         #[unsafe(link_section = "INIT")]
         #[unsafe(export_name = "DriverEntry")] // WDF expects a symbol with the name DriverEntry
         extern "system" fn __driver_entry(driver: &mut ::wdf::DRIVER_OBJECT, registry_path: ::wdf::PCUNICODE_STRING,) -> ::wdf::NTSTATUS {
-            #codeview_annotation  // Only emits if Some
+            #(#codeview_annotations)*
             let tracing_control_guid = #parse_tracing_control_guid;
             ::wdf::call_safe_driver_entry(driver, registry_path, #safe_driver_entry, tracing_control_guid)
         }
