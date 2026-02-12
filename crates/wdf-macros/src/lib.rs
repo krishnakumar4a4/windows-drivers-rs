@@ -4,6 +4,7 @@
 //! A collection of macros used for writing WDF-based drivers in safe Rust
 
 use std::collections::HashSet;
+use std::sync::Mutex;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -311,9 +312,9 @@ fn generate_wpp_flags_declaration(trace_controls: &[TraceControlDef]) -> proc_ma
         pub enum TraceLevel {
             /// No tracing
             None = 0,
-            /// Critical errors that cause system failure (Fatal is an alias)
+            /// Critical errors that cause system failure
             Critical = 1,
-            /// Non-fatal errors
+            /// Non-critical errors
             Error = 2,
             /// Warnings
             Warning = 3,
@@ -330,9 +331,6 @@ fn generate_wpp_flags_declaration(trace_controls: &[TraceControlDef]) -> proc_ma
             /// Reserved level 9
             Reserved9 = 9,
         }
-
-        /// Fatal is an alias for Critical
-        pub const Fatal: TraceLevel = TraceLevel::Critical;
 
         impl TraceLevel {
             /// Returns the numeric value of the trace level.
@@ -487,8 +485,9 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
     // Generate codeview annotations for all trace controls
     let codeview_annotations: Vec<proc_macro2::TokenStream> = trace_controls.iter().map(|tc| {
         let guid = &tc.guid;
+        let flags = &tc.flags;
         quote! {
-            core::hint::codeview_annotation!("TMC:", #guid, "CtlGuid");
+            core::hint::codeview_annotation!("TMC:", #guid, "CtlGuid", #(#flags),*);
         }
     }).collect();
 
@@ -729,6 +728,24 @@ fn is_valid_guid(guid_str: &str) -> bool {
 /// This is incremented for each trace! macro expansion.
 static TRACE_MESSAGE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(10);
 
+/// A static set to track generated trait names and avoid duplicate declarations.
+/// Key format: "<arg_types_suffix>" - we generate one method per unique argument signature.
+static GENERATED_TRAITS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// Checks if a trait with the given key has already been generated.
+/// If not, marks it as generated and returns true (should generate).
+/// If already generated, returns false (skip generation).
+fn should_generate_trait(key: &str) -> bool {
+    let mut guard = GENERATED_TRAITS.lock().unwrap();
+    let set = guard.get_or_insert_with(HashSet::new);
+    if set.contains(key) {
+        false
+    } else {
+        set.insert(key.to_string());
+        true
+    }
+}
+
 /// Represents the type of a trace argument for WPP tracing
 #[derive(Debug, Clone)]
 enum TraceArgType {
@@ -885,7 +902,7 @@ struct ParsedTraceArgs {
 
 /// Known trace level names for validation
 const TRACE_LEVEL_NAMES: &[&str] = &[
-    "None", "Critical", "Fatal", "Error", "Warning", 
+    "None", "Critical", "Error", "Warning", 
     "Information", "Verbose", "Reserved6", "Reserved7", "Reserved8", "Reserved9"
 ];
 
@@ -1241,18 +1258,24 @@ pub fn trace(item: TokenStream) -> TokenStream {
     
     annotation_args.push(quote! { "}" });
     
-    // Generate method suffix based on argument types
+    // Generate method suffix based on argument types only
+    // One trait/method per unique argument signature, shared across all flag/level combinations
     let method_suffix = generate_method_suffix(&args);
-    let method_name = format!("trace_{}", if method_suffix.is_empty() { "empty".to_string() } else { method_suffix.clone() });
+    let trait_key = if method_suffix.is_empty() { "empty".to_string() } else { method_suffix.clone() };
+    
+    let method_name = format!("trace_{}", trait_key);
     let method_ident = syn::Ident::new(&method_name, proc_macro2::Span::call_site());
     
-    // Create unique trait name per signature to avoid conflicts
     let trait_suffix = if method_suffix.is_empty() { "Empty".to_string() } else { method_suffix.to_uppercase() };
     let trait_name = format!("TraceWriterExt{}", trait_suffix);
     let trait_ident = syn::Ident::new(&trait_name, proc_macro2::Span::call_site());
     
-    // Always generate the trait - Rust will handle duplicate definitions
-    let trait_and_impl = generate_trace_writer_ext_method(&method_ident, &trait_ident, &args);
+    // Only generate trait definition if we haven't already for this signature
+    let trait_and_impl = if should_generate_trait(&trait_key) {
+        generate_trace_writer_ext_method(&method_ident, &trait_ident, &args)
+    } else {
+        quote! {}
+    };
     
     // Generate the method call with arguments (now with flag and level)
     let method_call = generate_trace_method_call(&method_ident, &trait_ident, message_id as u16, &args, flag.as_ref(), level.as_ref());
@@ -1430,13 +1453,7 @@ fn generate_trace_method_call(
     
     // Generate level value
     let level_value = if let Some(level_ident) = level {
-        let level_str = level_ident.to_string();
-        if level_str == "Fatal" {
-            // Fatal is a constant alias for Critical
-            quote! { Fatal as u8 }
-        } else {
-            quote! { TraceLevel::#level_ident as u8 }
-        }
+        quote! { TraceLevel::#level_ident as u8 }
     } else {
         quote! { TraceLevel::None as u8 }
     };
@@ -1449,7 +1466,7 @@ fn generate_trace_method_call(
             quote! { 
                 {
                     let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag");
-                    1u32 << __flag.flag_index()
+                    (__flag.flag_index() + 1) as u32
                 }
             },
             quote! {
@@ -1474,11 +1491,13 @@ fn generate_trace_method_call(
             
             if let Some(__trace_writer) = ::wdf::get_trace_writer() {
                 // Check if the flag is enabled in the control block
-                let __should_trace_wpp = __trace_writer.is_flag_enabled(__control_index, __trace_flags);
+                // If no flag is specified (__trace_flags == 0), default to tracing enabled
+                let __should_trace_wpp = (__trace_flags == 0 || __trace_writer.is_flag_enabled(__control_index, __trace_flags)) 
+                                            && __trace_writer.is_level_enabled(__control_index, __trace_level);
                 
                 // Check if we should call auto log trace
                 // Skip if level > Verbose (5) and AutoLogVerboseEnabled is false
-                let __should_auto_log = __trace_level < 5 || __trace_writer.is_auto_log_verbose_enabled(__control_index);
+                let __should_auto_log = __trace_level < TraceLevel::Verbose as u8 || __trace_writer.is_auto_log_verbose_enabled(__control_index);
                 
                 <::wdf::tracing::TraceWriter as #trait_ident>::#method_ident(
                     __trace_writer,
