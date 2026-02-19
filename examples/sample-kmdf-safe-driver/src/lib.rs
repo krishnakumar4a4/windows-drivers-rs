@@ -17,8 +17,12 @@
 //! wrong. That is likely to change and improve over time.
 
 #![no_std]
+#![feature(codeview_annotation)]
+#![feature(core_intrinsics)]
 
 use core::time::Duration;
+
+use core::intrinsics::codeview_annotation;
 
 use wdf::{
     driver_entry,
@@ -42,6 +46,8 @@ use wdf::{
     SpinLock,
     Timer,
     TimerConfig,
+    tracing::TraceWriter,
+    get_trace_writer,
 };
 
 extern crate alloc;
@@ -92,7 +98,7 @@ struct TimerContext {
 /// * `registry_path` - Represents the driver specific path in the Registry.
 /// The function driver can use the path to store driver related data between
 /// reboots. The path does not store hardware instance specific data.
-#[driver_entry(tracing_control_guid = "cb94defb-592a-4509-8f2e-54f204929669")]
+#[driver_entry(trace_control = ("cb94defb-592a-4509-8f2e-54f204929669", [FLAG_ONE, FLAG_TWO]))]
 fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     if cfg!(debug_assertions) {
         print_driver_version(driver)?;
@@ -101,7 +107,29 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     // Set up the device add callback
     driver.set_evt_device_add(evt_device_add);
 
-    trace("Trace: Safe Rust driver entry complete");
+    // core::hint::codeview_annotation!("TMF:", "e7602a7b-5034-321b-d450-a986113fc2e1 sample_kmdf_safe_driver // SRC=lib.rs MJ= MN=", 
+    // "#typev sample_kmdf_safe_driver_109 10 \"%0Trace: Safe Rust driver entry complete %10!d!\"", "{", "test, ItemLong -- 10", "}");
+
+    for i in 0..1000 {
+        // Use the new type annotation syntax: `variable: Type`
+        trace!("Trace: Safe Rust driver entry trace, int - {}, int - {}, int - {}, int - {}, int - {}, int - {}", i: i32, i: i32, i: i32, i: i32, i: i32, i: i32);
+    }
+
+    trace!(FLAG_ONE, "1 Trace: Safe Rust driver entry complete, int - {}", 1001);
+
+    trace!(FLAG_TWO, "2 Trace: Safe Rust driver entry complete, int - {}", 1002);
+
+    // Trace with level only (no flag)
+    trace!(Information, "3 Trace: Safe Rust driver entry complete, int - {}", 1003);
+
+    // Trace with level only (no flag)
+    trace!(Verbose, "4 Trace: Safe Rust driver entry complete, int - {}", 1004);
+
+    trace!(FLAG_TWO, Information, "5 Trace: Safe Rust driver entry complete, int - {}", 1005);
+
+    trace!("Trace: Safe Rust driver entry with basic data, int - {}, str - {}", 9999, "hello");
+
+    trace!(FLAG_TWO, Information, "Trace: Safe Rust driver entry complete, int - {}, str - {}", 1006, "examplestring!@#$%^&*()_+-=1234567890`~[]{}|;:'\"<>,./?  E");
 
     Ok(())
 }
