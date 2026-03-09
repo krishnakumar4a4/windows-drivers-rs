@@ -22,9 +22,13 @@ test = false
 
 [build-dependencies]
 wdk-build = { path = "../../crates/wdk-build", version = "0.4.0" }
+syn = { version = "2", features = ["full", "visit"] }
+quote = "1"
+proc-macro2 = { version = "1", features = ["span-locations"] }
+object = { version = "0.36", default-features = false, features = ["write", "coff"] }
 
 [dependencies]
-wdf = { path = "../../crates/wdf", version = "0.3.0" }
+wdf = { path = "../../crates/wdf" }
 
 [features]
 default = []

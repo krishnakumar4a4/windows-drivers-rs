@@ -13,8 +13,10 @@ categories = ["macros", "os::windows-apis", "os"]
 proc-macro = true
 
 [dependencies]
+fs4.workspace = true
 proc-macro2.workspace = true
 quote.workspace = true
+scratch.workspace = true
 syn = { workspace = true, features = ["full"] }
 
 [features]

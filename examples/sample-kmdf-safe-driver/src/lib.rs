@@ -17,12 +17,12 @@
 //! wrong. That is likely to change and improve over time.
 
 #![no_std]
-#![feature(codeview_annotation)]
-#![feature(core_intrinsics)]
+// #![feature(codeview_annotation)]
+// #![feature(core_intrinsics)]
 
 use core::time::Duration;
 
-use core::intrinsics::codeview_annotation;
+// use core::intrinsics::codeview_annotation;
 
 use wdf::{
     driver_entry,
@@ -216,6 +216,8 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
 
     QueueContext::attach(&queue, queue_context)?;
 
+    // core::hint::codeview_annotation!("Trace: Queue initialized");
+    // trace!("Trace: Queue initialized {}", 43);
     Ok(())
 }
 
@@ -280,6 +282,8 @@ fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
 ///   request.
 fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
+    // trace!("Trace: evt_io_read called with values int - {}, str - {}", 50, "evt_io_read");
+    // trace("<Trace: evt_io_read called>");
 
     let context = QueueContext::get(&queue);
     let memory = match request.retrieve_output_memory() {
@@ -344,6 +348,8 @@ fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 ///   request.
 fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
     println!("evt_io_write called. Queue {queue:?}, Request {request:?} Length {length}");
+    // core::hint::codeview_annotation!("Trace: evt_io_write called");
+    // trace("Trace: evt_io_write called");
 
     if length > MAX_WRITE_LENGTH {
         println!("evt_io_write buffer length too big {length}. Max is {MAX_WRITE_LENGTH}");
@@ -389,6 +395,8 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
 /// `token` - The cancellation token that identifies the request to be cancelled
 fn evt_request_cancel(token: &RequestCancellationToken) {
     println!("evt_request_cancel called");
+    // core::hint::codeview_annotation!("Trace: evt_request_cancel called");
+    // trace("Trace: evt_request_cancel called");
 
     let queue = token.get_io_queue();
 
@@ -412,6 +420,7 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 /// * `timer` - Handle of the timer that fired
 fn evt_timer(timer: &Timer) {
     println!("evt_timer called");
+    // core::hint::codeview_annotation!("Trace: evt_timer called");
 
     let queue = &TimerContext::get(timer).queue;
 

@@ -1144,8 +1144,10 @@ dependencies = [
 name = "wdf-macros"
 version = "0.3.0"
 dependencies = [
+ "fs4",
  "proc-macro2",
  "quote",
+ "scratch",
  "syn",
 ]
 

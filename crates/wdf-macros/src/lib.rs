@@ -4,13 +4,14 @@
 //! A collection of macros used for writing WDF-based drivers in safe Rust
 
 use std::collections::HashSet;
-use std::sync::Mutex;
 
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit, Token, Type, meta::parser, parse_macro_input};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
+
+mod manifest;
 
 /// A procedural macro that when placed on a safe Rust impl of a driver
 /// generates the relevant FFI wrappers
@@ -472,6 +473,20 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         return err.to_compile_error().into();
     }
 
+    // Store trace controls for manifest generation and reset entries for fresh
+    // compilation.
+    {
+        let control_infos: Vec<manifest::TraceControlInfo> = trace_controls
+            .iter()
+            .map(|tc| manifest::TraceControlInfo {
+                guid: tc.guid.clone(),
+                flags: tc.flags.clone(),
+            })
+            .collect();
+        *manifest::TRACE_CONTROL_INFO.lock().unwrap() = control_infos;
+        manifest::TRACE_ENTRIES.lock().unwrap().clear();
+    }
+
     // Generate the tracing control GUID for the first control
     let parse_tracing_control_guid = if let Some(first_control) = trace_controls.first() {
         let guid = &first_control.guid;
@@ -482,15 +497,6 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         quote! { None }
     };
 
-    // Generate codeview annotations for all trace controls
-    let codeview_annotations: Vec<proc_macro2::TokenStream> = trace_controls.iter().map(|tc| {
-        let guid = &tc.guid;
-        let flags = &tc.flags;
-        quote! {
-            core::hint::codeview_annotation!("TMC:", #guid, "CtlGuid", #(#flags),*);
-        }
-    }).collect();
-
     // Generate the WPP flags declaration
     let wpp_flags_declaration = generate_wpp_flags_declaration(&trace_controls);
 
@@ -500,7 +506,6 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         #[unsafe(link_section = "INIT")]
         #[unsafe(export_name = "DriverEntry")] // WDF expects a symbol with the name DriverEntry
         extern "system" fn __driver_entry(driver: &mut ::wdf::DRIVER_OBJECT, registry_path: ::wdf::PCUNICODE_STRING,) -> ::wdf::NTSTATUS {
-            #(#codeview_annotations)*
             let tracing_control_guid = #parse_tracing_control_guid;
             ::wdf::call_safe_driver_entry(driver, registry_path, #safe_driver_entry, tracing_control_guid)
         }
@@ -728,23 +733,7 @@ fn is_valid_guid(guid_str: &str) -> bool {
 /// This is incremented for each trace! macro expansion.
 static TRACE_MESSAGE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(10);
 
-/// A static set to track generated trait names and avoid duplicate declarations.
-/// Key format: "<arg_types_suffix>" - we generate one method per unique argument signature.
-static GENERATED_TRAITS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
-/// Checks if a trait with the given key has already been generated.
-/// If not, marks it as generated and returns true (should generate).
-/// If already generated, returns false (skip generation).
-fn should_generate_trait(key: &str) -> bool {
-    let mut guard = GENERATED_TRAITS.lock().unwrap();
-    let set = guard.get_or_insert_with(HashSet::new);
-    if set.contains(key) {
-        false
-    } else {
-        set.insert(key.to_string());
-        true
-    }
-}
 
 /// Represents the type of a trace argument for WPP tracing
 #[derive(Debug, Clone)]
@@ -1127,6 +1116,7 @@ fn infer_arg_info(
 }
 
 /// Generates the WPP-style format string with numbered placeholders
+#[allow(dead_code)]
 fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
     let mut result = String::new();
     let mut arg_idx = 0;
@@ -1194,10 +1184,13 @@ fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
 /// trace!(Warning, "Warning message {}", value: i32);
 /// ```
 ///
-/// This generates a `codeview_annotation!` call with WPP trace metadata.
+/// This accumulates WPP trace metadata for TMF manifest file generation and
+/// generates runtime tracing calls (wpp_trace_message and WppAutoLogTrace).
 /// The wpp_trace_message is conditionally called based on the flag's control block.
 /// The wpp_auto_log_trace is conditionally called based on level (skipped for Verbose
 /// unless AutoLogVerboseEnabled is set on the control block).
+/// The TMF manifest file is written to the scratch directory when the
+/// proc-macro host process exits.
 #[proc_macro]
 pub fn trace(item: TokenStream) -> TokenStream {
     let span = proc_macro::Span::call_site();
@@ -1226,38 +1219,33 @@ pub fn trace(item: TokenStream) -> TokenStream {
         .unwrap_or_else(|_| "unknown_driver".to_string())
         .replace('-', "_");
     
-    // TODO: Get actual msg GUID - for now use a placeholder
-    let msg_guid = "e7602a7b-5034-321b-d450-a986113fc2e1";
-    
-    // Build the codeview_annotation parameters
-    // Parameter 2: "<guid> <driver_name> // SRC=<filename> MJ= MN="
-    let param2 = format!("{} {} // SRC={} MJ= MN=", msg_guid, driver_name, file_name);
-    
-    // Parameter 3: "#typev <driver_name>_<line> <msg_id> \"<format_with_placeholders>\""
-    let wpp_format = generate_wpp_format_string(&format_str, &args);
-    let typev_name = format!("{}_{}", driver_name, line_number);
-    let param3 = format!("#typev {} {} \"%0{}\"", typev_name, message_id, wpp_format);
-    
-    // Build argument descriptors (parameters 5..n-1)
-    let arg_descriptors: Vec<String> = args.iter().enumerate().map(|(idx, arg)| {
-        let param_num = 10 + idx;
-        format!("{}, {} -- {}", arg.name, arg.arg_type.item_type_name(), param_num)
-    }).collect();
-    
-    // Generate the codeview_annotation! call
-    let mut annotation_args = vec![
-        quote! { "TMF:" },
-        quote! { #param2 },
-        quote! { #param3 },
-        quote! { "{" },
-    ];
-    
-    for desc in &arg_descriptors {
-        annotation_args.push(quote! { #desc });
+    // Accumulate trace entry for WPP manifest (TMF) file generation
+    {
+        let manifest_args: Vec<manifest::TraceManifestArg> = args
+            .iter()
+            .enumerate()
+            .map(|(idx, arg)| manifest::TraceManifestArg {
+                name: arg.name.clone(),
+                item_type: arg.arg_type.item_type_name().to_string(),
+                param_number: idx + 1,
+            })
+            .collect();
+
+        let entry = manifest::TraceManifestEntry {
+            message_id,
+            source_file: file_name.to_string(),
+            line_number,
+            flag: flag.as_ref().map(|f| f.to_string()),
+            level: level.as_ref().map(|l| l.to_string()),
+            format_string: format_str.clone(),
+            args: manifest_args,
+            driver_name: driver_name.clone(),
+        };
+
+        manifest::TRACE_ENTRIES.lock().unwrap().push(entry);
+        manifest::ensure_flusher_registered();
     }
-    
-    annotation_args.push(quote! { "}" });
-    
+
     // Generate method suffix based on argument types only
     // One trait/method per unique argument signature, shared across all flag/level combinations
     let method_suffix = generate_method_suffix(&args);
@@ -1270,20 +1258,19 @@ pub fn trace(item: TokenStream) -> TokenStream {
     let trait_name = format!("TraceWriterExt{}", trait_suffix);
     let trait_ident = syn::Ident::new(&trait_name, proc_macro2::Span::call_site());
     
-    // Only generate trait definition if we haven't already for this signature
-    let trait_and_impl = if should_generate_trait(&trait_key) {
-        generate_trace_writer_ext_method(&method_ident, &trait_ident, &args)
-    } else {
-        quote! {}
-    };
+    // Always generate trait definition and impl for each expansion since each
+    // expansion is wrapped in its own block and traits/impls are not visible
+    // across function or block boundaries.
+    let trait_and_impl = generate_trace_writer_ext_method(&method_ident, &trait_ident, &args);
     
     // Generate the method call with arguments (now with flag and level)
     let method_call = generate_trace_method_call(&method_ident, &trait_ident, message_id as u16, &args, flag.as_ref(), level.as_ref());
     
     let expanded = quote! {
-        core::hint::codeview_annotation!(#(#annotation_args),*);
-        #trait_and_impl
-        #method_call
+        {
+            #trait_and_impl
+            #method_call
+        }
     };
     
     expanded.into()
