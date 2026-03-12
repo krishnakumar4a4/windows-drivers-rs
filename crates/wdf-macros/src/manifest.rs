@@ -3,97 +3,94 @@
 
 //! WPP manifest (TMF) file generation for `trace!` macro metadata.
 //!
-//! This module accumulates trace entry metadata from `trace!` macro expansions
-//! and writes a TMF (Trace Message Format) file when the proc-macro host
-//! process exits.  The manifest file enables WPP trace decoding tools
-//! (`tracefmt`, `traceview`) to decode ETW events produced by the driver's
-//! runtime tracing calls (`wpp_trace_message` / `WppAutoLogTrace`).
+//! ## Per-module partial manifest design
+//!
+//! Each `trace!` expansion records its entry keyed by source file name into
+//! `TRACE_ENTRIES` (`HashMap<String, Vec<TraceManifestEntry>>`).  On flush:
+//!
+//! 1. Each source file that had `trace!` expansions writes a **partial**
+//!    manifest file (JSON) to the scratch directory.
+//! 2. All partial files (including unchanged ones from prior builds) are
+//!    assembled into the final `.tmf` file.
+//! 3. If `build.rs` generated a `module_graph.json`, stale partials for
+//!    deleted modules are pruned before assembly.
+//!
+//! This survives incremental compilation: only re-expanded modules update
+//! their partials; unchanged modules retain their on-disk partials.
 //!
 //! ## Flush strategy
 //!
-//! Trace metadata is accumulated in-process via [`TRACE_ENTRIES`] (a
-//! `Mutex<Vec<…>>`).  Two complementary mechanisms guarantee the manifest is
-//! written exactly once after **all** `trace!` expansions have completed:
-//!
-//! 1. **`atexit` handler** (primary) – registered via the C standard library's
-//!    `atexit` function.  This fires when the `rustc` process exits (including
-//!    via `std::process::exit`).
-//! 2. **Thread-local `ManifestFlusher` with `Drop`** (secondary) – fires when
-//!    the compilation thread exits normally (i.e. when `main()` returns without
-//!    calling `process::exit`).
-//!
-//! An [`AtomicBool`] guard prevents double-flushing.
+//! 1. **`atexit` handler** (primary) fires when the `rustc` process exits.
+//! 2. **Thread-local `ManifestFlusher` with `Drop`** (secondary) fires on
+//!    normal thread exit.
+//! An `AtomicBool` guard prevents double-flushing.
 
+use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Mutex, Once,
+    LazyLock, Mutex, Once,
 };
+
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
 
 /// A single argument in a trace manifest entry.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TraceManifestArg {
-    /// The argument name (e.g. `"my_var"`, `"literal0"`).
     pub name: String,
-    /// The WPP item type (e.g. `"ItemLong"`, `"ItemString"`).
     pub item_type: String,
-    /// The 1-based parameter number for TMF format strings.
     pub param_number: usize,
 }
 
 /// Metadata for a single `trace!` invocation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TraceManifestEntry {
-    /// The WPP message ID (matches the runtime `id` parameter passed to
-    /// `wpp_trace_message`).
     pub message_id: u32,
-    /// Source file name (e.g. `"lib.rs"`).
     pub source_file: String,
-    /// Source line number.
     pub line_number: usize,
-    /// Optional WPP flag name (e.g. `"FLAG_ONE"`).
     pub flag: Option<String>,
-    /// Optional trace level name (e.g. `"Information"`).
     pub level: Option<String>,
-    /// The original Rust format string (e.g. `"Hello {} world {}"`).
     pub format_string: String,
-    /// The trace arguments.
     pub args: Vec<TraceManifestArg>,
-    /// The driver/crate name (dashes replaced by underscores).
     pub driver_name: String,
 }
 
 /// Trace control information (GUID + flags) captured from `#[driver_entry]`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct TraceControlInfo {
-    /// The control GUID string.
     pub guid: String,
-    /// The WPP flag names for this control.
     pub flags: Vec<String>,
 }
 
+/// Per-module partial manifest stored as JSON on disk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PartialManifest {
+    source_file: String,
+    controls: Vec<TraceControlInfo>,
+    entries: Vec<TraceManifestEntry>,
+}
+
 // ---------------------------------------------------------------------------
-// Global accumulation statics
+// Global statics
 // ---------------------------------------------------------------------------
 
-/// Accumulated trace entries from all `trace!` invocations in this
-/// compilation session.
-pub(crate) static TRACE_ENTRIES: Mutex<Vec<TraceManifestEntry>> = Mutex::new(Vec::new());
+/// Trace entries keyed by source file name.
+pub(crate) static TRACE_ENTRIES: LazyLock<Mutex<HashMap<String, Vec<TraceManifestEntry>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Trace control definitions captured from `#[driver_entry]`.
 pub(crate) static TRACE_CONTROL_INFO: Mutex<Vec<TraceControlInfo>> = Mutex::new(Vec::new());
 
-/// Prevents double-flushing from both `atexit` and `Drop`.
+/// Prevents double-flushing.
 static MANIFEST_FLUSHED: AtomicBool = AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
 // TMF generation helpers
 // ---------------------------------------------------------------------------
 
-/// Maps a WPP item type name to its C-style format specifier.
 fn item_type_to_format_specifier(item_type: &str) -> &'static str {
     match item_type {
         "ItemLong" => "d",
@@ -105,11 +102,6 @@ fn item_type_to_format_specifier(item_type: &str) -> &'static str {
     }
 }
 
-/// Generates a WPP format string with **1-based** argument numbering suitable
-/// for a TMF file.
-///
-/// Converts Rust `{}` placeholders to WPP `%N!type!` format specifiers where
-/// `N` starts at 1.
 fn generate_tmf_format_string(format_str: &str, args: &[TraceManifestArg]) -> String {
     let mut result = String::new();
     let mut arg_idx = 0;
@@ -118,18 +110,16 @@ fn generate_tmf_format_string(format_str: &str, args: &[TraceManifestArg]) -> St
     while let Some(c) = chars.next() {
         if c == '{' {
             if chars.peek() == Some(&'{') {
-                // Escaped `{{` → literal `{`
                 chars.next();
                 result.push('{');
             } else {
-                // Format placeholder `{}`  – skip until closing `}`
                 while let Some(inner) = chars.next() {
                     if inner == '}' {
                         break;
                     }
                 }
                 if arg_idx < args.len() {
-                    let param_num = arg_idx + 1; // 1-based for TMF
+                    let param_num = arg_idx + 1;
                     let fmt_spec = item_type_to_format_specifier(&args[arg_idx].item_type);
                     result.push_str(&format!("%{param_num}!{fmt_spec}!"));
                     arg_idx += 1;
@@ -137,7 +127,6 @@ fn generate_tmf_format_string(format_str: &str, args: &[TraceManifestArg]) -> St
             }
         } else if c == '}' {
             if chars.peek() == Some(&'}') {
-                // Escaped `}}` → literal `}`
                 chars.next();
                 result.push('}');
             } else {
@@ -151,8 +140,6 @@ fn generate_tmf_format_string(format_str: &str, args: &[TraceManifestArg]) -> St
     result
 }
 
-/// Generates the complete TMF file content from the provided entries and
-/// controls.
 fn generate_tmf_content(
     entries: &[TraceManifestEntry],
     controls: &[TraceControlInfo],
@@ -169,16 +156,13 @@ fn generate_tmf_content(
     let mut tmf = String::new();
 
     for entry in entries {
-        // Line 1: <GUID> <driver_name> // SRC=<file> MJ= MN=
         tmf.push_str(&format!(
             "{} {} // SRC={} MJ= MN=\n",
             control_guid, entry.driver_name, entry.source_file
         ));
 
-        // Generate 1-based WPP format string
         let wpp_fmt = generate_tmf_format_string(&entry.format_string, &entry.args);
 
-        // Build level/flag comment
         let mut comment_parts = Vec::new();
         if let Some(ref level) = entry.level {
             comment_parts.push(level.clone());
@@ -192,13 +176,11 @@ fn generate_tmf_content(
             comment_parts.join(" ")
         };
 
-        // Line 2: #typev <driver>_<line> <msg_id> "%0<fmt>" // <level> <flag>
         tmf.push_str(&format!(
             "#typev {}_{} {} \"%0{}\" // {}\n",
             entry.driver_name, entry.line_number, entry.message_id, wpp_fmt, comment
         ));
 
-        // Argument block
         if !entry.args.is_empty() {
             tmf.push_str("{\n");
             for arg in &entry.args {
@@ -210,7 +192,6 @@ fn generate_tmf_content(
             tmf.push_str("}\n");
         }
 
-        // Blank line between entries
         tmf.push('\n');
     }
 
@@ -218,35 +199,179 @@ fn generate_tmf_content(
 }
 
 // ---------------------------------------------------------------------------
+// Partial file helpers
+// ---------------------------------------------------------------------------
+
+/// Converts a source file name to a safe filename for the partial manifest.
+fn source_file_to_partial_name(source_file: &str) -> String {
+    source_file
+        .replace(['/', '\\', '.'], "_")
+        .to_lowercase()
+}
+
+/// Returns the scratch subdirectory for per-module partial manifests.
+fn partials_dir() -> std::path::PathBuf {
+    scratch::path("wdf_macros_wpp").join("partials")
+}
+
+/// Writes a per-module partial manifest file to disk.
+fn write_partial(source_file: &str, entries: &[TraceManifestEntry], controls: &[TraceControlInfo]) {
+    let dir = partials_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        eprintln!("wdf-macros: failed to create partials directory");
+        return;
+    }
+
+    let partial = PartialManifest {
+        source_file: source_file.to_string(),
+        controls: controls.to_vec(),
+        entries: entries.to_vec(),
+    };
+
+    let file_name = format!("{}.json", source_file_to_partial_name(source_file));
+    let path = dir.join(&file_name);
+
+    match serde_json::to_string_pretty(&partial) {
+        Ok(json) => {
+            eprintln!("wdf-macros: partial manifest JSON for '{source_file}':\n{json}");
+            if let Err(e) = std::fs::write(&path, &json) {
+            eprintln!("wdf-macros: failed to write partial manifest {}: {e}", path.display());
+            } else {
+            eprintln!("wdf-macros: partial manifest written for module '{source_file}' -> {}", path.display());
+            }
+        }
+        Err(e) => {
+            eprintln!("wdf-macros: failed to serialize partial manifest: {e}");
+        }
+    }
+}
+
+/// Reads the module graph generated by build.rs (if present).
+fn read_module_graph() -> Option<Vec<String>> {
+    let graph_path = scratch::path("wdf_macros_wpp").join("module_graph.json");
+    let content = std::fs::read_to_string(&graph_path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// Reads all partial manifest files from the partials directory.
+fn read_all_partials() -> Vec<PartialManifest> {
+    let dir = partials_dir();
+    let mut partials = Vec::new();
+
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return partials,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "json") {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(partial) = serde_json::from_str::<PartialManifest>(&content) {
+                    partials.push(partial);
+                }
+            }
+        }
+    }
+
+    partials
+}
+
+/// Prunes stale partial manifests for modules that no longer exist in the
+/// module graph.
+fn prune_stale_partials(module_graph: &[String]) {
+    let dir = partials_dir();
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "json") {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(partial) = serde_json::from_str::<PartialManifest>(&content) {
+                    if !module_graph.contains(&partial.source_file) {
+                        eprintln!(
+                            "wdf-macros: pruning stale partial for deleted module '{}' (not in module graph)",
+                            partial.source_file
+                        );
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Flush logic
 // ---------------------------------------------------------------------------
 
-/// Writes the accumulated manifest to the scratch directory as a TMF file.
-///
-/// Guarded by [`MANIFEST_FLUSHED`] so it executes at most once.
-fn flush_accumulated_manifest() {
-    // Prevent double-flushing
+fn flush_accumulated_manifest(caller: &str) {
     if MANIFEST_FLUSHED.swap(true, Ordering::SeqCst) {
         return;
     }
 
-    // Build the TMF content while holding the locks, then release before I/O.
-    let (tmf_content, driver_name) = {
+    eprintln!("wdf-macros: manifest flusher invoked by {caller}");
+
+    let (per_module_entries, controls, driver_name) = {
         let entries = TRACE_ENTRIES.lock().unwrap();
         let controls = TRACE_CONTROL_INFO.lock().unwrap();
 
         if entries.is_empty() {
-            return;
+            eprintln!("wdf-macros: no trace entries accumulated in this compilation pass");
+            // Still need to assemble from partials (unchanged modules)
+            let dn = std::env::var("CARGO_PKG_NAME")
+                .unwrap_or_else(|_| "unknown_driver".to_string())
+                .replace('-', "_");
+            return assemble_final_tmf(&dn, &controls, caller);
         }
 
-        let driver_name = entries
-            .first()
+        let dn = entries
+            .values()
+            .flat_map(|v| v.first())
             .map(|e| e.driver_name.clone())
+            .next()
             .unwrap_or_else(|| "unknown_driver".to_string());
 
-        let content = generate_tmf_content(&entries, &controls);
-        (content, driver_name)
+        (entries.clone(), controls.clone(), dn)
     };
+
+    // Step 1: Write per-module partial files for modules that were re-expanded
+    for (source_file, entries) in &per_module_entries {
+        write_partial(source_file, entries, &controls);
+    }
+
+    // Step 2: Assemble final TMF
+    assemble_final_tmf(&driver_name, &controls, caller);
+}
+
+fn assemble_final_tmf(driver_name: &str, controls: &[TraceControlInfo], caller: &str) {
+    // Prune stale partials using module graph if available
+    if let Some(module_graph) = read_module_graph() {
+        eprintln!("wdf-macros: module graph found with {} modules, pruning stale partials", module_graph.len());
+        prune_stale_partials(&module_graph);
+    } else {
+        eprintln!("wdf-macros: no module_graph.json found, skipping stale module pruning");
+    }
+
+    // Read all surviving partial manifests
+    let partials = read_all_partials();
+
+    if partials.is_empty() {
+        eprintln!("wdf-macros: no partial manifests found, skipping TMF generation");
+        return;
+    }
+
+    // Collect all entries from all partials, sorted by message_id for stable output
+    let mut all_entries: Vec<TraceManifestEntry> = partials
+        .into_iter()
+        .flat_map(|p| p.entries)
+        .collect();
+    all_entries.sort_by_key(|e| e.message_id);
+
+    let tmf_content = generate_tmf_content(&all_entries, controls);
 
     if tmf_content.is_empty() {
         return;
@@ -255,7 +380,6 @@ fn flush_accumulated_manifest() {
     let scratch_dir = scratch::path("wdf_macros_wpp");
     let tmf_path = scratch_dir.join(format!("{driver_name}.tmf"));
 
-    // Use file locking for safety (following the wdk-macros pattern).
     let lock_path = scratch_dir.join(".wpp_manifest.lock");
     match std::fs::File::create(&lock_path) {
         Ok(lock_file) => {
@@ -264,8 +388,16 @@ fn flush_accumulated_manifest() {
                 match std::fs::write(&tmf_path, &tmf_content) {
                     Ok(()) => {
                         eprintln!(
-                            "wdf-macros: WPP TMF manifest written to {}",
-                            tmf_path.display()
+                            "wdf-macros: [{}] WPP TMF manifest written to {} ({} entries from {} modules)",
+                            caller,
+                            tmf_path.display(),
+                            all_entries.len(),
+                            {
+                                let mut files: Vec<&str> = all_entries.iter().map(|e| e.source_file.as_str()).collect();
+                                files.sort();
+                                files.dedup();
+                                files.len()
+                            }
                         );
                     }
                     Err(e) => {
@@ -285,63 +417,37 @@ fn flush_accumulated_manifest() {
 // Drop-based flusher + atexit registration
 // ---------------------------------------------------------------------------
 
-/// Drop-based manifest flusher.
-///
-/// When dropped (e.g. on thread exit), writes the accumulated trace metadata
-/// to a TMF manifest file.  An `atexit` handler is also registered as a
-/// fallback to handle cases where thread-local destructors don't run (e.g.
-/// when `rustc` calls `std::process::exit`).
 pub(crate) struct ManifestFlusher;
 
 impl Drop for ManifestFlusher {
     fn drop(&mut self) {
-        flush_accumulated_manifest();
+        flush_accumulated_manifest("Drop (thread-local ManifestFlusher)");
     }
 }
 
-/// `atexit` callback registered once per process.
 extern "C" fn atexit_flush_manifest() {
-    flush_accumulated_manifest();
+    flush_accumulated_manifest("atexit handler");
 }
 
-/// Guards one-time registration of the `atexit` handler.
 static FLUSHER_REGISTERED: Once = Once::new();
 
 thread_local! {
-    /// Thread-local flusher whose `Drop` fires on thread exit.
     static THREAD_FLUSHER: std::cell::RefCell<Option<ManifestFlusher>> =
         const { std::cell::RefCell::new(None) };
 }
 
-/// Ensures the manifest flusher is registered.
-///
-/// This is called from each `trace!` expansion.  It registers:
-///
-/// 1. An `atexit` handler (primary – runs when `rustc` process exits).
-/// 2. A thread-local [`ManifestFlusher`] (secondary – runs when thread exits
-///    via `Drop`).
-///
-/// Both are guarded by [`MANIFEST_FLUSHED`] to prevent double-flushing.
 pub(crate) fn ensure_flusher_registered() {
-    // Register atexit handler (once)
     FLUSHER_REGISTERED.call_once(|| {
-        // SAFETY: `atexit` is a C standard library function that registers a
-        // callback to be called on normal process exit.  The callback
-        // `atexit_flush_manifest` has a compatible `extern "C"` ABI and
-        // remains valid for the lifetime of the process since it is a
-        // statically-linked function in this proc-macro dylib.
         unsafe extern "C" {
             fn atexit(func: extern "C" fn()) -> core::ffi::c_int;
         }
 
-        // SAFETY: Calling `atexit` with a valid function pointer that has a
-        // compatible `extern "C"` ABI.
+        // SAFETY: Registering a valid extern "C" function pointer with atexit.
         unsafe {
             atexit(atexit_flush_manifest);
         }
     });
 
-    // Register thread-local flusher as defense-in-depth
     THREAD_FLUSHER.with(|f| {
         let mut guard = f.borrow_mut();
         if guard.is_none() {

@@ -522,7 +522,147 @@
 //     obj_path
 // }
 
+/// Walks the module tree starting from `lib.rs` and returns all source file
+/// paths (relative to the crate root, e.g. `src/lib.rs`, `src/io/mod.rs`).
+///
+/// This is written to the scratch directory as `module_graph.json` so that the
+/// `wdf-macros` proc-macro atexit handler can prune stale partial manifest
+/// files for modules that have been deleted or renamed.
+fn generate_module_graph() {
+    use std::collections::VecDeque;
+    use std::path::{Path, PathBuf};
+
+    let manifest_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
+    let src_dir = manifest_dir.join("src");
+    let entry_file = src_dir.join("lib.rs");
+
+    if !entry_file.exists() {
+        eprintln!(
+            "cargo::warning=module_graph: entry file {} does not exist, skipping",
+            entry_file.display()
+        );
+        return;
+    }
+
+    let mut module_files: Vec<String> = Vec::new();
+    let mut queue: VecDeque<PathBuf> = VecDeque::new();
+    queue.push_back(entry_file);
+
+    while let Some(file_path) = queue.pop_front() {
+        let relative = file_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(&file_path)
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        if module_files.contains(&relative) {
+            continue; // avoid cycles
+        }
+        module_files.push(relative.clone());
+
+        // Parse the file to find `mod` declarations
+        let content = match std::fs::read_to_string(&file_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let syntax = match syn::parse_file(&content) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "cargo::warning=module_graph: failed to parse {}: {}",
+                    file_path.display(),
+                    e
+                );
+                continue;
+            }
+        };
+
+        let parent_dir = file_path.parent().unwrap_or(Path::new("."));
+
+        for item in &syntax.items {
+            if let syn::Item::Mod(item_mod) = item {
+                // Only follow non-inline module declarations (no body)
+                if item_mod.content.is_some() {
+                    // Inline module — items are in the same file, already covered
+                    continue;
+                }
+
+                let mod_name = item_mod.ident.to_string();
+
+                // Check for #[path = "..."] attribute
+                let custom_path = item_mod.attrs.iter().find_map(|attr| {
+                    if attr.path().is_ident("path") {
+                        if let syn::Meta::NameValue(nv) = &attr.meta {
+                            if let syn::Expr::Lit(syn::ExprLit {
+                                lit: syn::Lit::Str(s),
+                                ..
+                            }) = &nv.value
+                            {
+                                return Some(s.value());
+                            }
+                        }
+                    }
+                    None
+                });
+
+                let candidates = if let Some(custom) = custom_path {
+                    vec![parent_dir.join(custom)]
+                } else {
+                    // Standard Rust module resolution:
+                    //   1. <parent_dir>/<mod_name>.rs
+                    //   2. <parent_dir>/<mod_name>/mod.rs
+                    vec![
+                        parent_dir.join(format!("{mod_name}.rs")),
+                        parent_dir.join(&mod_name).join("mod.rs"),
+                    ]
+                };
+
+                for candidate in candidates {
+                    if candidate.exists() {
+                        queue.push_back(candidate);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort for deterministic output
+    module_files.sort();
+
+    let scratch_dir = scratch::path("wdf_macros_wpp");
+    if let Err(e) = std::fs::create_dir_all(&scratch_dir) {
+        eprintln!("cargo::warning=module_graph: failed to create scratch dir: {e}");
+        return;
+    }
+
+    let graph_path = scratch_dir.join("module_graph.json");
+    match serde_json::to_string_pretty(&module_files) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&graph_path, &json) {
+                eprintln!("cargo::warning=module_graph: failed to write {}: {e}", graph_path.display());
+            } else {
+                println!(
+                    "cargo::warning=module_graph: wrote {} modules to {}",
+                    module_files.len(),
+                    graph_path.display()
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("cargo::warning=module_graph: failed to serialize: {e}");
+        }
+    }
+
+    // Re-run build.rs when any source file changes (catches renames/deletes)
+    println!("cargo::rerun-if-changed=src/");
+}
+
 fn main() -> Result<(), wdk_build::ConfigError> {
+    generate_module_graph();
+
     // let obj_path = generate_wpp_annotation_coff();
 
     // Tell the linker to include the annotation object so that

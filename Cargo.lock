@@ -1148,6 +1148,8 @@ dependencies = [
  "proc-macro2",
  "quote",
  "scratch",
+ "serde",
+ "serde_json",
  "syn",
 ]
 
