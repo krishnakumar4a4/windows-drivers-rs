@@ -526,8 +526,6 @@ dependencies = [
  "object",
  "proc-macro2",
  "quote",
- "scratch",
- "serde_json",
  "syn",
  "wdf",
  "wdk-build",
@@ -748,8 +746,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "scratch",
- "serde",
- "serde_json",
  "syn",
 ]
 

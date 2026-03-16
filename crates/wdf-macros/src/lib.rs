@@ -1198,13 +1198,8 @@ pub fn trace(item: TokenStream) -> TokenStream {
     let span = proc_macro::Span::call_site();
     
     // Get source file information
-    // Normalize path separators to forward slashes so that partial manifest
-    // keys match the dep-info entries parsed from the rustc .d file.
+    // Normalize path separators to forward slashes for consistent manifest output.
     let source_file = span.file().replace('\\', "/");
-    let _file_name = std::path::Path::new(&source_file)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown.rs");
     let line_number = span.line();
     
     // Parse the macro arguments
