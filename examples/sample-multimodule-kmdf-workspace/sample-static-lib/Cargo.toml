@@ -1,0 +1,12 @@
+[package]
+name = "sample-static-lib"
+version = "0.1.0"
+edition = "2021"
+description = "An internal library crate that is statically linked into the driver"
+publish = false
+
+[build-dependencies]
+wdk-build.workspace = true
+
+[dependencies]
+wdf.workspace = true

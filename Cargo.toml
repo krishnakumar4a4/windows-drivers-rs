@@ -9,6 +9,8 @@ exclude = [
   "examples/sample-wdm-driver",
   "examples/sample-test",
   "examples/osrusbfx2",
+  "examples/sample-multimodule-kmdf-workspace",
+  "examples/sample-external-lib",
   "tests/config-kmdf",
   "tests/config-umdf",
   "tests/config-wdm",
@@ -27,7 +29,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 # Workspace Crates
 wdf = { path = "crates/wdf", version = "0.3.0" }
-wdf-macros = { path = "crates/wdf-macros", version = "0.3.0" }
+wdf-macros = { path = "crates/wdf-macros" }
 wdk = { path = "crates/wdk", version = "0.3.1" }
 wdk-alloc = { path = "crates/wdk-alloc", version = "0.3.1" }
 wdk-build = { path = "crates/wdk-build", version = "0.4.0" }

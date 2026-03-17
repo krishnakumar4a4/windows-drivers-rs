@@ -1,0 +1,22 @@
+[package]
+name = "sample-multimodule-kmdf-driver"
+version = "0.1.0"
+edition = "2021"
+description = "A sample KMDF driver with multiple modules demonstrating trace macros across crate boundaries"
+publish = false
+
+# Signal this is a driver crate; inherits driver-model from workspace metadata
+[package.metadata.wdk]
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+
+[build-dependencies]
+wdk-build.workspace = true
+
+[dependencies]
+wdf.workspace = true
+sample-static-lib = { path = "../sample-static-lib" }
+sample-dynamic-lib = { path = "../sample-dynamic-lib" }
+sample-external-lib = { path = "../../sample-external-lib" }

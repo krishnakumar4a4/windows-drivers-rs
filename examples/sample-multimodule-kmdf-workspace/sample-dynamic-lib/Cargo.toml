@@ -1,0 +1,12 @@
+[package]
+name = "sample-dynamic-lib"
+version = "0.1.0"
+edition = "2021"
+description = "An internal library crate that demonstrates trace macros in a dynamically-consumed dependency. Note: true kernel-mode dynamic linking (separate .sys) requires a standalone driver project; within a Cargo workspace, all Rust libraries are statically linked into the cdylib driver binary."
+publish = false
+
+[build-dependencies]
+wdk-build.workspace = true
+
+[dependencies]
+wdf.workspace = true
