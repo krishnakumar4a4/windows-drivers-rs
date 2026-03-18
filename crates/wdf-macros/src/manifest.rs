@@ -91,6 +91,11 @@ fn item_type_to_format_specifier(item_type: &str) -> &'static str {
 }
 
 fn generate_tmf_format_string(format_str: &str, args: &[TraceManifestArg]) -> String {
+    generate_tmf_format_string_pub(format_str, args)
+}
+
+/// Public helper for `pdb_annotation` module to generate WPP format strings.
+pub(crate) fn generate_tmf_format_string_pub(format_str: &str, args: &[TraceManifestArg]) -> String {
     let mut result = String::new();
     let mut arg_idx = 0;
     let mut chars = format_str.chars().peekable();
@@ -271,6 +276,319 @@ fn flush_manifest(caller: &str) {
         }
         Err(e) => {
             eprintln!("wdf-macros: failed to create manifest lock file: {e}");
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // PDB CodeView annotation injection.
+    //
+    // Only the driver crate's rustc produces a PDB (via the linker).
+    // If we find a recently-produced PDB, inject S_ANNOTATION records.
+    // For rlib crates no PDB exists -> this is a no-op.
+    // -----------------------------------------------------------------
+    attempt_pdb_annotation(&all_entries, &controls, &driver_name, &scratch_dir);
+}
+
+/// Parses a `.tmf` file produced by a dependent crate and returns the trace
+/// entries it contains.
+///
+/// TMF format (per entry):
+/// ```text
+/// <guid> <driver_name> // SRC=<source_file> MJ= MN=
+/// #typev <driver_name>_<line> <msg_id> "%0<wpp_format>" // <level> <flag>
+/// {                           <-- optional arg block
+///   <name>, <ItemType> -- <n>
+/// }
+/// ```
+fn parse_tmf_file(path: &std::path::Path) -> Vec<TraceManifestEntry> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut entries = Vec::new();
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i].trim();
+
+        // Look for the header line: <guid> <driver_name> // SRC=<file> MJ= MN=
+        if !line.contains("// SRC=") || !line.contains("MJ=") {
+            i += 1;
+            continue;
+        }
+
+        // Parse source file from header
+        let source_file = line
+            .split("// SRC=")
+            .nth(1)
+            .and_then(|s| s.split(" MJ=").next())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        // Parse driver_name from header (second token)
+        let header_driver_name = line
+            .split_whitespace()
+            .nth(1)
+            .unwrap_or("unknown")
+            .to_string();
+
+        i += 1;
+        if i >= lines.len() {
+            break;
+        }
+
+        // Next line should be #typev
+        let typev_line = lines[i].trim();
+        if !typev_line.starts_with("#typev ") {
+            continue;
+        }
+
+        // Parse: #typev <name>_<line> <msg_id> "%0<format>" // <comment>
+        // Extract message_id
+        let parts: Vec<&str> = typev_line.splitn(4, ' ').collect();
+        if parts.len() < 4 {
+            i += 1;
+            continue;
+        }
+
+        // parts[1] = "driver_name_LINE"
+        let name_line = parts[1];
+        let line_number: usize = name_line
+            .rsplit('_')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+
+        let message_id: u32 = parts[2].parse().unwrap_or(0);
+
+        // Everything after msg_id: "%0<format>" // <comment>
+        let rest = parts[3];
+
+        // Extract format string between "%0 and the closing "
+        let wpp_format = rest
+            .strip_prefix("\"%0")
+            .and_then(|s| s.split('"').next())
+            .unwrap_or("")
+            .to_string();
+
+        // Parse the format string back to a Rust-like format string
+        // by reversing WPP specifiers like %1!d! back to {}
+        let format_string = reverse_wpp_format(&wpp_format);
+
+        // Extract level and flag from comment (after //)
+        let comment = rest
+            .split("// ")
+            .nth(1)
+            .unwrap_or("")
+            .trim();
+
+        let comment_parts: Vec<&str> = comment.split_whitespace().collect();
+        let (level, flag) = parse_level_flag(&comment_parts);
+
+        i += 1;
+
+        // Parse optional arg block
+        let mut args = Vec::new();
+        if i < lines.len() && lines[i].trim() == "{" {
+            i += 1;
+            while i < lines.len() && lines[i].trim() != "}" {
+                let arg_line = lines[i].trim();
+                // Format: "name, ItemType -- param_number"
+                if let Some((name_type, param)) = arg_line.split_once(" -- ") {
+                    if let Some((name, item_type)) = name_type.split_once(", ") {
+                        args.push(TraceManifestArg {
+                            name: name.trim().to_string(),
+                            item_type: item_type.trim().to_string(),
+                            param_number: param.trim().parse().unwrap_or(0),
+                        });
+                    }
+                }
+                i += 1;
+            }
+            if i < lines.len() {
+                i += 1; // skip "}"
+            }
+        }
+
+        entries.push(TraceManifestEntry {
+            message_id,
+            source_file,
+            line_number,
+            flag,
+            level,
+            format_string,
+            args,
+            driver_name: header_driver_name.clone(),
+        });
+    }
+
+    entries
+}
+
+/// Reverses WPP format specifiers like `%1!d!` back to `{}`.
+fn reverse_wpp_format(wpp: &str) -> String {
+    let mut result = String::new();
+    let mut chars = wpp.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            // Skip the param number
+            while chars.peek().map_or(false, |ch| ch.is_ascii_digit()) {
+                chars.next();
+            }
+            // Skip !specifier!
+            if chars.peek() == Some(&'!') {
+                chars.next(); // first '!'
+                while chars.peek().map_or(false, |ch| *ch != '!') {
+                    chars.next();
+                }
+                if chars.peek() == Some(&'!') {
+                    chars.next(); // closing '!'
+                }
+            }
+            result.push_str("{}");
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Parses level and flag from a TMF comment like ["Information", "FLAG_DEVICE"]
+/// or ["Verbose"] or ["FLAG_DEVICE"].
+fn parse_level_flag(parts: &[&str]) -> (Option<String>, Option<String>) {
+    let known_levels = [
+        "Verbose",
+        "Information",
+        "Warning",
+        "Error",
+        "Critical",
+    ];
+    let mut level = None;
+    let mut flag = None;
+    for &part in parts {
+        if known_levels.iter().any(|l| l.eq_ignore_ascii_case(part)) {
+            level = Some(part.to_string());
+        } else if !part.is_empty() {
+            flag = Some(part.to_string());
+        }
+    }
+    (level, flag)
+}
+
+/// Reads all `.tmf` files from the scratch directory *other* than the driver's
+/// own TMF, parses them, and returns the merged entries.
+fn collect_dependent_entries(
+    scratch_dir: &std::path::Path,
+    driver_name: &str,
+) -> Vec<TraceManifestEntry> {
+    let driver_tmf = format!("{driver_name}.tmf");
+    let mut all = Vec::new();
+
+    let entries = match std::fs::read_dir(scratch_dir) {
+        Ok(e) => e,
+        Err(_) => return all,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("tmf") {
+            continue;
+        }
+        // Skip the driver's own TMF — those entries are already in-memory
+        if path.file_name().and_then(|n| n.to_str()) == Some(&driver_tmf) {
+            continue;
+        }
+        let parsed = parse_tmf_file(&path);
+        if !parsed.is_empty() {
+            eprintln!(
+                "wdf-macros: [pdb_annotation] Read {} trace(s) from dependent TMF: {}",
+                parsed.len(),
+                path.file_name().and_then(|n| n.to_str()).unwrap_or("?"),
+            );
+        }
+        all.extend(parsed);
+    }
+
+    all
+}
+
+/// Attempts to find a PDB and inject CodeView annotations into it.
+///
+/// When a PDB is found (i.e. this is the driver crate), this function also
+/// reads **all** `.tmf` files from the scratch directory (produced by
+/// dependent crates) and merges their trace entries into the PDB alongside
+/// the driver's own entries.  This ensures the PDB contains a complete set
+/// of annotations for every `trace!` call across the entire dependency tree.
+///
+/// This is a no-op when:
+/// - No PDB is found (rlib crates, failed builds)
+/// - No trace entries exist
+/// - PDB patching fails (falls back silently after logging)
+fn attempt_pdb_annotation(
+    driver_entries: &[TraceManifestEntry],
+    controls: &[TraceControlInfo],
+    driver_name: &str,
+    scratch_dir: &std::path::Path,
+) {
+    if driver_entries.is_empty() {
+        return;
+    }
+
+    let control_guid = controls
+        .first()
+        .map(|c| c.guid.as_str())
+        .unwrap_or("00000000-0000-0000-0000-000000000000");
+
+    let pdb_path = match crate::pdb_annotation::find_recent_pdb(scratch_dir, driver_name) {
+        Some(p) => p,
+        None => {
+            eprintln!(
+                "wdf-macros: [pdb_annotation] No recent PDB found — \
+                 '{}' is likely a dependent crate (rlib), skipping PDB annotation",
+                driver_name
+            );
+            return;
+        }
+    };
+
+    // -----------------------------------------------------------------
+    // Merge: driver's own entries + entries from dependent crate TMFs.
+    // -----------------------------------------------------------------
+    let dependent_entries = collect_dependent_entries(scratch_dir, driver_name);
+
+    let mut all_entries: Vec<TraceManifestEntry> = Vec::new();
+    all_entries.extend_from_slice(driver_entries);
+    all_entries.extend(dependent_entries);
+    all_entries.sort_by_key(|e| e.message_id);
+
+    eprintln!(
+        "wdf-macros: [pdb_annotation] PDB found: '{}' — \
+         injecting {} annotation(s) ({} driver + {} dependent)",
+        pdb_path.display(),
+        all_entries.len(),
+        driver_entries.len(),
+        all_entries.len() - driver_entries.len(),
+    );
+
+    match crate::pdb_annotation::patch_pdb_with_annotations(
+        &pdb_path,
+        &all_entries,
+        control_guid,
+        driver_name,
+    ) {
+        Ok(()) => {
+            eprintln!(
+                "wdf-macros: [pdb_annotation] PDB patched successfully with CodeView S_ANNOTATION records"
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "wdf-macros: [pdb_annotation] PDB patching failed ({}), TMF sidecar is still available",
+                e
+            );
         }
     }
 }

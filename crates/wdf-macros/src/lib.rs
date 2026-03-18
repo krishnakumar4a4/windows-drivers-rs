@@ -12,6 +12,7 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 
 mod manifest;
+mod pdb_annotation;
 
 /// A procedural macro that when placed on a safe Rust impl of a driver
 /// generates the relevant FFI wrappers
