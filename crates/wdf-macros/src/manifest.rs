@@ -1,101 +1,144 @@
 // Copyright (c) Microsoft Corporation
 // License: MIT OR Apache-2.0
 
-//! WPP manifest (TMF) file generation for `trace!` macro metadata.
+//! Trace manifest infrastructure — PE binary `.trman` section reader + atexit
+//! PDB patcher.
 //!
-//! ## Architecture
+//! Instead of accumulating trace entries in proc-macro memory and writing
+//! intermediate TMF files, this module reads the final linked binary's
+//! `.trman` PE section at `atexit` time.  Each `trace!` expansion embeds a
+//! fixed-size [`TraceManifestRecord`](wdf::__internal::TraceManifestRecord)
+//! into `.trman$m` via `#[link_section]`.  The MSVC linker merges all
+//! `$`-suffixed subsections into a single `.trman` section.
 //!
-//! `rustc` re-expands **every** proc macro on every compilation — even during
-//! incremental builds.  This means the in-memory `TRACE_ENTRIES` map always
-//! holds the complete, up-to-date set of trace entries for the entire crate
-//! after macro expansion finishes.
+//! ## Flow
 //!
-//! We leverage this by writing the final `.tmf` file directly from
-//! `TRACE_ENTRIES` in a single `atexit` handler — no intermediate partial
-//! files, no dep-info parsing, no stale-entry pruning.
-//!
-//! ## Flush strategy
-//!
-//! Each `trace!` expansion accumulates its entry into `TRACE_ENTRIES`
-//! (a `HashMap<String, Vec<TraceManifestEntry>>` keyed by source file).
-//! The first expansion also registers an `atexit` handler via
-//! [`ensure_flusher_registered`].  When `rustc` exits, the handler
-//! collects all entries, sorts by `message_id`, generates TMF content,
-//! and writes the `.tmf` file under a file-system lock.
+//! 1. `#[driver_entry]` stores the control GUID and driver name, then
+//!    registers the `atexit` callback.
+//! 2. `trace!` generates `#[link_section = ".trman$m"]` statics (no
+//!    proc-macro state accumulation).
+//! 3. When `rustc` exits, the atexit handler:
+//!    a. Finds the PDB that was just produced.
+//!    b. Finds the companion binary (DLL/SYS) next to the PDB.
+//!    c. Reads the `.trman` PE section from the binary.
+//!    d. Parses fixed-size `TraceManifestRecord` entries (skipping sentinels).
+//!    e. Converts them to `TraceManifestEntry` values.
+//!    f. Delegates to `pdb_annotation::patch_pdb_with_annotations`.
 
-use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    LazyLock, Mutex, Once,
-};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, Once};
 
-// ---------------------------------------------------------------------------
-// Data types
-// ---------------------------------------------------------------------------
+use crate::pdb_annotation;
 
-/// A single argument in a trace manifest entry.
-#[derive(Debug, Clone)]
-pub(crate) struct TraceManifestArg {
-    pub name: String,
-    pub item_type: String,
-    pub param_number: usize,
-}
+// ===========================================================================
+// Public types (consumed by lib.rs and pdb_annotation.rs)
+// ===========================================================================
 
-/// Metadata for a single `trace!` invocation.
-#[derive(Debug, Clone)]
-pub(crate) struct TraceManifestEntry {
-    pub message_id: u32,
-    pub source_file: String,
-    pub line_number: usize,
-    pub flag: Option<String>,
-    pub level: Option<String>,
-    pub format_string: String,
-    pub args: Vec<TraceManifestArg>,
-    pub driver_name: String,
-}
-
-/// Trace control information (GUID + flags) captured from `#[driver_entry]`.
-#[derive(Debug, Clone)]
+/// Information about a single trace control definition (GUID + flags).
+#[derive(Clone)]
 pub(crate) struct TraceControlInfo {
+    /// The control GUID string.
     pub guid: String,
+    /// Flag names associated with this control.
     pub flags: Vec<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Global statics
-// ---------------------------------------------------------------------------
+/// A single trace argument's metadata.
+#[derive(Debug, Clone)]
+pub(crate) struct TraceManifestArg {
+    /// Argument name.
+    pub name: String,
+    /// WPP item type (e.g. `"ItemLong"`, `"ItemString"`).
+    pub item_type: String,
+    /// 1-based parameter number.
+    pub param_number: usize,
+}
 
-/// Trace entries keyed by source file name.
-pub(crate) static TRACE_ENTRIES: LazyLock<Mutex<HashMap<String, Vec<TraceManifestEntry>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// A single trace entry's metadata (built from PE section records).
+#[derive(Debug, Clone)]
+pub(crate) struct TraceManifestEntry {
+    /// Unique message ID for this trace point.
+    pub message_id: u32,
+    /// Source file path.
+    pub source_file: String,
+    /// Line number in the source file.
+    pub line_number: usize,
+    /// Optional WPP flag name.
+    pub flag: Option<String>,
+    /// Optional WPP trace level name.
+    pub level: Option<String>,
+    /// Rust format string.
+    pub format_string: String,
+    /// Trace argument descriptors.
+    pub args: Vec<TraceManifestArg>,
+    /// Crate/driver name.
+    pub driver_name: String,
+}
 
-/// Trace control definitions captured from `#[driver_entry]`.
+// ===========================================================================
+// Static state (set by #[driver_entry])
+// ===========================================================================
+
+/// Trace control definitions (GUID + flags) from `#[driver_entry]`.
 pub(crate) static TRACE_CONTROL_INFO: Mutex<Vec<TraceControlInfo>> = Mutex::new(Vec::new());
 
-/// Prevents double-flushing.
-static MANIFEST_FLUSHED: AtomicBool = AtomicBool::new(false);
+/// Driver/crate name from `#[driver_entry]`.
+pub(crate) static DRIVER_NAME: Mutex<String> = Mutex::new(String::new());
 
-// ---------------------------------------------------------------------------
-// TMF generation helpers
-// ---------------------------------------------------------------------------
+/// Ensures the atexit flusher is registered exactly once per proc-macro load.
+static FLUSHER_REGISTERED: Once = Once::new();
 
-fn item_type_to_format_specifier(item_type: &str) -> &'static str {
+// ===========================================================================
+// C atexit binding
+// ===========================================================================
+
+unsafe extern "C" {
+    fn atexit(callback: extern "C" fn()) -> std::os::raw::c_int;
+}
+
+/// Registers the atexit callback.  Called once from `#[driver_entry]`.
+pub(crate) fn ensure_flusher_registered() {
+    FLUSHER_REGISTERED.call_once(|| {
+        // SAFETY: `atexit` is a standard C library function provided by the CRT.
+        // The proc-macro runs inside the compiler process, which links against
+        // the CRT.  The callback fires when the compiler process exits — after
+        // the linker has produced the binary and PDB.
+        unsafe {
+            atexit(atexit_flush_manifest);
+        }
+    });
+}
+
+extern "C" fn atexit_flush_manifest() {
+    if let Err(e) = std::panic::catch_unwind(flush_manifest) {
+        eprintln!("wdf-macros: [manifest] Panic during flush: {e:?}");
+    }
+}
+
+// ===========================================================================
+// WPP format string generation
+// ===========================================================================
+
+/// Maps a WPP item type name to a C-style printf format specifier.
+fn item_type_to_format_spec(item_type: &str) -> &'static str {
     match item_type {
         "ItemLong" => "d",
         "ItemULong" => "u",
         "ItemLongLong" => "I64d",
         "ItemULongLong" => "I64u",
         "ItemString" => "s",
-        _ => "d",
+        _ => "x",
     }
 }
 
-fn generate_tmf_format_string(format_str: &str, args: &[TraceManifestArg]) -> String {
-    generate_tmf_format_string_pub(format_str, args)
-}
-
-/// Public helper for `pdb_annotation` module to generate WPP format strings.
-pub(crate) fn generate_tmf_format_string_pub(format_str: &str, args: &[TraceManifestArg]) -> String {
+/// Converts a Rust-style format string and argument metadata into a WPP TMF
+/// format string with numbered placeholders.
+///
+/// Example: `"hello {} world {}"` with two args → `"hello %10!d! world %11!s!"`
+pub(crate) fn generate_tmf_format_string_pub(
+    format_str: &str,
+    args: &[TraceManifestArg],
+) -> String {
     let mut result = String::new();
     let mut arg_idx = 0;
     let mut chars = format_str.chars().peekable();
@@ -103,9 +146,11 @@ pub(crate) fn generate_tmf_format_string_pub(format_str: &str, args: &[TraceMani
     while let Some(c) = chars.next() {
         if c == '{' {
             if chars.peek() == Some(&'{') {
+                // Escaped {{ → literal {
                 chars.next();
                 result.push('{');
             } else {
+                // Format placeholder — skip to closing }
                 while let Some(inner) = chars.next() {
                     if inner == '}' {
                         break;
@@ -113,13 +158,14 @@ pub(crate) fn generate_tmf_format_string_pub(format_str: &str, args: &[TraceMani
                 }
                 if arg_idx < args.len() {
                     let param_num = arg_idx + 1;
-                    let fmt_spec = item_type_to_format_specifier(&args[arg_idx].item_type);
-                    result.push_str(&format!("%{param_num}!{fmt_spec}!"));
+                    let spec = item_type_to_format_spec(&args[arg_idx].item_type);
+                    result.push_str(&format!("%{param_num}!{spec}!"));
                     arg_idx += 1;
                 }
             }
         } else if c == '}' {
             if chars.peek() == Some(&'}') {
+                // Escaped }} → literal }
                 chars.next();
                 result.push('}');
             } else {
@@ -133,485 +179,336 @@ pub(crate) fn generate_tmf_format_string_pub(format_str: &str, args: &[TraceMani
     result
 }
 
-fn generate_tmf_content(
-    entries: &[TraceManifestEntry],
-    controls: &[TraceControlInfo],
-) -> String {
-    if entries.is_empty() {
-        return String::new();
-    }
+// ===========================================================================
+// PE .trman section reader
+// ===========================================================================
 
-    let control_guid = controls
-        .first()
-        .map(|c| c.guid.as_str())
-        .unwrap_or("00000000-0000-0000-0000-000000000000");
+// Record layout constants — **must** match `wdf::__internal::trace_manifest`.
+const TRACE_MANIFEST_MAGIC: u32 = 0x5452_4D4E; // "TRMN"
+const TRACE_MANIFEST_SENTINEL_START: u32 = 0xAAAA_AAAA;
+const TRACE_MANIFEST_SENTINEL_END: u32 = 0x5A5A_5A5A;
+const TRACE_MANIFEST_VERSION: u32 = 1;
 
-    let mut tmf = String::new();
+const MAX_CRATE_NAME: usize = 64;
+const MAX_FILE_NAME: usize = 256;
+const MAX_FORMAT_STR: usize = 512;
+const MAX_ARG_NAME: usize = 32;
+const MAX_ITEM_TYPE: usize = 24;
+const MAX_ARGS: usize = 16;
+const MAX_FLAG_NAME: usize = 32;
+const MAX_LEVEL_NAME: usize = 16;
 
-    for entry in entries {
-        tmf.push_str(&format!(
-            "{} {} // SRC={} MJ= MN=\n",
-            control_guid, entry.driver_name, entry.source_file
-        ));
+/// Size of one `TraceArgRecord` in the PE section (no hidden padding in
+/// `#[repr(C)]` since all u32 fields land on 4-byte boundaries).
+const ARG_RECORD_SIZE: usize = MAX_ARG_NAME + MAX_ITEM_TYPE + 4 + 4; // 64
 
-        let wpp_fmt = generate_tmf_format_string(&entry.format_string, &entry.args);
+/// Size of one `TraceManifestRecord` in the PE section.
+const RECORD_SIZE: usize = 24 // magic(4) + version(4) + message_id(4) + line_number(4) + arg_count(4) + _reserved(4)
+    + MAX_CRATE_NAME   //  64
+    + MAX_FILE_NAME    // 256
+    + MAX_FORMAT_STR   // 512
+    + MAX_FLAG_NAME    //  32
+    + MAX_LEVEL_NAME   //  16
+    + MAX_ARGS * ARG_RECORD_SIZE; // 1024  → total 1928
 
-        let mut comment_parts = Vec::new();
-        if let Some(ref level) = entry.level {
-            comment_parts.push(level.clone());
-        }
-        if let Some(ref flag) = entry.flag {
-            comment_parts.push(flag.clone());
-        }
-        let comment = if comment_parts.is_empty() {
-            String::new()
-        } else {
-            comment_parts.join(" ")
-        };
-
-        tmf.push_str(&format!(
-            "#typev {}_{} {} \"%0{}\" // {}\n",
-            entry.driver_name, entry.line_number, entry.message_id, wpp_fmt, comment
-        ));
-
-        if !entry.args.is_empty() {
-            tmf.push_str("{\n");
-            for arg in &entry.args {
-                tmf.push_str(&format!(
-                    "  {}, {} -- {}\n",
-                    arg.name, arg.item_type, arg.param_number
-                ));
-            }
-            tmf.push_str("}\n");
-        }
-
-        tmf.push('\n');
-    }
-
-    tmf
+/// Reads a `u32` from little-endian bytes at `offset`.
+fn read_u32(data: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ])
 }
 
-// ---------------------------------------------------------------------------
-// Flush logic
-// ---------------------------------------------------------------------------
-
-/// Writes the final `.tmf` manifest directly from in-memory `TRACE_ENTRIES`.
-///
-/// Because `rustc` re-expands every proc macro on every compilation,
-/// `TRACE_ENTRIES` always contains the complete set of trace entries for the
-/// crate.  No partial files or dep-info parsing needed.
-fn flush_manifest(caller: &str) {
-    if MANIFEST_FLUSHED.swap(true, Ordering::SeqCst) {
-        return;
-    }
-
-    eprintln!("wdf-macros: manifest flush invoked by {caller}");
-
-    let entries = TRACE_ENTRIES.lock().unwrap();
-    let controls = TRACE_CONTROL_INFO.lock().unwrap();
-
-    if entries.is_empty() {
-        eprintln!("wdf-macros: no trace entries accumulated — skipping TMF generation");
-        return;
-    }
-
-    // Collect all entries across all source files, sorted by message_id
-    let mut all_entries: Vec<TraceManifestEntry> = entries
-        .values()
-        .flatten()
-        .cloned()
-        .collect();
-    all_entries.sort_by_key(|e| e.message_id);
-
-    let driver_name = all_entries
-        .first()
-        .map(|e| e.driver_name.clone())
-        .unwrap_or_else(|| {
-            std::env::var("CARGO_PKG_NAME")
-                .unwrap_or_else(|_| "unknown_driver".to_string())
-                .replace('-', "_")
-        });
-
-    let tmf_content = generate_tmf_content(&all_entries, &controls);
-
-    if tmf_content.is_empty() {
-        return;
-    }
-
-    let scratch_dir = scratch::path("wdf_macros_wpp");
-    let tmf_path = scratch_dir.join(format!("{driver_name}.tmf"));
-
-    let lock_path = scratch_dir.join(".wpp_manifest.lock");
-    match std::fs::File::create(&lock_path) {
-        Ok(lock_file) => {
-            use fs4::fs_std::FileExt;
-            if FileExt::lock_exclusive(&lock_file).is_ok() {
-                match std::fs::write(&tmf_path, &tmf_content) {
-                    Ok(()) => {
-                        let mut files: Vec<&str> = all_entries
-                            .iter()
-                            .map(|e| e.source_file.as_str())
-                            .collect();
-                        files.sort();
-                        files.dedup();
-                        let timestamp = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0);
-                        eprintln!(
-                            "wdf-macros: [{}] [{}] WPP TMF manifest written to {} ({} entries from {} modules)",
-                            timestamp,
-                            caller,
-                            tmf_path.display(),
-                            all_entries.len(),
-                            files.len(),
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("wdf-macros: failed to write WPP TMF manifest: {e}");
-                    }
-                }
-                let _ = FileExt::unlock(&lock_file);
-            }
-        }
-        Err(e) => {
-            eprintln!("wdf-macros: failed to create manifest lock file: {e}");
-        }
-    }
-
-    // -----------------------------------------------------------------
-    // PDB CodeView annotation injection.
-    //
-    // Only the driver crate's rustc produces a PDB (via the linker).
-    // If we find a recently-produced PDB, inject S_ANNOTATION records.
-    // For rlib crates no PDB exists -> this is a no-op.
-    // -----------------------------------------------------------------
-    attempt_pdb_annotation(&all_entries, &controls, &driver_name, &scratch_dir);
+/// Reads a `u16` from little-endian bytes at `offset`.
+fn read_u16(data: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes([data[offset], data[offset + 1]])
 }
 
-/// Parses a `.tmf` file produced by a dependent crate and returns the trace
-/// entries it contains.
-///
-/// TMF format (per entry):
-/// ```text
-/// <guid> <driver_name> // SRC=<source_file> MJ= MN=
-/// #typev <driver_name>_<line> <msg_id> "%0<wpp_format>" // <level> <flag>
-/// {                           <-- optional arg block
-///   <name>, <ItemType> -- <n>
-/// }
-/// ```
-fn parse_tmf_file(path: &std::path::Path) -> Vec<TraceManifestEntry> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
+/// Extracts a NUL-terminated UTF-8 string from a fixed-size byte buffer.
+fn str_from_fixed(buf: &[u8]) -> String {
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..end]).to_string()
+}
 
-    let mut entries = Vec::new();
-    let lines: Vec<&str> = content.lines().collect();
-    let mut i = 0;
+/// Reads the raw bytes of the `.trman` PE section from a binary file.
+fn read_trman_section_bytes(
+    binary_path: &Path,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let data = std::fs::read(binary_path)?;
 
-    while i < lines.len() {
-        let line = lines[i].trim();
+    // --- DOS header ---
+    if data.len() < 64 || data[0] != b'M' || data[1] != b'Z' {
+        return Err("Not a valid PE file (bad MZ signature)".into());
+    }
+    let pe_offset = read_u32(&data, 0x3C) as usize;
+    if pe_offset + 24 > data.len() {
+        return Err("PE header offset out of bounds".into());
+    }
 
-        // Look for the header line: <guid> <driver_name> // SRC=<file> MJ= MN=
-        if !line.contains("// SRC=") || !line.contains("MJ=") {
-            i += 1;
-            continue;
-        }
+    // --- PE signature ---
+    if &data[pe_offset..pe_offset + 4] != b"PE\0\0" {
+        return Err("Not a valid PE file (bad PE signature)".into());
+    }
 
-        // Parse source file from header
-        let source_file = line
-            .split("// SRC=")
-            .nth(1)
-            .and_then(|s| s.split(" MJ=").next())
-            .unwrap_or("")
-            .trim()
-            .to_string();
+    // --- COFF header ---
+    let num_sections = read_u16(&data, pe_offset + 6) as usize;
+    let optional_header_size = read_u16(&data, pe_offset + 20) as usize;
 
-        // Parse driver_name from header (second token)
-        let header_driver_name = line
-            .split_whitespace()
-            .nth(1)
-            .unwrap_or("unknown")
-            .to_string();
+    // Section table immediately follows PE sig (4) + COFF header (20) +
+    // optional header.
+    let section_table_offset = pe_offset + 24 + optional_header_size;
 
-        i += 1;
-        if i >= lines.len() {
+    // --- Scan section headers for ".trman" ---
+    for i in 0..num_sections {
+        let sh_offset = section_table_offset + i * 40;
+        if sh_offset + 40 > data.len() {
             break;
         }
 
-        // Next line should be #typev
-        let typev_line = lines[i].trim();
-        if !typev_line.starts_with("#typev ") {
+        let name = &data[sh_offset..sh_offset + 8];
+        // ".trman" is 6 bytes; remaining 2 must be NUL.
+        if name.starts_with(b".trman") && name[6..].iter().all(|&b| b == 0) {
+            let raw_data_size = read_u32(&data, sh_offset + 16) as usize;
+            let raw_data_ptr = read_u32(&data, sh_offset + 20) as usize;
+
+            if raw_data_ptr + raw_data_size > data.len() {
+                return Err(format!(
+                    ".trman section raw data [{:#x}..{:#x}] exceeds file size ({:#x})",
+                    raw_data_ptr,
+                    raw_data_ptr + raw_data_size,
+                    data.len()
+                )
+                .into());
+            }
+
+            return Ok(data[raw_data_ptr..raw_data_ptr + raw_data_size].to_vec());
+        }
+    }
+
+    Err("No .trman section found in PE binary".into())
+}
+
+/// Parses `TraceManifestEntry` records from raw `.trman` section bytes.
+///
+/// Sentinel records (start/end) and records with bad magic/version are
+/// silently skipped.
+fn parse_trman_records(section_data: &[u8]) -> Vec<TraceManifestEntry> {
+    let mut entries = Vec::new();
+    let num_records = section_data.len() / RECORD_SIZE;
+
+    for i in 0..num_records {
+        let base = i * RECORD_SIZE;
+        if base + RECORD_SIZE > section_data.len() {
+            break;
+        }
+
+        let rec = &section_data[base..base + RECORD_SIZE];
+        let magic = read_u32(rec, 0);
+        let version = read_u32(rec, 4);
+
+        // Skip sentinels
+        if magic == TRACE_MANIFEST_SENTINEL_START
+            || magic == TRACE_MANIFEST_SENTINEL_END
+        {
+            continue;
+        }
+        // Skip invalid records
+        if magic != TRACE_MANIFEST_MAGIC || version != TRACE_MANIFEST_VERSION {
             continue;
         }
 
-        // Parse: #typev <name>_<line> <msg_id> "%0<format>" // <comment>
-        // Extract message_id
-        let parts: Vec<&str> = typev_line.splitn(4, ' ').collect();
-        if parts.len() < 4 {
-            i += 1;
-            continue;
-        }
+        let message_id = read_u32(rec, 8);
+        let line_number = read_u32(rec, 12) as usize;
+        let arg_count = (read_u32(rec, 16) as usize).min(MAX_ARGS);
 
-        // parts[1] = "driver_name_LINE"
-        let name_line = parts[1];
-        let line_number: usize = name_line
-            .rsplit('_')
-            .next()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        // Field offsets — matching #[repr(C)] layout.  No hidden padding
+        // because all u32 fields land on 4-byte boundaries after byte-array
+        // fields whose sizes are multiples of 4.
+        let off_crate = 24;
+        let off_file = off_crate + MAX_CRATE_NAME; //  88
+        let off_fmt = off_file + MAX_FILE_NAME; // 344
+        let off_flag = off_fmt + MAX_FORMAT_STR; // 856
+        let off_level = off_flag + MAX_FLAG_NAME; // 888
+        let off_args = off_level + MAX_LEVEL_NAME; // 904
 
-        let message_id: u32 = parts[2].parse().unwrap_or(0);
+        let crate_name =
+            str_from_fixed(&rec[off_crate..off_crate + MAX_CRATE_NAME]);
+        let source_file =
+            str_from_fixed(&rec[off_file..off_file + MAX_FILE_NAME]);
+        let format_string =
+            str_from_fixed(&rec[off_fmt..off_fmt + MAX_FORMAT_STR]);
+        let flag_name =
+            str_from_fixed(&rec[off_flag..off_flag + MAX_FLAG_NAME]);
+        let level_name =
+            str_from_fixed(&rec[off_level..off_level + MAX_LEVEL_NAME]);
 
-        // Everything after msg_id: "%0<format>" // <comment>
-        let rest = parts[3];
+        let mut args = Vec::with_capacity(arg_count);
+        for j in 0..arg_count {
+            let arg_base = off_args + j * ARG_RECORD_SIZE;
+            let name =
+                str_from_fixed(&rec[arg_base..arg_base + MAX_ARG_NAME]);
+            let item_type = str_from_fixed(
+                &rec[arg_base + MAX_ARG_NAME
+                    ..arg_base + MAX_ARG_NAME + MAX_ITEM_TYPE],
+            );
+            let param_number =
+                read_u32(rec, arg_base + MAX_ARG_NAME + MAX_ITEM_TYPE) as usize;
 
-        // Extract format string between "%0 and the closing "
-        let wpp_format = rest
-            .strip_prefix("\"%0")
-            .and_then(|s| s.split('"').next())
-            .unwrap_or("")
-            .to_string();
-
-        // Parse the format string back to a Rust-like format string
-        // by reversing WPP specifiers like %1!d! back to {}
-        let format_string = reverse_wpp_format(&wpp_format);
-
-        // Extract level and flag from comment (after //)
-        let comment = rest
-            .split("// ")
-            .nth(1)
-            .unwrap_or("")
-            .trim();
-
-        let comment_parts: Vec<&str> = comment.split_whitespace().collect();
-        let (level, flag) = parse_level_flag(&comment_parts);
-
-        i += 1;
-
-        // Parse optional arg block
-        let mut args = Vec::new();
-        if i < lines.len() && lines[i].trim() == "{" {
-            i += 1;
-            while i < lines.len() && lines[i].trim() != "}" {
-                let arg_line = lines[i].trim();
-                // Format: "name, ItemType -- param_number"
-                if let Some((name_type, param)) = arg_line.split_once(" -- ") {
-                    if let Some((name, item_type)) = name_type.split_once(", ") {
-                        args.push(TraceManifestArg {
-                            name: name.trim().to_string(),
-                            item_type: item_type.trim().to_string(),
-                            param_number: param.trim().parse().unwrap_or(0),
-                        });
-                    }
-                }
-                i += 1;
-            }
-            if i < lines.len() {
-                i += 1; // skip "}"
-            }
+            args.push(TraceManifestArg {
+                name,
+                item_type,
+                param_number,
+            });
         }
 
         entries.push(TraceManifestEntry {
             message_id,
             source_file,
             line_number,
-            flag,
-            level,
+            flag: if flag_name.is_empty() {
+                None
+            } else {
+                Some(flag_name)
+            },
+            level: if level_name.is_empty() {
+                None
+            } else {
+                Some(level_name)
+            },
             format_string,
             args,
-            driver_name: header_driver_name.clone(),
+            driver_name: crate_name,
         });
     }
 
     entries
 }
 
-/// Reverses WPP format specifiers like `%1!d!` back to `{}`.
-fn reverse_wpp_format(wpp: &str) -> String {
-    let mut result = String::new();
-    let mut chars = wpp.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            // Skip the param number
-            while chars.peek().map_or(false, |ch| ch.is_ascii_digit()) {
-                chars.next();
+// ===========================================================================
+// Binary discovery
+// ===========================================================================
+
+/// Finds the linked binary (DLL/SYS/EXE) next to a PDB file.
+fn find_binary_near_pdb(pdb_path: &Path, driver_name: &str) -> Option<PathBuf> {
+    let dir = pdb_path.parent()?;
+    let stem = pdb_path.file_stem()?.to_str()?;
+
+    // Try the PDB stem first (most likely match), then the driver name.
+    for name in [stem, driver_name] {
+        for ext in ["dll", "sys", "exe"] {
+            let candidate = dir.join(format!("{name}.{ext}"));
+            if candidate.is_file() {
+                return Some(candidate);
             }
-            // Skip !specifier!
-            if chars.peek() == Some(&'!') {
-                chars.next(); // first '!'
-                while chars.peek().map_or(false, |ch| *ch != '!') {
-                    chars.next();
-                }
-                if chars.peek() == Some(&'!') {
-                    chars.next(); // closing '!'
-                }
-            }
-            result.push_str("{}");
-        } else {
-            result.push(c);
         }
     }
-    result
+
+    None
 }
 
-/// Parses level and flag from a TMF comment like ["Information", "FLAG_DEVICE"]
-/// or ["Verbose"] or ["FLAG_DEVICE"].
-fn parse_level_flag(parts: &[&str]) -> (Option<String>, Option<String>) {
-    let known_levels = [
-        "Verbose",
-        "Information",
-        "Warning",
-        "Error",
-        "Critical",
-    ];
-    let mut level = None;
-    let mut flag = None;
-    for &part in parts {
-        if known_levels.iter().any(|l| l.eq_ignore_ascii_case(part)) {
-            level = Some(part.to_string());
-        } else if !part.is_empty() {
-            flag = Some(part.to_string());
-        }
-    }
-    (level, flag)
-}
+// ===========================================================================
+// Atexit flush handler
+// ===========================================================================
 
-/// Reads all `.tmf` files from the scratch directory *other* than the driver's
-/// own TMF, parses them, and returns the merged entries.
-fn collect_dependent_entries(
-    scratch_dir: &std::path::Path,
-    driver_name: &str,
-) -> Vec<TraceManifestEntry> {
-    let driver_tmf = format!("{driver_name}.tmf");
-    let mut all = Vec::new();
+/// Main atexit callback.  Reads the binary's `.trman` section, converts the
+/// records to `TraceManifestEntry` values, and patches the PDB.
+fn flush_manifest() {
+    let driver_name = DRIVER_NAME.lock().unwrap().clone();
+    let controls = TRACE_CONTROL_INFO.lock().unwrap().clone();
 
-    let entries = match std::fs::read_dir(scratch_dir) {
-        Ok(e) => e,
-        Err(_) => return all,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("tmf") {
-            continue;
-        }
-        // Skip the driver's own TMF — those entries are already in-memory
-        if path.file_name().and_then(|n| n.to_str()) == Some(&driver_tmf) {
-            continue;
-        }
-        let parsed = parse_tmf_file(&path);
-        if !parsed.is_empty() {
-            eprintln!(
-                "wdf-macros: [pdb_annotation] Read {} trace(s) from dependent TMF: {}",
-                parsed.len(),
-                path.file_name().and_then(|n| n.to_str()).unwrap_or("?"),
-            );
-        }
-        all.extend(parsed);
-    }
-
-    all
-}
-
-/// Attempts to find a PDB and inject CodeView annotations into it.
-///
-/// When a PDB is found (i.e. this is the driver crate), this function also
-/// reads **all** `.tmf` files from the scratch directory (produced by
-/// dependent crates) and merges their trace entries into the PDB alongside
-/// the driver's own entries.  This ensures the PDB contains a complete set
-/// of annotations for every `trace!` call across the entire dependency tree.
-///
-/// This is a no-op when:
-/// - No PDB is found (rlib crates, failed builds)
-/// - No trace entries exist
-/// - PDB patching fails (falls back silently after logging)
-fn attempt_pdb_annotation(
-    driver_entries: &[TraceManifestEntry],
-    controls: &[TraceControlInfo],
-    driver_name: &str,
-    scratch_dir: &std::path::Path,
-) {
-    if driver_entries.is_empty() {
+    if driver_name.is_empty() || controls.is_empty() {
         return;
     }
 
-    let control_guid = controls
-        .first()
-        .map(|c| c.guid.as_str())
-        .unwrap_or("00000000-0000-0000-0000-000000000000");
+    let control_guid = &controls[0].guid;
 
-    let pdb_path = match crate::pdb_annotation::find_recent_pdb(scratch_dir, driver_name) {
+    eprintln!(
+        "wdf-macros: [manifest] Flushing trace manifest for '{}' (GUID: {})",
+        driver_name, control_guid,
+    );
+
+    // --- Find PDB ---
+    let pdb_path = match pdb_annotation::find_recent_pdb(
+        &PathBuf::new(), // scratch_dir unused in current implementation
+        &driver_name,
+    ) {
         Some(p) => p,
         None => {
             eprintln!(
-                "wdf-macros: [pdb_annotation] No recent PDB found — \
-                 '{}' is likely a dependent crate (rlib), skipping PDB annotation",
-                driver_name
+                "wdf-macros: [manifest] No recent PDB found for '{}'",
+                driver_name,
             );
             return;
         }
     };
 
-    // -----------------------------------------------------------------
-    // Merge: driver's own entries + entries from dependent crate TMFs.
-    // -----------------------------------------------------------------
-    let dependent_entries = collect_dependent_entries(scratch_dir, driver_name);
-
-    let mut all_entries: Vec<TraceManifestEntry> = Vec::new();
-    all_entries.extend_from_slice(driver_entries);
-    all_entries.extend(dependent_entries);
-    all_entries.sort_by_key(|e| e.message_id);
-
     eprintln!(
-        "wdf-macros: [pdb_annotation] PDB found: '{}' — \
-         injecting {} annotation(s) ({} driver + {} dependent)",
+        "wdf-macros: [manifest] Found PDB: {}",
         pdb_path.display(),
-        all_entries.len(),
-        driver_entries.len(),
-        all_entries.len() - driver_entries.len(),
     );
 
-    match crate::pdb_annotation::patch_pdb_with_annotations(
+    // --- Find binary ---
+    let binary_path = match find_binary_near_pdb(&pdb_path, &driver_name) {
+        Some(p) => p,
+        None => {
+            eprintln!(
+                "wdf-macros: [manifest] No binary found near PDB '{}'",
+                pdb_path.display(),
+            );
+            return;
+        }
+    };
+
+    eprintln!(
+        "wdf-macros: [manifest] Found binary: {}",
+        binary_path.display(),
+    );
+
+    // --- Read .trman section ---
+    let section_data = match read_trman_section_bytes(&binary_path) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("wdf-macros: [manifest] Failed to read .trman section: {e}");
+            return;
+        }
+    };
+
+    eprintln!(
+        "wdf-macros: [manifest] Read .trman section: {} bytes ({} potential records)",
+        section_data.len(),
+        section_data.len() / RECORD_SIZE,
+    );
+
+    // --- Parse records ---
+    let mut entries = parse_trman_records(&section_data);
+    entries.sort_by_key(|e| e.message_id);
+
+    eprintln!(
+        "wdf-macros: [manifest] Parsed {} trace entries from binary",
+        entries.len(),
+    );
+
+    if entries.is_empty() {
+        return;
+    }
+
+    // --- Patch PDB ---
+    match pdb_annotation::patch_pdb_with_annotations(
         &pdb_path,
-        &all_entries,
+        &entries,
         control_guid,
-        driver_name,
+        &driver_name,
     ) {
         Ok(()) => {
             eprintln!(
-                "wdf-macros: [pdb_annotation] PDB patched successfully with CodeView S_ANNOTATION records"
+                "wdf-macros: [manifest] PDB patched successfully with {} S_ANNOTATION records",
+                entries.len(),
             );
         }
         Err(e) => {
-            eprintln!(
-                "wdf-macros: [pdb_annotation] PDB patching failed ({}), TMF sidecar is still available",
-                e
-            );
+            eprintln!("wdf-macros: [manifest] PDB patching failed: {e}");
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// atexit registration
-// ---------------------------------------------------------------------------
-
-extern "C" fn atexit_flush_manifest() {
-    flush_manifest("atexit handler");
-}
-
-static FLUSHER_REGISTERED: Once = Once::new();
-
-pub(crate) fn ensure_flusher_registered() {
-    FLUSHER_REGISTERED.call_once(|| {
-        unsafe extern "C" {
-            fn atexit(func: extern "C" fn()) -> core::ffi::c_int;
-        }
-
-        // SAFETY: Registering a valid extern "C" function pointer with atexit.
-        unsafe {
-            atexit(atexit_flush_manifest);
-        }
-    });
 }

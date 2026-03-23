@@ -474,9 +474,12 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         return err.to_compile_error().into();
     }
 
-    // Store trace controls for manifest generation and reset entries for fresh
-    // compilation.
+    // Store trace controls and driver name; register the atexit flusher that
+    // will read the binary's .trman PE section and patch the PDB.
     {
+        let driver_name = std::env::var("CARGO_PKG_NAME")
+            .unwrap_or_else(|_| "unknown_driver".to_string())
+            .replace('-', "_");
         let control_infos: Vec<manifest::TraceControlInfo> = trace_controls
             .iter()
             .map(|tc| manifest::TraceControlInfo {
@@ -485,9 +488,8 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
             })
             .collect();
         *manifest::TRACE_CONTROL_INFO.lock().unwrap() = control_infos;
-        // NOTE: Do NOT clear TRACE_ENTRIES here. With incremental compilation,
-        // expansion order across modules is not guaranteed. The HashMap is
-        // freshly empty on each proc-macro dylib load anyway.
+        *manifest::DRIVER_NAME.lock().unwrap() = driver_name;
+        manifest::ensure_flusher_registered();
     }
 
     // Generate the tracing control GUID for the first control
@@ -505,6 +507,23 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let mut wrappers: TokenStream = quote! {
         #wpp_flags_declaration
+
+        // Sentinels for the .trman PE section.  The MSVC linker sorts
+        // $-suffixed subsections alphabetically, so .trman$a comes before
+        // .trman$m (trace entries) which comes before .trman$z.
+        #[used]
+        #[unsafe(link_section = ".trman$a")]
+        static __TRACE_MANIFEST_START: ::wdf::__internal::TraceManifestRecord =
+            ::wdf::__internal::TraceManifestRecord::sentinel(
+                ::wdf::__internal::TRACE_MANIFEST_SENTINEL_START,
+            );
+
+        #[used]
+        #[unsafe(link_section = ".trman$z")]
+        static __TRACE_MANIFEST_END: ::wdf::__internal::TraceManifestRecord =
+            ::wdf::__internal::TraceManifestRecord::sentinel(
+                ::wdf::__internal::TRACE_MANIFEST_SENTINEL_END,
+            );
 
         #[unsafe(link_section = "INIT")]
         #[unsafe(export_name = "DriverEntry")] // WDF expects a symbol with the name DriverEntry
@@ -1187,13 +1206,11 @@ fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
 /// trace!(Warning, "Warning message {}", value: i32);
 /// ```
 ///
-/// This accumulates WPP trace metadata for TMF manifest file generation and
-/// generates runtime tracing calls (wpp_trace_message and WppAutoLogTrace).
+/// This generates runtime tracing calls (wpp_trace_message and WppAutoLogTrace)
+/// and embeds trace metadata into a `.trman` PE section for PDB annotation.
 /// The wpp_trace_message is conditionally called based on the flag's control block.
 /// The wpp_auto_log_trace is conditionally called based on level (skipped for Verbose
 /// unless AutoLogVerboseEnabled is set on the control block).
-/// The TMF manifest file is written to the scratch directory when the
-/// proc-macro host process exits.
 #[proc_macro]
 pub fn trace(item: TokenStream) -> TokenStream {
     let span = proc_macro::Span::call_site();
@@ -1219,36 +1236,6 @@ pub fn trace(item: TokenStream) -> TokenStream {
         .unwrap_or_else(|_| "unknown_driver".to_string())
         .replace('-', "_");
     
-    // Accumulate trace entry for WPP manifest (TMF) file generation
-    {
-        let manifest_args: Vec<manifest::TraceManifestArg> = args
-            .iter()
-            .enumerate()
-            .map(|(idx, arg)| manifest::TraceManifestArg {
-                name: arg.name.clone(),
-                item_type: arg.arg_type.item_type_name().to_string(),
-                param_number: idx + 1,
-            })
-            .collect();
-
-        let entry = manifest::TraceManifestEntry {
-            message_id,
-            source_file: source_file.clone(),
-            line_number,
-            flag: flag.as_ref().map(|f| f.to_string()),
-            level: level.as_ref().map(|l| l.to_string()),
-            format_string: format_str.clone(),
-            args: manifest_args,
-            driver_name: driver_name.clone(),
-        };
-
-        manifest::TRACE_ENTRIES.lock().unwrap()
-            .entry(source_file.clone())
-            .or_default()
-            .push(entry);
-        manifest::ensure_flusher_registered();
-    }
-
     // Generate method suffix based on argument types only
     // One trait/method per unique argument signature, shared across all flag/level combinations
     let method_suffix = generate_method_suffix(&args);
@@ -1269,14 +1256,106 @@ pub fn trace(item: TokenStream) -> TokenStream {
     // Generate the method call with arguments (now with flag and level)
     let method_call = generate_trace_method_call(&method_ident, &trait_ident, message_id as u16, &args, flag.as_ref(), level.as_ref());
     
+    // Generate the linkme distributed_slice entry for embedding trace
+    // metadata directly into the binary.
+    let linkme_entry = generate_linkme_entry(
+        message_id,
+        &driver_name,
+        &source_file,
+        line_number,
+        &format_str,
+        flag.as_ref(),
+        level.as_ref(),
+        &args,
+    );
+    
     let expanded = quote! {
         {
+            #linkme_entry
             #trait_and_impl
             #method_call
         }
     };
     
     expanded.into()
+}
+
+/// Generates a `#[link_section = ".trman$m"]` static entry for embedding
+/// trace metadata directly into the compiled binary.
+///
+/// Each `trace!` invocation produces one const `TraceManifestRecord` that is
+/// placed into the `.trman$m` PE section. At link time the MSVC linker
+/// merges all `$`-suffixed subsections (`.trman$a`, `.trman$m`, `.trman$z`)
+/// into a single contiguous `.trman` section.
+///
+/// The driver crate's `#[driver_entry]` macro generates start/end sentinels
+/// in `.trman$a` and `.trman$z` to bracket the data.
+fn generate_linkme_entry(
+    message_id: u32,
+    driver_name: &str,
+    source_file: &str,
+    line_number: usize,
+    format_str: &str,
+    flag: Option<&syn::Ident>,
+    level: Option<&syn::Ident>,
+    args: &[TraceArg],
+) -> proc_macro2::TokenStream {
+    // Unique static name based on message_id to avoid collisions
+    let static_name = syn::Ident::new(
+        &format!("__TRACE_MANIFEST_{}", message_id),
+        proc_macro2::Span::call_site(),
+    );
+
+    let message_id_lit = proc_macro2::Literal::u32_unsuffixed(message_id);
+    let line_number_lit = proc_macro2::Literal::u32_unsuffixed(line_number as u32);
+    let arg_count_lit = proc_macro2::Literal::u32_unsuffixed(args.len() as u32);
+
+    let flag_str = flag.map_or(String::new(), |f| f.to_string());
+    let level_str = level.map_or(String::new(), |l| l.to_string());
+
+    // Generate const arg records for each argument
+    let mut arg_inits = Vec::new();
+    for (idx, arg) in args.iter().enumerate() {
+        let name = &arg.name;
+        let item_type = arg.arg_type.item_type_name();
+        let param_num = proc_macro2::Literal::u32_unsuffixed((idx + 1) as u32);
+        arg_inits.push(quote! {
+            ::wdf::__internal::TraceArgRecord {
+                name: ::wdf::__internal::fixed_str::<{ ::wdf::__internal::MAX_ARG_NAME }>(#name),
+                item_type: ::wdf::__internal::fixed_str::<{ ::wdf::__internal::MAX_ITEM_TYPE }>(#item_type),
+                param_number: #param_num,
+                _pad: 0,
+            }
+        });
+    }
+
+    // Pad remaining slots with zeroed records
+    let remaining = 16 - args.len();
+    for _ in 0..remaining {
+        arg_inits.push(quote! {
+            ::wdf::__internal::TraceArgRecord::zeroed()
+        });
+    }
+
+    quote! {
+        #[used]
+        #[unsafe(link_section = ".trman$m")]
+        static #static_name: ::wdf::__internal::TraceManifestRecord =
+            ::wdf::__internal::TraceManifestRecord {
+                magic: ::wdf::__internal::TRACE_MANIFEST_MAGIC,
+                version: ::wdf::__internal::TRACE_MANIFEST_VERSION,
+                message_id: #message_id_lit,
+                line_number: #line_number_lit,
+                arg_count: #arg_count_lit,
+                _reserved: 0,
+                crate_name: ::wdf::__internal::fixed_str::<{ ::wdf::__internal::MAX_CRATE_NAME }>(#driver_name),
+                source_file: ::wdf::__internal::fixed_str::<{ ::wdf::__internal::MAX_FILE_NAME }>(#source_file),
+                format_string: ::wdf::__internal::fixed_str::<{ ::wdf::__internal::MAX_FORMAT_STR }>(#format_str),
+                flag_name: ::wdf::__internal::fixed_str::<{ ::wdf::__internal::MAX_FLAG_NAME }>(#flag_str),
+                level_name: ::wdf::__internal::fixed_str::<{ ::wdf::__internal::MAX_LEVEL_NAME }>(#level_str),
+                args: [#(#arg_inits),*],
+            };
+    }
 }
 
 /// Generates the TraceWriterExt trait method definition and implementation

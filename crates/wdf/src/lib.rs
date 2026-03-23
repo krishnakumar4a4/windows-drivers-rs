@@ -20,6 +20,13 @@ pub use api::*;
 pub mod __internal {
     pub use crate::tracing::{strlen, WppAutoLogTrace, TRACE_GUID, WPP_TRACE_OPTIONS};
     pub use crate::driver::{get_auto_log_context, get_wpp_logger, get_wpp_trace_message};
+    pub use crate::trace_manifest::{
+        fixed_str, str_from_fixed, TraceArgRecord, TraceManifestRecord,
+        TRACE_MANIFEST_MAGIC, TRACE_MANIFEST_VERSION,
+        TRACE_MANIFEST_SENTINEL_START, TRACE_MANIFEST_SENTINEL_END,
+        MAX_ARG_NAME, MAX_ARGS, MAX_CRATE_NAME,
+        MAX_FILE_NAME, MAX_FLAG_NAME, MAX_FORMAT_STR, MAX_ITEM_TYPE, MAX_LEVEL_NAME,
+    };
     pub use wdk_sys::{LPCGUID, LPCSTR, LPGUID, UCHAR, ULONG, USHORT, TRACEHANDLE, PVOID};
 }
 
