@@ -165,15 +165,9 @@ impl TraceWriter {
     }
 
     /// Stops WPP tracing
-    pub fn stop(&self) {
-        let control_block_ptr = self.trace_config.control_block;
-        unsafe {
-            if let Some(etw_unregister) = self.trace_config.etw_unregister {
-                etw_unregister((&(*control_block_ptr).Control).RegHandle);
-            }
-
-            WppAutoLogStop(control_block_ptr, self.wdm_driver);
-        }
+    pub fn stop(self) {
+        self.unregister_and_stop();
+        mem::forget(self); // Prevent drop as that will call unregister_and_stop again
     }
 
     /// Writes a trace message to the WPP tracing system.
@@ -247,11 +241,22 @@ impl TraceWriter {
             );
         }
     }
+
+    pub fn unregister_and_stop(&self) {
+        let control_block_ptr = self.trace_config.control_block;
+        unsafe {
+            if let Some(etw_unregister) = self.trace_config.etw_unregister {
+                etw_unregister((&(*control_block_ptr).Control).RegHandle);
+            }
+
+            WppAutoLogStop(control_block_ptr, self.wdm_driver);
+        }
+    }
 }
 
 impl Drop for TraceWriter {
     fn drop(&mut self) {
-        self.stop();
+        self.unregister_and_stop();
     }
 }
 
