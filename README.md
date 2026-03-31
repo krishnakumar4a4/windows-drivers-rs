@@ -13,8 +13,6 @@ To see an example of this repo used to create drivers, see [Windows-rust-driver-
 
 Note: This project is still in early stages of development and is not yet recommended for production use. We encourage community experimentation and collaboration through our [GitHub Discussions forum](https://github.com/microsoft/windows-drivers-rs/discussions)!
 
-> **Preview:** A new purpose-built tool, [`cargo-wdk`](./crates/cargo-wdk), is now available to simplify building drivers. The first preview release has been published on [crates.io](https://crates.io/crates/cargo-wdk) and can be installed with `cargo install cargo-wdk`. Over the coming months, it will replace the current `cargo-make`-based development workflow. Please try it out and share your feedback and suggestions.
-
 ## <a name="supported-configs">Supported Configurations
 
 This project was built with support of WDM, KMDF, and UMDF drivers in mind, as well as Win32 Services. This includes support for all versions of WDF included in WDK 22H2 and newer. Currently, the crates available on [`crates.io`](https://crates.io) only support KMDF v1.33, but bindings can be generated for everything else by cloning `windows-drivers-rs` and modifying the config specified in [`build.rs` of `wdk-sys`](./crates/wdk-sys/build.rs). Crates.io support for other WDK configurations is planned in the near future.
@@ -181,6 +179,8 @@ Minimal examples of `WDM`, `KMDF`, and `UMDF` drivers can be found in the [examp
 ## Cargo Make
 
 [`cargo-make`](https://github.com/sagiegurari/cargo-make) is used to facilitate builds using `windows-drivers-rs`, including for executing post-build driver packaging steps.
+
+> **Preview:** A new purpose-built tool, [`cargo-wdk`](./crates/cargo-wdk), is now available to simplify building drivers. The first preview release has been published on [crates.io](https://crates.io/crates/cargo-wdk) and can be installed with `cargo install cargo-wdk`. Over the coming months, it will replace the current `cargo-make`-based development workflow. Please try it out and share your feedback and suggestions.
 
 To execute the default action (build and package driver):
 
