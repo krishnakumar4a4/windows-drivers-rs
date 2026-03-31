@@ -20,6 +20,7 @@ pub use api::*;
 pub mod __internal {
     pub use crate::tracing::{strlen, WppAutoLogTrace, TRACE_GUID, WPP_TRACE_OPTIONS};
     pub use crate::driver::{get_auto_log_context, get_wpp_logger, get_wpp_trace_message};
+    pub use crate::trace_data::TraceData;
     pub use wdk_sys::{LPCGUID, LPCSTR, LPGUID, UCHAR, ULONG, USHORT, TRACEHANDLE, PVOID};
 }
 

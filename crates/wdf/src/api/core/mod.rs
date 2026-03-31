@@ -12,6 +12,7 @@ pub mod result;
 pub mod string;
 pub mod sync;
 pub mod timer;
+pub mod trace_data;
 pub mod tracing;
 
 use core::time::Duration;

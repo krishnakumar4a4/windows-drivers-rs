@@ -68,6 +68,17 @@ impl NtStatus {
     pub fn is_error(&self) -> bool {
         matches!(*self, Self::Error(_))
     }
+
+    /// Returns a reference to the raw NTSTATUS code value.
+    ///
+    /// Used internally by the [`TraceData`](super::trace_data::TraceData)
+    /// implementation to obtain a stable pointer for trace descriptors.
+    pub(crate) fn code_ref(&self) -> &i32 {
+        match self {
+            Self::NonError(non_error) => non_error.code_ref(),
+            Self::Error(error) => error.code_ref(),
+        }
+    }
 }
 
 impl From<NtStatusNonError> for NtStatus {
@@ -141,6 +152,13 @@ impl NtStatusNonError {
     pub fn is_warning(&self) -> bool {
         matches!(*self, Self::Warning(_))
     }
+
+    /// Returns a reference to the raw NTSTATUS code value.
+    pub(crate) fn code_ref(&self) -> &i32 {
+        match self {
+            Self::Success(c) | Self::Informational(c) | Self::Warning(c) => c,
+        }
+    }
 }
 
 impl From<i32> for NtStatusNonError {
@@ -172,6 +190,11 @@ impl NtStatusError {
 
     pub const fn code(&self) -> i32 {
         self.0
+    }
+
+    /// Returns a reference to the raw NTSTATUS code value.
+    pub(crate) fn code_ref(&self) -> &i32 {
+        &self.0
     }
 }
 

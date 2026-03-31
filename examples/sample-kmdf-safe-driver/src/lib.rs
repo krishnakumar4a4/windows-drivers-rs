@@ -22,8 +22,6 @@
 
 use core::time::Duration;
 
-use core::intrinsics::codeview_annotation;
-
 use wdf::{
     driver_entry,
     object_context,
@@ -40,14 +38,13 @@ use wdf::{
     IoQueueConfig,
     IoQueueDispatchType,
     NtResult,
+    NtStatus,
     PnpPowerEventCallbacks,
     Request,
     RequestCancellationToken,
     SpinLock,
     Timer,
     TimerConfig,
-    tracing::TraceWriter,
-    get_trace_writer,
 };
 
 extern crate alloc;
@@ -110,9 +107,9 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     // core::hint::codeview_annotation!("TMF:", "e7602a7b-5034-321b-d450-a986113fc2e1 sample_kmdf_safe_driver // SRC=lib.rs MJ= MN=", 
     // "#typev sample_kmdf_safe_driver_109 10 \"%0Trace: Safe Rust driver entry complete %10!d!\"", "{", "test, ItemLong -- 10", "}");
 
-    for i in 0..1000 {
-        // Use the new type annotation syntax: `variable: Type`
-        trace!("Trace: Safe Rust driver entry trace, int - {}, int - {}, int - {}, int - {}, int - {}, int - {}", i: i32, i: i32, i: i32, i: i32, i: i32, i: i32);
+    for i in 0..1000i32 {
+        // All variables require explicit format specifiers — {:d} for signed 32-bit int
+        trace!("Trace: Safe Rust driver entry trace, int - {:d}, int - {:d}, int - {:d}, int - {:d}, int - {:d}, int - {:d}", i, i, i, i, i, i);
     }
 
     trace!(FLAG_ONE, "1 Trace: Safe Rust driver entry complete, int - {}", 1001);
@@ -131,6 +128,15 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
 
     trace!(FLAG_TWO, Information, "Trace: Safe Rust driver entry complete, int - {}, str - {}", 1006, "examplestring!@#$%^&*()_+-=1234567890`~[]{}|;:'\"<>,./?  E");
 
+    // Trace with NTSTATUS type — {:NTSTATUS} format specifier overrides to ItemNTSTATUS + %!STATUS!
+    // let my_status = NtStatus::from(0); // STATUS_SUCCESS
+    let my_status = status_codes::STATUS_SUCCESS;
+    trace!(FLAG_ONE, Information, "Trace with NTSTATUS: status = {:NTSTATUS}", my_status);
+
+    // Trace with HRESULT type — {:HRESULT} format specifier overrides to ItemHRESULT + %!HRESULT!
+    let my_hresult: wdk_sys::HRESULT = -2147024809; // E_INVALIDARG (0x80070057)
+    trace!(FLAG_TWO, Error, "Trace with HRESULT: hr = {:HRESULT}", my_hresult);
+
     Ok(())
 }
 
@@ -144,7 +150,16 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
 fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
     println!("Enter evt_device_add");
 
-    device_create(device_init)
+    let function_name = "evt_device_add";
+    let is_first_call = true;
+    trace!(FLAG_ONE, Information, "Entering {:s}, first_call = {:bool}", function_name, is_first_call);
+
+    let result = device_create(device_init);
+
+    let succeeded = result.is_ok();
+    trace!(FLAG_ONE, Information, "Leaving {:s}, succeeded = {:bool}", function_name, succeeded);
+
+    result
 }
 
 /// Worker routine called to create a device and its software resources.
@@ -156,6 +171,10 @@ fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
 /// WdfDeviceCreate succeeds. So don't access the structure after
 /// that point.
 fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
+    let interface_guid_str = "2aa02ab1-c26e-431b-8efe-85ee8de102e4";
+    let num_pnp_callbacks: u32 = 3;
+    trace!(FLAG_ONE, Verbose, "device_create: registering {:u} PnP callbacks, interface GUID = {:s}", num_pnp_callbacks, interface_guid_str);
+
     // Register pnp/power callbacks so that we can start and stop the
     // timer as the device gets started and stopped.
     let mut pnp_power_callbacks = PnpPowerEventCallbacks::default();
@@ -169,9 +188,11 @@ fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
     // Create a device interface so that applications can find us and talk
     // to us.
     let _ = device.create_device_interface(
-        &Guid::parse("2aa02ab1-c26e-431b-8efe-85ee8de102e4").expect("GUID is valid"),
+        &Guid::parse(interface_guid_str).expect("GUID is valid"),
         None,
     )?;
+
+    trace!(FLAG_ONE, Information, "device_create: device and interface created successfully");
 
     queue_initialize(&device)
 }
@@ -187,16 +208,23 @@ fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
 ///
 /// * `device`` - Handle to a framework device object.
 fn queue_initialize(device: &Device) -> NtResult<()> {
+    let is_default_queue = true;
+    let timer_period_ms: u32 = 9_000;
+    let timer_tolerable_delay: u32 = 0;
+    let timer_high_resolution = false;
+    trace!(FLAG_TWO, Verbose, "queue_initialize: default = {:bool}, timer_period_ms = {:u}, tolerable_delay = {:u}, high_res = {:bool}",
+        is_default_queue, timer_period_ms, timer_tolerable_delay, timer_high_resolution);
+
     // Create queue
     let mut queue_config = IoQueueConfig::new_default(IoQueueDispatchType::Sequential);
-    queue_config.default_queue = true;
+    queue_config.default_queue = is_default_queue;
     queue_config.evt_io_read = Some(evt_io_read);
     queue_config.evt_io_write = Some(evt_io_write);
 
     let queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
 
     // Create timer
-    let timer_config = TimerConfig::new_periodic(&queue, evt_timer, 9_000, 0, false);
+    let timer_config = TimerConfig::new_periodic(&queue, evt_timer, timer_period_ms, timer_tolerable_delay, timer_high_resolution);
 
     let timer = Timer::create(&timer_config)?;
 
@@ -215,6 +243,8 @@ fn queue_initialize(device: &Device) -> NtResult<()> {
     };
 
     QueueContext::attach(&queue, queue_context)?;
+
+    trace!(FLAG_TWO, Information, "queue_initialize: queue and timer created successfully");
 
     Ok(())
 }
@@ -280,6 +310,7 @@ fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
 ///   request.
 fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
     println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
+    trace!(FLAG_ONE, Verbose, "evt_io_read: requested {:usize} bytes", length);
 
     let context = QueueContext::get(&queue);
     let memory = match request.retrieve_output_memory() {
@@ -345,9 +376,14 @@ fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
 fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
     println!("evt_io_write called. Queue {queue:?}, Request {request:?} Length {length}");
 
+    let max_write: u32 = MAX_WRITE_LENGTH as u32;
+    trace!(FLAG_TWO, Verbose, "evt_io_write: requested {:usize} bytes, max {:u}", length, max_write);
+
     if length > MAX_WRITE_LENGTH {
         println!("evt_io_write buffer length too big {length}. Max is {MAX_WRITE_LENGTH}");
-        request.complete_with_information(status_codes::STATUS_BUFFER_OVERFLOW.into(), 0);
+        let overflow_status = status_codes::STATUS_BUFFER_OVERFLOW;
+        trace!(FLAG_TWO, Error, "evt_io_write: buffer overflow, length = {:usize}, status = {:NTSTATUS}", length, overflow_status);
+        request.complete_with_information(overflow_status.into(), 0);
         return;
     }
 
@@ -355,7 +391,9 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
         Ok(memory) => memory,
         Err(e) => {
             println!("evt_io_write could not get request memory buffer {e:?}");
-            request.complete(e.into());
+            let err_status: NtStatus = e.into();
+            trace!(FLAG_TWO, Error, "evt_io_write: retrieve_input_memory failed, status = {:NTSTATUS}", err_status);
+            request.complete(err_status);
             return;
         }
     };
@@ -374,6 +412,9 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
 
     request.set_information(length);
 
+    let is_cancellable = true;
+    trace!(FLAG_TWO, Information, "evt_io_write: {:usize} bytes buffered, cancellable = {:bool}", length, is_cancellable);
+
     if let Err((e, request)) = request.mark_cancellable(evt_request_cancel, &context.request) {
         println!("evt_io_write failed to mark request cancellable: {e:?}");
         request.complete(status_codes::STATUS_UNSUCCESSFUL.into());
@@ -389,6 +430,7 @@ fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
 /// `token` - The cancellation token that identifies the request to be cancelled
 fn evt_request_cancel(token: &RequestCancellationToken) {
     println!("evt_request_cancel called");
+    trace!(FLAG_ONE, Information, "evt_request_cancel: cancellation requested");
 
     let queue = token.get_io_queue();
 
@@ -396,9 +438,14 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 
     let mut req = context.request.lock();
     if let Some(req) = req.take() {
-        req.complete(status_codes::STATUS_CANCELLED.into());
+        let cancel_status = status_codes::STATUS_CANCELLED;
+        trace!(FLAG_ONE, Information, "evt_request_cancel: completing with {:NTSTATUS}", cancel_status);
+        // trace!(FLAG_ONE, Information, "evt_request_cancel: completing with %NTSTATUS", cancel_status);
+        req.complete(cancel_status.into());
         println!("Request cancelled");
     } else {
+        let was_found = false;
+        trace!(FLAG_ONE, Warning, "evt_request_cancel: request not found, was_found = {:d}", was_found);
         println!("Request already completed");
     }
 }
@@ -412,13 +459,19 @@ fn evt_request_cancel(token: &RequestCancellationToken) {
 /// * `timer` - Handle of the timer that fired
 fn evt_timer(timer: &Timer) {
     println!("evt_timer called");
+    trace!(FLAG_TWO, Verbose, "evt_timer: timer fired");
 
     let queue = &TimerContext::get(timer).queue;
 
     let req = QueueContext::get(queue).request.lock().take();
 
+    let has_pending = req.is_some();
+    trace!(FLAG_TWO, Verbose, "evt_timer: has_pending_request = {:bool}", has_pending);
+
     if let Some(req) = req {
-        req.complete(status_codes::STATUS_SUCCESS.into());
+        let success_status = status_codes::STATUS_SUCCESS;
+        trace!(FLAG_TWO, Information, "evt_timer: completing request with {:NTSTATUS}", success_status);
+        req.complete(success_status.into());
         println!("Request completed");
     } else {
         println!("No request pending");
@@ -436,7 +489,12 @@ fn print_driver_version(driver: &Driver) -> NtResult<()> {
     let driver_version = driver.retrieve_version_string()?;
     println!("Echo Sample {driver_version}");
 
-    if driver.is_version_available(1, 0) {
+    let major: u32 = 1;
+    let minor: u32 = 0;
+    let is_available = driver.is_version_available(major, minor);
+    trace!(FLAG_ONE, Information, "print_driver_version: checking version {:u}.{:u}, available = {:bool}", major, minor, is_available);
+
+    if is_available {
         println!("Yes, framework version is 1.0");
     } else {
         println!("No, framework version is not 1.0");
