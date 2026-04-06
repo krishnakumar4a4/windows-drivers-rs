@@ -7,9 +7,19 @@ use std::collections::HashSet;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit, Token, meta::parser, parse_macro_input};
-use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
+use syn::{
+    Error,
+    Ident,
+    ItemFn,
+    ItemImpl,
+    ItemStruct,
+    Lit,
+    Token,
+    meta::parser,
+    parse::{Parse, ParseStream},
+    parse_macro_input,
+    punctuated::Punctuated,
+};
 
 /// A procedural macro that when placed on a safe Rust impl of a driver
 /// generates the relevant FFI wrappers
@@ -141,7 +151,8 @@ struct TraceControlDef {
 /// Parser for trace_control argument
 /// Supports two syntaxes:
 /// 1. Just a GUID string: "guid-string"
-/// 2. Tuple with GUID and flags: ("guid-string", [FLAG_ONE, FLAG_TWO]) or ("guid-string", [])
+/// 2. Tuple with GUID and flags: ("guid-string", [FLAG_ONE, FLAG_TWO]) or
+///    ("guid-string", [])
 impl Parse for TraceControlDef {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         // Check if it's a parenthesized tuple or just a string literal
@@ -149,40 +160,44 @@ impl Parse for TraceControlDef {
             // Tuple format: ("guid", [FLAGS...])
             let content;
             syn::parenthesized!(content in input);
-            
+
             // Parse GUID string
             let guid_lit: syn::LitStr = content.parse()?;
             let guid = guid_lit.value();
-            
+
             if !is_valid_guid(&guid) {
                 return Err(Error::new_spanned(guid_lit, "Not a valid GUID"));
             }
-            
+
             // Parse comma separator
             content.parse::<Token![,]>()?;
-            
+
             // Parse flag array [FLAG_ONE, FLAG_TWO, ...] or []
             let flags_content;
             syn::bracketed!(flags_content in content);
-            
-            let flags_punctuated: Punctuated<Ident, Token![,]> = 
+
+            let flags_punctuated: Punctuated<Ident, Token![,]> =
                 Punctuated::parse_terminated(&flags_content)?;
-            
-            let flags: Vec<String> = flags_punctuated.iter()
+
+            let flags: Vec<String> = flags_punctuated
+                .iter()
                 .map(|ident| ident.to_string())
                 .collect();
-            
+
             Ok(TraceControlDef { guid, flags })
         } else {
             // Simple string format: "guid"
             let guid_lit: syn::LitStr = input.parse()?;
             let guid = guid_lit.value();
-            
+
             if !is_valid_guid(&guid) {
                 return Err(Error::new_spanned(guid_lit, "Not a valid GUID"));
             }
-            
-            Ok(TraceControlDef { guid, flags: Vec::new() })
+
+            Ok(TraceControlDef {
+                guid,
+                flags: Vec::new(),
+            })
         }
     }
 }
@@ -194,9 +209,9 @@ struct TraceControlArgs {
 
 impl Parse for TraceControlArgs {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let controls: Punctuated<TraceControlDef, Token![,]> = 
+        let controls: Punctuated<TraceControlDef, Token![,]> =
             Punctuated::parse_separated_nonempty(input)?;
-        
+
         Ok(TraceControlArgs {
             controls: controls.into_iter().collect(),
         })
@@ -204,22 +219,28 @@ impl Parse for TraceControlArgs {
 }
 
 /// Validates that there are no duplicate flags across all trace controls
-fn validate_no_duplicate_flags(controls: &[TraceControlDef]) -> Result<(), (String, String, String)> {
+fn validate_no_duplicate_flags(
+    controls: &[TraceControlDef],
+) -> Result<(), (String, String, String)> {
     let mut seen_flags: HashSet<String> = HashSet::new();
-    
+
     for control in controls {
         for flag in &control.flags {
             if !seen_flags.insert(flag.clone()) {
                 // Find which GUID had this flag first
                 for prev_control in controls {
                     if prev_control.flags.contains(flag) {
-                        return Err((flag.clone(), prev_control.guid.clone(), control.guid.clone()));
+                        return Err((
+                            flag.clone(),
+                            prev_control.guid.clone(),
+                            control.guid.clone(),
+                        ));
                     }
                 }
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -227,7 +248,7 @@ fn validate_no_duplicate_flags(controls: &[TraceControlDef]) -> Result<(), (Stri
 fn generate_wpp_flags_declaration(trace_controls: &[TraceControlDef]) -> proc_macro2::TokenStream {
     // Check if there are any flags defined
     let has_flags = trace_controls.iter().any(|tc| !tc.flags.is_empty());
-    
+
     if !has_flags {
         return quote! {};
     }
@@ -240,65 +261,84 @@ fn generate_wpp_flags_declaration(trace_controls: &[TraceControlDef]) -> proc_ma
         flag_idx: usize,
     }
 
-    let variants: Vec<VariantInfo> = trace_controls.iter()
+    let variants: Vec<VariantInfo> = trace_controls
+        .iter()
         .enumerate()
         .flat_map(|(control_idx, tc)| {
-            tc.flags.iter().enumerate().map(move |(flag_idx, flag_name)| {
-                let variant_ident = Ident::new(
-                    flag_name,
-                    proc_macro2::Span::call_site(),
-                );
-                
-                VariantInfo {
-                    variant_ident,
-                    flag_name: flag_name.clone(),
-                    control_idx,
-                    flag_idx,
-                }
-            })
+            tc.flags
+                .iter()
+                .enumerate()
+                .map(move |(flag_idx, flag_name)| {
+                    let variant_ident = Ident::new(flag_name, proc_macro2::Span::call_site());
+
+                    VariantInfo {
+                        variant_ident,
+                        flag_name: flag_name.clone(),
+                        control_idx,
+                        flag_idx,
+                    }
+                })
         })
         .collect();
 
     // Generate enum variant definitions with tuple types: FLAG_NAME(usize, usize)
-    let enum_variants: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
-        let ident = &v.variant_ident;
-        quote! { #ident(usize, usize) }
-    }).collect();
+    let enum_variants: Vec<proc_macro2::TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            quote! { #ident(usize, usize) }
+        })
+        .collect();
 
     // Generate name match arms for by_name lookup
-    let name_match_arms: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
-        let ident = &v.variant_ident;
-        let name = &v.flag_name;
-        let ctrl_idx = proc_macro2::Literal::usize_unsuffixed(v.control_idx);
-        let flag_idx = proc_macro2::Literal::usize_unsuffixed(v.flag_idx);
-        quote! { #name => Some(WppFlag::#ident(#ctrl_idx, #flag_idx)) }
-    }).collect();
+    let name_match_arms: Vec<proc_macro2::TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            let name = &v.flag_name;
+            let ctrl_idx = proc_macro2::Literal::usize_unsuffixed(v.control_idx);
+            let flag_idx = proc_macro2::Literal::usize_unsuffixed(v.flag_idx);
+            quote! { #name => Some(WppFlag::#ident(#ctrl_idx, #flag_idx)) }
+        })
+        .collect();
 
     // Generate static array entries
-    let static_entries: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
-        let ident = &v.variant_ident;
-        let ctrl_idx = proc_macro2::Literal::usize_unsuffixed(v.control_idx);
-        let flag_idx = proc_macro2::Literal::usize_unsuffixed(v.flag_idx);
-        quote! { WppFlag::#ident(#ctrl_idx, #flag_idx) }
-    }).collect();
+    let static_entries: Vec<proc_macro2::TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            let ctrl_idx = proc_macro2::Literal::usize_unsuffixed(v.control_idx);
+            let flag_idx = proc_macro2::Literal::usize_unsuffixed(v.flag_idx);
+            quote! { WppFlag::#ident(#ctrl_idx, #flag_idx) }
+        })
+        .collect();
 
     // Generate match arms for control_index
-    let control_idx_arms: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
-        let ident = &v.variant_ident;
-        quote! { WppFlag::#ident(ctrl, _) => *ctrl }
-    }).collect();
+    let control_idx_arms: Vec<proc_macro2::TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            quote! { WppFlag::#ident(ctrl, _) => *ctrl }
+        })
+        .collect();
 
     // Generate match arms for flag_index
-    let flag_idx_arms: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
-        let ident = &v.variant_ident;
-        quote! { WppFlag::#ident(_, flag) => *flag }
-    }).collect();
+    let flag_idx_arms: Vec<proc_macro2::TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            quote! { WppFlag::#ident(_, flag) => *flag }
+        })
+        .collect();
 
     // Generate match arms for as_tuple
-    let tuple_arms: Vec<proc_macro2::TokenStream> = variants.iter().map(|v| {
-        let ident = &v.variant_ident;
-        quote! { WppFlag::#ident(ctrl, flag) => (*ctrl, *flag) }
-    }).collect();
+    let tuple_arms: Vec<proc_macro2::TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            quote! { WppFlag::#ident(ctrl, flag) => (*ctrl, *flag) }
+        })
+        .collect();
 
     let num_flags = variants.len();
 
@@ -409,29 +449,29 @@ fn generate_wpp_flags_declaration(trace_controls: &[TraceControlDef]) -> proc_ma
 }
 
 /// A procedural macro used to mark the entry point of a WDF driver
-/// 
+///
 /// # Supported Attributes
-/// 
+///
 /// ## Simple GUID format (no flags):
 /// ```ignore
 /// #[driver_entry(trace_control = "guid-string")]
 /// ```
-/// 
+///
 /// ## GUID with flags:
 /// ```ignore
 /// #[driver_entry(trace_control = ("guid-string", [FLAG_ONE, FLAG_TWO]))]
 /// ```
-/// 
+///
 /// ## GUID with empty flags:
 /// ```ignore
 /// #[driver_entry(trace_control = ("guid-string", []))]
 /// ```
-/// 
+///
 /// ## Multiple trace controls:
 /// ```ignore
 /// #[driver_entry(trace_control = ("guid1", [FLAG_A, FLAG_B]), ("guid2", [FLAG_C, FLAG_D]))]
 /// ```
-/// 
+///
 /// Note: Flag names must be unique across all trace control definitions.
 #[proc_macro_attribute]
 pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -447,10 +487,10 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         if meta.path.is_ident(TRACE_CONTROL_ATTR_NAME) {
             // Format: trace_control = "guid" or trace_control = ("guid", [FLAGS...]), ...
             meta.input.parse::<Token![=]>()?;
-            
+
             let parsed: TraceControlArgs = meta.input.parse()?;
             trace_controls = parsed.controls;
-            
+
             Ok(())
         } else {
             Err(meta.error(format!("Expected `{}`", TRACE_CONTROL_ATTR_NAME)))
@@ -464,9 +504,10 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         let err = Error::new(
             proc_macro2::Span::call_site(),
             format!(
-                "Duplicate flag '{}' found in trace controls. First in GUID '{}', duplicate in GUID '{}'",
+                "Duplicate flag '{}' found in trace controls. First in GUID '{}', duplicate in \
+                 GUID '{}'",
                 flag, guid1, guid2
-            )
+            ),
         );
         return err.to_compile_error().into();
     }
@@ -482,13 +523,16 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     // Generate codeview annotations for all trace controls
-    let codeview_annotations: Vec<proc_macro2::TokenStream> = trace_controls.iter().map(|tc| {
-        let guid = &tc.guid;
-        let flags = &tc.flags;
-        quote! {
-            core::hint::codeview_annotation!("TMC:", #guid, "CtlGuid", #(#flags),*);
-        }
-    }).collect();
+    let codeview_annotations: Vec<proc_macro2::TokenStream> = trace_controls
+        .iter()
+        .map(|tc| {
+            let guid = &tc.guid;
+            let flags = &tc.flags;
+            quote! {
+                core::hint::codeview_annotation!("TMC:", #guid, "CtlGuid", #(#flags),*);
+            }
+        })
+        .collect();
 
     // Generate the WPP flags declaration
     let wpp_flags_declaration = generate_wpp_flags_declaration(&trace_controls);
@@ -765,58 +809,86 @@ struct ParsedTraceArgs {
 
 /// Known trace level names for validation
 const TRACE_LEVEL_NAMES: &[&str] = &[
-    "None", "Critical", "Error", "Warning", 
-    "Information", "Verbose", "Reserved6", "Reserved7", "Reserved8", "Reserved9"
+    "None",
+    "Critical",
+    "Error",
+    "Warning",
+    "Information",
+    "Verbose",
+    "Reserved6",
+    "Reserved7",
+    "Reserved8",
+    "Reserved9",
 ];
 
-/// Parses the trace! macro input and extracts optional flag, optional level, format string and arguments
-/// 
+/// Parses the trace! macro input and extracts optional flag, optional level,
+/// format string and arguments
+///
 /// Supported syntaxes:
-/// - `trace!("fmt", args...)` - no flag, no level (defaults to TraceLevel::None)
+/// - `trace!("fmt", args...)` - no flag, no level (defaults to
+///   TraceLevel::None)
 /// - `trace!(FLAG, "fmt", args...)` - with flag, no level
 /// - `trace!(FLAG, Level, "fmt", args...)` - with flag and level
-/// - `trace!(Level, "fmt", args...)` - with level only (uses default control block)
+/// - `trace!(Level, "fmt", args...)` - with level only (uses default control
+///   block)
 fn parse_trace_args(item: TokenStream) -> Result<ParsedTraceArgs, Error> {
     use syn::{Expr, ExprLit, punctuated::Punctuated};
-    
+
     // Parse as comma-separated TraceArgInput items
     let args = syn::parse::Parser::parse(
         Punctuated::<TraceArgInput, Token![,]>::parse_terminated,
         item,
     )?;
-    
+
     // Convert to Vec for easier manipulation
     let all_args: Vec<TraceArgInput> = args.into_iter().collect();
-    
+
     if all_args.is_empty() {
-        return Err(Error::new(proc_macro2::Span::call_site(), "trace! requires at least a format string"));
+        return Err(Error::new(
+            proc_macro2::Span::call_site(),
+            "trace! requires at least a format string",
+        ));
     }
-    
+
     let mut flag: Option<syn::Ident> = None;
     let mut level: Option<syn::Ident> = None;
     let format_str: String;
     let remaining_start_idx: usize;
-    
+
     // Determine the pattern based on the first few arguments
     let first_is_path = matches!(&all_args[0].expr, Expr::Path(_));
-    let first_is_string = matches!(&all_args[0].expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
-    
+    let first_is_string = matches!(
+        &all_args[0].expr,
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(_),
+            ..
+        })
+    );
+
     if first_is_string {
         // Pattern: trace!("fmt", args...)
         format_str = match &all_args[0].expr {
-            Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value(),
+            Expr::Lit(ExprLit {
+                lit: Lit::Str(s), ..
+            }) => s.value(),
             _ => unreachable!(),
         };
         remaining_start_idx = 1;
     } else if first_is_path && all_args.len() >= 2 {
-        let second_is_string = matches!(&all_args[1].expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
+        let second_is_string = matches!(
+            &all_args[1].expr,
+            Expr::Lit(ExprLit {
+                lit: Lit::Str(_),
+                ..
+            })
+        );
         let second_is_path = matches!(&all_args[1].expr, Expr::Path(_));
-        
+
         if second_is_string {
             // Pattern: trace!(IDENT, "fmt", ...) - could be FLAG or Level
             let ident = extract_path_ident(&all_args[0].expr)?;
             let ident_str = ident.to_string();
-            
+
             if TRACE_LEVEL_NAMES.contains(&ident_str.as_str()) {
                 // It's a level: trace!(Level, "fmt", ...)
                 level = Some(ident);
@@ -824,58 +896,85 @@ fn parse_trace_args(item: TokenStream) -> Result<ParsedTraceArgs, Error> {
                 // It's a flag: trace!(FLAG, "fmt", ...)
                 flag = Some(ident);
             }
-            
+
             format_str = match &all_args[1].expr {
-                Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value(),
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) => s.value(),
                 _ => unreachable!(),
             };
             remaining_start_idx = 2;
         } else if second_is_path && all_args.len() >= 3 {
-            let third_is_string = matches!(&all_args[2].expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
-            
+            let third_is_string = matches!(
+                &all_args[2].expr,
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(_),
+                    ..
+                })
+            );
+
             if third_is_string {
                 // Pattern: trace!(FLAG, Level, "fmt", ...)
                 let first_ident = extract_path_ident(&all_args[0].expr)?;
                 let second_ident = extract_path_ident(&all_args[1].expr)?;
-                
+
                 // Second should be a level
                 let second_str = second_ident.to_string();
                 if !TRACE_LEVEL_NAMES.contains(&second_str.as_str()) {
-                    return Err(Error::new_spanned(&all_args[1].expr, 
-                        format!("Expected a trace level (one of: {:?}), got '{}'", TRACE_LEVEL_NAMES, second_str)));
+                    return Err(Error::new_spanned(
+                        &all_args[1].expr,
+                        format!(
+                            "Expected a trace level (one of: {:?}), got '{}'",
+                            TRACE_LEVEL_NAMES, second_str
+                        ),
+                    ));
                 }
-                
+
                 flag = Some(first_ident);
                 level = Some(second_ident);
-                
+
                 format_str = match &all_args[2].expr {
-                    Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value(),
+                    Expr::Lit(ExprLit {
+                        lit: Lit::Str(s), ..
+                    }) => s.value(),
                     _ => unreachable!(),
                 };
                 remaining_start_idx = 3;
             } else {
-                return Err(Error::new_spanned(&all_args[0].expr, "Expected a format string"));
+                return Err(Error::new_spanned(
+                    &all_args[0].expr,
+                    "Expected a format string",
+                ));
             }
         } else {
-            return Err(Error::new_spanned(&all_args[0].expr, "Expected a format string"));
+            return Err(Error::new_spanned(
+                &all_args[0].expr,
+                "Expected a format string",
+            ));
         }
     } else {
-        return Err(Error::new_spanned(&all_args[0].expr, "Expected a format string or flag identifier"));
+        return Err(Error::new_spanned(
+            &all_args[0].expr,
+            "Expected a format string or flag identifier",
+        ));
     }
-    
+
     // Parse format placeholders to extract per-argument specifier overrides
     let placeholders = parse_format_placeholders(&format_str);
-    
+
     // Remaining arguments are the trace parameters
-    let remaining_args: Vec<TraceArgInput> = all_args.into_iter().skip(remaining_start_idx).collect();
-    
+    let remaining_args: Vec<TraceArgInput> =
+        all_args.into_iter().skip(remaining_start_idx).collect();
+
     let mut trace_args = Vec::new();
     for (idx, arg_input) in remaining_args.into_iter().enumerate() {
-        let spec_override = placeholders.get(idx).and_then(|p| p.spec_override.as_deref());
+        let spec_override = placeholders
+            .get(idx)
+            .and_then(|p| p.spec_override.as_deref());
         let trace_arg = infer_arg_info(&arg_input.expr, idx, spec_override)?;
         trace_args.push(trace_arg);
     }
-    
+
     Ok(ParsedTraceArgs {
         flag,
         level,
@@ -913,18 +1012,26 @@ fn parse_format_placeholders(format_str: &str) -> Vec<FormatPlaceholder> {
             }
             let mut inner = String::new();
             while let Some(inner_c) = chars.next() {
-                if inner_c == '}' { break; }
+                if inner_c == '}' {
+                    break;
+                }
                 inner.push(inner_c);
             }
             let spec_override = if let Some(colon_pos) = inner.find(':') {
                 let spec = inner[colon_pos + 1..].trim();
-                if spec.is_empty() { None } else { Some(spec.to_string()) }
+                if spec.is_empty() {
+                    None
+                } else {
+                    Some(spec.to_string())
+                }
             } else {
                 None
             };
             placeholders.push(FormatPlaceholder { spec_override });
         } else if c == '}' {
-            if chars.peek() == Some(&'}') { chars.next(); }
+            if chars.peek() == Some(&'}') {
+                chars.next();
+            }
         }
     }
     placeholders
@@ -1047,94 +1154,116 @@ fn infer_arg_info(
     spec_override: Option<&str>,
 ) -> Result<TraceArg, Error> {
     use syn::Expr;
-    
+
     let name = extract_arg_name(expr, idx);
-    
+
     // Format specifier override takes precedence
     if let Some(spec) = spec_override {
         if let Some((etw_type, format_spec)) = format_spec_override(spec) {
-            return Ok(TraceArg { name, etw_type, format_spec, expr: expr.clone() });
+            return Ok(TraceArg {
+                name,
+                etw_type,
+                format_spec,
+                expr: expr.clone(),
+            });
         } else {
             return Err(Error::new_spanned(
                 expr,
                 format!(
-                    "Unknown format specifier ':{spec}'. Supported specifiers:\n\
-                     \n  C-style:     d, u, x, X, o, s, p\
-                     \n  Rust types:  i8, i16, i32, u8, u16, u32, i64, u64, isize, usize, bool\
-                     \n  WPP types:   NTSTATUS, STATUS, HRESULT, GUID\
-                     \n  64-bit:      I64d, I64u, I64x",
+                    "Unknown format specifier ':{spec}'. Supported specifiers:\n\n  C-style:     \
+                     d, u, x, X, o, s, p\n  Rust types:  i8, i16, i32, u8, u16, u32, i64, u64, \
+                     isize, usize, bool\n  WPP types:   NTSTATUS, STATUS, HRESULT, GUID\n  \
+                     64-bit:      I64d, I64u, I64x",
                 ),
             ));
         }
     }
-    
-    // Check for NtStatus, NtStatusError, NtStatusNonError constructor call expressions
+
+    // Check for NtStatus, NtStatusError, NtStatusNonError constructor call
+    // expressions
     if let Expr::Call(call) = expr {
         if let Expr::Path(func_path) = call.func.as_ref() {
             for seg in &func_path.path.segments {
                 let ident_str = seg.ident.to_string();
-                if matches!(ident_str.as_str(), "NtStatus" | "NtStatusError" | "NtStatusNonError") {
+                if matches!(
+                    ident_str.as_str(),
+                    "NtStatus" | "NtStatusError" | "NtStatusNonError"
+                ) {
                     return Ok(TraceArg {
-                        name, etw_type: "ItemNTSTATUS", format_spec: "s",
+                        name,
+                        etw_type: "ItemNTSTATUS",
+                        format_spec: "s",
                         expr: expr.clone(),
                     });
                 }
             }
         }
     }
-    
+
     // Infer type from expression structure — only literals are auto-detected
     match expr {
-        Expr::Lit(lit) => {
-            match &lit.lit {
-                Lit::Str(_) => Ok(TraceArg {
-                    name, etw_type: "ItemString", format_spec: "s",
+        Expr::Lit(lit) => match &lit.lit {
+            Lit::Str(_) => Ok(TraceArg {
+                name,
+                etw_type: "ItemString",
+                format_spec: "s",
+                expr: expr.clone(),
+            }),
+            Lit::Int(int_lit) => {
+                let (etw_type, format_spec) = match int_lit.suffix() {
+                    "i8" | "i16" | "i32" => ("ItemLong", "d"),
+                    "u8" | "u16" | "u32" => ("ItemULong", "u"),
+                    "i64" => ("ItemLongLong", "I64d"),
+                    "u64" => ("ItemULongLong", "I64u"),
+                    "isize" => isize_etw(),
+                    "usize" => usize_etw(),
+                    _ => ("ItemLong", "d"),
+                };
+                Ok(TraceArg {
+                    name,
+                    etw_type,
+                    format_spec,
                     expr: expr.clone(),
-                }),
-                Lit::Int(int_lit) => {
-                    let (etw_type, format_spec) = match int_lit.suffix() {
-                        "i8" | "i16" | "i32" => ("ItemLong", "d"),
-                        "u8" | "u16" | "u32" => ("ItemULong", "u"),
-                        "i64" => ("ItemLongLong", "I64d"),
-                        "u64" => ("ItemULongLong", "I64u"),
-                        "isize" => isize_etw(),
-                        "usize" => usize_etw(),
-                        _ => ("ItemLong", "d"),
-                    };
-                    Ok(TraceArg { name, etw_type, format_spec, expr: expr.clone() })
-                }
-                _ => Err(Error::new_spanned(lit, "Unsupported literal type for tracing")),
+                })
             }
-        }
-        Expr::Reference(r) => {
-            match r.expr.as_ref() {
-                Expr::Lit(lit) if matches!(&lit.lit, Lit::Str(_)) => Ok(TraceArg {
-                    name, etw_type: "ItemString", format_spec: "s",
-                    expr: expr.clone(),
-                }),
-                _ => Err(Error::new_spanned(
-                    expr,
-                    "Variables require an explicit format specifier. \
-                     Use {:d}, {:u}, {:x}, {:s}, {:NTSTATUS}, {:HRESULT}, etc.",
-                )),
-            }
-        }
+            _ => Err(Error::new_spanned(
+                lit,
+                "Unsupported literal type for tracing",
+            )),
+        },
+        Expr::Reference(r) => match r.expr.as_ref() {
+            Expr::Lit(lit) if matches!(&lit.lit, Lit::Str(_)) => Ok(TraceArg {
+                name,
+                etw_type: "ItemString",
+                format_spec: "s",
+                expr: expr.clone(),
+            }),
+            _ => Err(Error::new_spanned(
+                expr,
+                "Variables require an explicit format specifier. Use {:d}, {:u}, {:x}, {:s}, \
+                 {:NTSTATUS}, {:HRESULT}, etc.",
+            )),
+        },
         // All other expressions (variables, method calls, field access, etc.)
         // require an explicit format specifier — the proc macro cannot determine
         // the type from syntax alone.
         _ => Err(Error::new_spanned(
             expr,
-            "Variables require an explicit format specifier. \
-             Use {:d}, {:u}, {:x}, {:s}, {:NTSTATUS}, {:HRESULT}, etc.",
+            "Variables require an explicit format specifier. Use {:d}, {:u}, {:x}, {:s}, \
+             {:NTSTATUS}, {:HRESULT}, etc.",
         )),
     }
 }
 
-/// Extracts a human-readable name from an expression for use in trace annotations.
+/// Extracts a human-readable name from an expression for use in trace
+/// annotations.
 fn extract_arg_name(expr: &syn::Expr, idx: usize) -> String {
     use syn::Expr;
     match expr {
-        Expr::Path(p) => p.path.segments.last()
+        Expr::Path(p) => p
+            .path
+            .segments
+            .last()
             .map(|s| s.ident.to_string())
             .unwrap_or_else(|| format!("arg{}", idx)),
         Expr::Lit(lit) => match &lit.lit {
@@ -1144,7 +1273,9 @@ fn extract_arg_name(expr: &syn::Expr, idx: usize) -> String {
         },
         Expr::Reference(r) => {
             if let Expr::Path(p) = r.expr.as_ref() {
-                p.path.segments.last()
+                p.path
+                    .segments
+                    .last()
                     .map(|s| s.ident.to_string())
                     .unwrap_or_else(|| format!("arg{}", idx))
             } else {
@@ -1174,7 +1305,7 @@ fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
     let mut result = String::new();
     let mut arg_idx = 0;
     let mut chars = format_str.chars().peekable();
-    
+
     while let Some(c) = chars.next() {
         if c == '{' {
             if chars.peek() == Some(&'{') {
@@ -1182,7 +1313,9 @@ fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
                 result.push('{');
             } else {
                 while let Some(inner) = chars.next() {
-                    if inner == '}' { break; }
+                    if inner == '}' {
+                        break;
+                    }
                 }
                 if arg_idx < args.len() {
                     let param_num = 10 + arg_idx;
@@ -1265,70 +1398,103 @@ fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
 #[proc_macro]
 pub fn trace(item: TokenStream) -> TokenStream {
     let span = proc_macro::Span::call_site();
-    
+
     let source_file = span.file();
     let file_name = std::path::Path::new(&source_file)
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("unknown.rs");
     let line_number = span.line();
-    
+
     let parsed = match parse_trace_args(item) {
         Ok(parsed) => parsed,
         Err(e) => return e.to_compile_error().into(),
     };
-    
-    let ParsedTraceArgs { flag, level, format_str, args } = parsed;
-    
+
+    let ParsedTraceArgs {
+        flag,
+        level,
+        format_str,
+        args,
+    } = parsed;
+
     let message_id = TRACE_MESSAGE_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    
+
     let driver_name = std::env::var("CARGO_PKG_NAME")
         .unwrap_or_else(|_| "unknown_driver".to_string())
         .replace('-', "_");
-    
-    // TODO: Get actual msg GUID, this can be generated randomly per compilation or as per algorithm
+
+    // TODO: Get actual msg GUID, this can be generated randomly per compilation or
+    // as per algorithm
     let msg_guid = "e7602a7b-5034-321b-d450-a986113fc2e1";
-    
+
     // Build the codeview_annotation parameters
     let param2 = format!("{} {} // SRC={} MJ= MN=", msg_guid, driver_name, file_name);
     let wpp_format = generate_wpp_format_string(&format_str, &args);
     let typev_name = format!("{}_{}", driver_name, line_number);
     let param3 = format!("#typev {} {} \"%0{}\"", typev_name, message_id, wpp_format);
-    
-    let arg_descriptors: Vec<String> = args.iter().enumerate().map(|(idx, arg)| {
-        let param_num = 10 + idx;
-        format!("{}, {} -- {}", arg.name, arg.etw_type, param_num)
-    }).collect();
-    
-    let mut annotation_args = vec![
+
+    let (arg_bindings, byte_slice_bindings, byte_slice_idents) = generate_arg_code(&args);
+
+    // Build annotation args with split descriptors. Each arg descriptor becomes
+    // three array entries so the ETW type name comes from TraceData::FORMAT_SPEC
+    // (resolved at compile time via format_spec_of) rather than from the proc
+    // macro.   "name, ",  __trace_argN_etw_type,  " -- N"
+    let mut annotation_args: Vec<proc_macro2::TokenStream> = vec![
         quote! { "TMF:" },
         quote! { #param2 },
         quote! { #param3 },
         quote! { "{" },
     ];
-    for desc in &arg_descriptors {
-        annotation_args.push(quote! { #desc });
+    for (idx, arg) in args.iter().enumerate() {
+        let param_num = 10 + idx;
+        let prefix = format!("{}, ", arg.name);
+        let suffix = format!(" -- {}", param_num);
+        let etw_type_ident = syn::Ident::new(
+            &format!("__trace_arg{}_etw_type", idx),
+            proc_macro2::Span::call_site(),
+        );
+        annotation_args.push(quote! { #prefix });
+        annotation_args.push(quote! { #etw_type_ident });
+        annotation_args.push(quote! { #suffix });
     }
     annotation_args.push(quote! { "}" });
-    
-    let (arg_bindings, byte_slice_bindings, byte_slice_idents) = generate_arg_code(&args);
-    
-    let variadic_args: Vec<proc_macro2::TokenStream> = byte_slice_idents.iter().map(|ident| {
-        quote! { #ident.as_ptr() as *const core::ffi::c_void, #ident.len(), }
-    }).collect();
-    
+
+    // Generate let bindings that resolve each arg's ETW type name from
+    // TraceData::FORMAT_SPEC via the const fn format_spec_of helper.
+    let etw_type_bindings: Vec<proc_macro2::TokenStream> = (0..args.len())
+        .map(|idx| {
+            let arg_name = syn::Ident::new(
+                &format!("__trace_arg{}", idx),
+                proc_macro2::Span::call_site(),
+            );
+            let etw_type_name = syn::Ident::new(
+                &format!("__trace_arg{}_etw_type", idx),
+                proc_macro2::Span::call_site(),
+            );
+            quote! { let #etw_type_name = ::wdf::__internal::format_spec_of(&#arg_name); }
+        })
+        .collect();
+
+    let variadic_args: Vec<proc_macro2::TokenStream> = byte_slice_idents
+        .iter()
+        .map(|ident| {
+            quote! { #ident.as_ptr() as *const core::ffi::c_void, #ident.len(), }
+        })
+        .collect();
+
     let message_id_lit = proc_macro2::Literal::u16_unsuffixed(message_id as u16);
-    
+
     let level_value = if let Some(level_ident) = &level {
         quote! { TraceLevel::#level_ident as u8 }
     } else {
         quote! { TraceLevel::None as u8 }
     };
-    
+
     let (flags_value, control_index) = if let Some(flag_ident) = &flag {
         let flag_name = flag_ident.to_string();
         (
-            quote! { 
+            quote! {
                 {
                     let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag");
                     (__flag.flag_index() + 1) as u32
@@ -1339,28 +1505,37 @@ pub fn trace(item: TokenStream) -> TokenStream {
                     let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag");
                     __flag.control_index()
                 }
-            }
+            },
         )
     } else {
         (quote! { 0u32 }, quote! { 0usize })
     };
-    
+
     let expanded = quote! {
         {
-            core::hint::codeview_annotation!(#(#annotation_args),*);
-            
             #(#arg_bindings)*
+
+            #(#etw_type_bindings)*
+
+            unsafe {
+                core::intrinsics::codeview_annotation(
+                    core::mem::transmute::<&[&str], &'static [&'static str]>(
+                        &[#(#annotation_args),*]
+                    )
+                );
+            }
+
             #(#byte_slice_bindings)*
-            
+
             let __trace_level: u8 = #level_value;
             let __trace_flags: u32 = #flags_value;
             let __control_index: usize = #control_index;
-            
+
             if let Some(__trace_writer) = ::wdf::get_trace_writer() {
-                let __should_trace_wpp = (__trace_flags == 0 || __trace_writer.is_flag_enabled(__control_index, __trace_flags)) 
+                let __should_trace_wpp = (__trace_flags == 0 || __trace_writer.is_flag_enabled(__control_index, __trace_flags))
                                             && __trace_writer.is_level_enabled(__control_index, __trace_level);
                 let __should_auto_log = __trace_level < TraceLevel::Verbose as u8 || __trace_writer.is_auto_log_verbose_enabled(__control_index);
-                
+
                 unsafe {
                     if __should_trace_wpp {
                         let __logger = ::wdf::__internal::get_wpp_logger().unwrap();
@@ -1390,13 +1565,15 @@ pub fn trace(item: TokenStream) -> TokenStream {
             }
         }
     };
-    
+
     expanded.into()
 }
 
 /// Generates argument bindings, byte-slice conversions via `as_bytes()`, and
 /// byte-slice identifiers.
-fn generate_arg_code(args: &[TraceArg]) -> (
+fn generate_arg_code(
+    args: &[TraceArg],
+) -> (
     Vec<proc_macro2::TokenStream>,
     Vec<proc_macro2::TokenStream>,
     Vec<syn::Ident>,
@@ -1404,12 +1581,18 @@ fn generate_arg_code(args: &[TraceArg]) -> (
     let mut bindings = Vec::new();
     let mut byte_slices = Vec::new();
     let mut idents = Vec::new();
-    
+
     for (idx, arg) in args.iter().enumerate() {
-        let arg_name = syn::Ident::new(&format!("__trace_arg{}", idx), proc_macro2::Span::call_site());
-        let bytes_name = syn::Ident::new(&format!("__trace_bytes{}", idx), proc_macro2::Span::call_site());
+        let arg_name = syn::Ident::new(
+            &format!("__trace_arg{}", idx),
+            proc_macro2::Span::call_site(),
+        );
+        let bytes_name = syn::Ident::new(
+            &format!("__trace_bytes{}", idx),
+            proc_macro2::Span::call_site(),
+        );
         let expr = &arg.expr;
-        
+
         if arg.etw_type == "ItemString" {
             // String arguments: convert to CString first
             bindings.push(quote! {
@@ -1430,13 +1613,13 @@ fn generate_arg_code(args: &[TraceArg]) -> (
                 });
             }
         }
-        
+
         byte_slices.push(quote! {
             let #bytes_name = ::wdf::__internal::TraceData::as_bytes(&#arg_name);
         });
-        
+
         idents.push(bytes_name);
     }
-    
+
     (bindings, byte_slices, idents)
 }

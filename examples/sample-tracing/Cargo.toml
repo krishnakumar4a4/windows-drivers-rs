@@ -1,0 +1,33 @@
+[package]
+name = "sample-tracing"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[package.metadata.wdk.driver-model]
+driver-type = "KMDF"
+kmdf-version-major = 1
+target-kmdf-version-minor = 33
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+
+[build-dependencies]
+wdk-build = { path = "../../crates/wdk-build", version = "0.4.0" }
+
+[dependencies]
+wdf = { path = "../../crates/wdf", version = "0.3.0" }
+wdk-sys = { path = "../../crates/wdk-sys", version = "0.4.0" }
+const_format = "0.2"
+
+[features]
+default = []
+
+[profile.dev]
+panic = "abort"
+lto = true
+
+[profile.release]
+lto = true
+panic = "abort"

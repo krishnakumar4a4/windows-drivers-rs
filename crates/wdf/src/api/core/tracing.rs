@@ -23,9 +23,10 @@ use wdk_sys::{
     USHORT,
 };
 
-use crate::api::{guid::Guid, string::UnicodeString};
-
-use crate::println;
+use crate::{
+    api::{guid::Guid, string::UnicodeString},
+    println,
+};
 
 /// These globals are expected by IFR functionality such as the
 /// windbg extensions used to read IFR logs
@@ -176,11 +177,12 @@ impl TraceWriter {
     }
 
     /// Checks if the specified flag is enabled in the control block.
-    /// 
+    ///
     /// # Arguments
-    /// * `control_index` - The index of the control block (0 for the default control block)
+    /// * `control_index` - The index of the control block (0 for the default
+    ///   control block)
     /// * `flags` - The flag bits to check
-    /// 
+    ///
     /// # Returns
     /// `true` if the flag is enabled, `false` otherwise
     #[inline]
@@ -189,15 +191,19 @@ impl TraceWriter {
         unsafe {
             let control = &(*control_block_ptr).Control;
             // Check if the logger is active and the flags match
-            control.Logger != 0 && (control.Flags[( (0xFFFF & (flags-1) ) / 32) as usize] & (1 << ((flags-1) & 31))) != 0
+            control.Logger != 0
+                && (control.Flags[((0xFFFF & (flags - 1)) / 32) as usize]
+                    & (1 << ((flags - 1) & 31)))
+                    != 0
         }
     }
 
     /// Checks if AutoLogVerboseEnabled is set for the control block.
-    /// 
+    ///
     /// # Arguments
-    /// * `control_index` - The index of the control block (0 for the default control block)
-    /// 
+    /// * `control_index` - The index of the control block (0 for the default
+    ///   control block)
+    ///
     /// # Returns
     /// `true` if AutoLogVerboseEnabled is set, `false` otherwise
     #[inline]
@@ -209,18 +215,22 @@ impl TraceWriter {
         }
     }
 
-    /// Checks if the passed level is enabled (at or below the control block's level).
-    /// 
-    /// In WPP tracing, a trace message should be emitted if its level is less than
-    /// or equal to the level configured in the control block. Lower numeric values
-    /// are more severe (Critical=1, Error=2, etc.), so we trace if passed_level <= control_level.
-    /// 
+    /// Checks if the passed level is enabled (at or below the control block's
+    /// level).
+    ///
+    /// In WPP tracing, a trace message should be emitted if its level is less
+    /// than or equal to the level configured in the control block. Lower
+    /// numeric values are more severe (Critical=1, Error=2, etc.), so we
+    /// trace if passed_level <= control_level.
+    ///
     /// # Arguments
-    /// * `control_index` - The index of the control block (0 for the default control block)
+    /// * `control_index` - The index of the control block (0 for the default
+    ///   control block)
     /// * `level` - The level to check
-    /// 
+    ///
     /// # Returns
-    /// `true` if the level should be traced (passed level <= control block level), `false` otherwise
+    /// `true` if the level should be traced (passed level <= control block
+    /// level), `false` otherwise
     #[inline]
     pub fn is_level_enabled(&self, _control_index: usize, level: u8) -> bool {
         let control_block_ptr = self.trace_config.control_block;

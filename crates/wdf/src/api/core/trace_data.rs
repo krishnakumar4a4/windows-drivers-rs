@@ -12,7 +12,8 @@
 use super::result::{NtStatus, NtStatusError, NtStatusNonError};
 
 mod sealed {
-    /// Sealed trait to prevent external implementations of [`super::TraceData`].
+    /// Sealed trait to prevent external implementations of
+    /// [`super::TraceData`].
     pub trait Sealed {}
 }
 
@@ -36,6 +37,11 @@ mod sealed {
 /// | `NtStatusError`    | Inner `i32` code bytes       |
 /// | `NtStatusNonError` | Inner `i32` code bytes       |
 pub trait TraceData: sealed::Sealed {
+    /// A compile-time string describing the WPP format specifier for this type.
+    /// Used by the `trace!` macro to pass type metadata into
+    /// `codeview_annotation!`.
+    const FORMAT_SPEC: &'static str;
+
     /// Returns the byte representation of this value for trace logging.
     ///
     /// The returned slice must remain valid for the duration of the trace
@@ -44,21 +50,37 @@ pub trait TraceData: sealed::Sealed {
     fn as_bytes(&self) -> &[u8];
 }
 
+/// Const helper to resolve [`TraceData::FORMAT_SPEC`] from a value reference.
+///
+/// This is a `const fn` so the compiler can evaluate it at compile time,
+/// returning the `&'static str` backed by each type's global static.
+#[rustc_force_inline]
+pub const fn format_spec_of<T: TraceData>(_: &T) -> &'static str {
+    T::FORMAT_SPEC
+}
+
 // ---------------------------------------------------------------------------
 // Integer type implementations
 // ---------------------------------------------------------------------------
 
 macro_rules! impl_trace_data_int {
-    ($ty:ty) => {
-        impl sealed::Sealed for $ty {}
-        impl TraceData for $ty {
-            #[inline]
-            fn as_bytes(&self) -> &[u8] {
-                unsafe { // TODO: This would be an extra runtime overhead constructing the slice.
-                    core::slice::from_raw_parts(
-                        self as *const $ty as *const u8,
-                        core::mem::size_of::<$ty>(),
-                    )
+    ($ty:ty, $spec:expr) => {
+        ::paste::paste! {
+            #[doc(hidden)]
+            static [<__FORMAT_SPEC_ $ty:upper>]: &str = $spec;
+
+            impl sealed::Sealed for $ty {}
+            impl TraceData for $ty {
+                const FORMAT_SPEC: &'static str = [<__FORMAT_SPEC_ $ty:upper>];
+
+                #[inline]
+                fn as_bytes(&self) -> &[u8] {
+                    unsafe {
+                        core::slice::from_raw_parts(
+                            self as *const $ty as *const u8,
+                            core::mem::size_of::<$ty>(),
+                        )
+                    }
                 }
             }
         }
@@ -66,22 +88,64 @@ macro_rules! impl_trace_data_int {
 }
 
 // Signed integers
-impl_trace_data_int!(i8);
-impl_trace_data_int!(i16);
-impl_trace_data_int!(i32);
-impl_trace_data_int!(i64);
-impl_trace_data_int!(isize);
+impl_trace_data_int!(i8, "ItemLong");
+impl_trace_data_int!(i16, "ItemLong");
+impl_trace_data_int!(i32, "ItemLong");
+impl_trace_data_int!(i64, "ItemLongLong");
 
 // Unsigned integers
-impl_trace_data_int!(u8);
-impl_trace_data_int!(u16);
-impl_trace_data_int!(u32);
-impl_trace_data_int!(u64);
-impl_trace_data_int!(usize);
+impl_trace_data_int!(u8, "ItemULong");
+impl_trace_data_int!(u16, "ItemULong");
+impl_trace_data_int!(u32, "ItemULong");
+impl_trace_data_int!(u64, "ItemULongLong");
+
+// Pointer-sized integers — target-dependent ETW type
+impl sealed::Sealed for isize {}
+impl TraceData for isize {
+    const FORMAT_SPEC: &'static str = if core::mem::size_of::<isize>() == 8 {
+        "ItemLongLong"
+    } else {
+        "ItemLong"
+    };
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self as *const isize as *const u8,
+                core::mem::size_of::<isize>(),
+            )
+        }
+    }
+}
+
+impl sealed::Sealed for usize {}
+impl TraceData for usize {
+    const FORMAT_SPEC: &'static str = if core::mem::size_of::<usize>() == 8 {
+        "ItemULongLong"
+    } else {
+        "ItemULong"
+    };
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self as *const usize as *const u8,
+                core::mem::size_of::<usize>(),
+            )
+        }
+    }
+}
 
 // Boolean — traced as an i32 (1 = true, 0 = false)
+#[doc(hidden)]
+static __FORMAT_SPEC_BOOL: &str = "ItemListLong(false,true)";
+
 impl sealed::Sealed for bool {}
 impl TraceData for bool {
+    const FORMAT_SPEC: &'static str = __FORMAT_SPEC_BOOL;
+
     #[inline]
     fn as_bytes(&self) -> &[u8] {
         static TRUE_BYTES: [u8; core::mem::size_of::<i32>()] = 1i32.to_ne_bytes();
@@ -97,8 +161,13 @@ impl TraceData for bool {
 /// [`NtStatus`] implementation — the top-level NTSTATUS enum.
 ///
 /// Returns the bytes of the inner `i32` status code via [`NtStatus::code_ref`].
+#[doc(hidden)]
+static __FORMAT_SPEC_NTSTATUS: &str = "ItemNTSTATUS";
+
 impl sealed::Sealed for NtStatus {}
 impl TraceData for NtStatus {
+    const FORMAT_SPEC: &'static str = __FORMAT_SPEC_NTSTATUS;
+
     #[inline]
     fn as_bytes(&self) -> &[u8] {
         unsafe {
@@ -113,6 +182,8 @@ impl TraceData for NtStatus {
 /// [`NtStatusError`] implementation — the error subset of NTSTATUS.
 impl sealed::Sealed for NtStatusError {}
 impl TraceData for NtStatusError {
+    const FORMAT_SPEC: &'static str = __FORMAT_SPEC_NTSTATUS;
+
     #[inline]
     fn as_bytes(&self) -> &[u8] {
         unsafe {
@@ -128,6 +199,8 @@ impl TraceData for NtStatusError {
 /// subset of NTSTATUS.
 impl sealed::Sealed for NtStatusNonError {}
 impl TraceData for NtStatusNonError {
+    const FORMAT_SPEC: &'static str = __FORMAT_SPEC_NTSTATUS;
+
     #[inline]
     fn as_bytes(&self) -> &[u8] {
         unsafe {
@@ -147,8 +220,13 @@ impl TraceData for NtStatusNonError {
 ///
 /// String arguments in `trace!` are first converted to `CString` by the macro,
 /// then `as_bytes()` returns the bytes including the null terminator.
+#[doc(hidden)]
+static __FORMAT_SPEC_CSTRING: &str = "ItemString";
+
 impl sealed::Sealed for alloc::ffi::CString {}
 impl TraceData for alloc::ffi::CString {
+    const FORMAT_SPEC: &'static str = __FORMAT_SPEC_CSTRING;
+
     #[inline]
     fn as_bytes(&self) -> &[u8] {
         self.as_bytes_with_nul()

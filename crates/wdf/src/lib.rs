@@ -5,6 +5,7 @@
 
 #![no_std]
 #![allow(non_snake_case, non_camel_case_types)]
+#![feature(rustc_attrs)]
 
 extern crate alloc;
 
@@ -18,10 +19,13 @@ pub use api::*;
 #[doc(hidden)]
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 pub mod __internal {
-    pub use crate::tracing::{strlen, WppAutoLogTrace, TRACE_GUID, WPP_TRACE_OPTIONS};
-    pub use crate::driver::{get_auto_log_context, get_wpp_logger, get_wpp_trace_message};
-    pub use crate::trace_data::TraceData;
-    pub use wdk_sys::{LPCGUID, LPCSTR, LPGUID, UCHAR, ULONG, USHORT, TRACEHANDLE, PVOID};
+    pub use wdk_sys::{LPCGUID, LPCSTR, LPGUID, PVOID, TRACEHANDLE, UCHAR, ULONG, USHORT};
+
+    pub use crate::{
+        driver::{get_auto_log_context, get_wpp_logger, get_wpp_trace_message},
+        trace_data::{TraceData, format_spec_of},
+        tracing::{TRACE_GUID, WPP_TRACE_OPTIONS, WppAutoLogTrace, strlen},
+    };
 }
 
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]

@@ -317,30 +317,28 @@ pub fn get_trace_writer() -> Option<&'static TraceWriter> {
 /// The returned pointer is only valid after tracing has been initialized.
 #[doc(hidden)]
 pub unsafe fn get_auto_log_context() -> Option<PVOID> {
-    get_trace_writer().map(|tw| unsafe {
-        (&(*tw.trace_config.control_block).Control).AutoLogContext
-    })
+    get_trace_writer()
+        .map(|tw| unsafe { (&(*tw.trace_config.control_block).Control).AutoLogContext })
 }
 
 /// Returns the TRACEHANDLE logger for WPP tracing.
 /// This is exposed for macro-generated code.
-/// 
+///
 /// # Safety
-/// 
+///
 /// The returned TRACEHANDLE is only valid after tracing has been initialized.
 #[doc(hidden)]
 pub unsafe fn get_wpp_logger() -> Option<TRACEHANDLE> {
-    get_trace_writer().map(|tw| unsafe {
-        (&(*tw.trace_config.control_block).Control).Logger
-    })
+    get_trace_writer().map(|tw| unsafe { (&(*tw.trace_config.control_block).Control).Logger })
 }
 
 /// Returns the WppTraceMessage function pointer for WPP tracing.
 /// This is exposed for macro-generated code.
-/// 
+///
 /// # Safety
-/// 
-/// The returned function pointer is only valid after tracing has been initialized.
+///
+/// The returned function pointer is only valid after tracing has been
+/// initialized.
 #[doc(hidden)]
 pub unsafe fn get_wpp_trace_message() -> Option<WppTraceMessage> {
     get_trace_writer().and_then(|tw| tw.trace_config.wpp_trace_message)
