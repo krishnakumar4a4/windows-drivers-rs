@@ -6,6 +6,10 @@
 #![no_std]
 #![allow(non_snake_case, non_camel_case_types)]
 #![feature(rustc_attrs)]
+// Nightly features to get compile time reflection
+#![feature(type_info)]
+#![feature(const_cmp)]
+#![feature(const_trait_impl)]
 
 extern crate alloc;
 
@@ -23,7 +27,7 @@ pub mod __internal {
 
     pub use crate::{
         driver::{get_auto_log_context, get_wpp_logger, get_wpp_trace_message},
-        trace_data::{TraceData, format_spec_of},
+        trace_data::{TraceData, format_spec_of, primitive_name_of_val},
         tracing::{TRACE_GUID, WPP_TRACE_OPTIONS, WppAutoLogTrace, strlen},
     };
 }

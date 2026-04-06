@@ -59,6 +59,115 @@ pub const fn format_spec_of<T: TraceData>(_: &T) -> &'static str {
     T::FORMAT_SPEC
 }
 
+// Compile time reflection using nightly rust features
+use core::any::TypeId;
+use core::mem::type_info::{Type, TypeKind};
+
+// #[inline(always)]
+// const fn primitive_name_from_info<T: 'static>() -> &'static str {
+//     let ty = TypeId::of::<T>().info();
+
+//     match ty.kind {
+//         TypeKind::Bool(_) => "bool",
+//         TypeKind::Char(_) => "char",
+//         TypeKind::Float(f) => match f.bits {
+//             16 => "f16",
+//             32 => "f32",
+//             64 => "f64",
+//             128 => "f128",
+//             _ => "unknown-float",
+//         },
+//         TypeKind::Int(_) => primitive_int_name::<T>(),
+//         _ => "non-primitive",
+//     }
+// }
+
+// #[inline(always)]
+// const fn primitive_int_name<T: 'static>() -> &'static str {
+//     // Current nightly docs clearly expose TypeKind::Int(Int),
+//     // but the fetched docs here don't expose Int's exact public fields.
+//     // So for a compileable sample, dispatch by concrete type parameter.
+//     if TypeId::of::<T>() == TypeId::of::<u8>() {
+//         "u8"
+//     } else if TypeId::of::<T>() == TypeId::of::<u16>() {
+//         "u16"
+//     } else if TypeId::of::<T>() == TypeId::of::<u32>() {
+//         "u32"
+//     } else if TypeId::of::<T>() == TypeId::of::<u64>() {
+//         "u64"
+//     } else if TypeId::of::<T>() == TypeId::of::<u128>() {
+//         "u128"
+//     } else if TypeId::of::<T>() == TypeId::of::<usize>() {
+//         "usize"
+//     } else if TypeId::of::<T>() == TypeId::of::<i8>() {
+//         "i8"
+//     } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+//         "i16"
+//     } else if TypeId::of::<T>() == TypeId::of::<i32>() {
+//         "i32"
+//     } else if TypeId::of::<T>() == TypeId::of::<i64>() {
+//         "i64"
+//     } else if TypeId::of::<T>() == TypeId::of::<i128>() {
+//         "i128"
+//     } else if TypeId::of::<T>() == TypeId::of::<isize>() {
+//         "isize"
+//     } else {
+//         "unknown-int"
+//     }
+// }
+
+#[inline(always)]
+pub const fn primitive_name_of_val<T: 'static>(_: &T) -> &'static str {
+    const {     
+        let ty = TypeId::of::<T>().info();
+        match ty.kind {
+            TypeKind::Bool(_) => "bool",
+            TypeKind::Char(_) => "char",
+            TypeKind::Float(f) => match f.bits {
+                16 => "f16",
+                32 => "f32",
+                64 => "f64",
+                128 => "f128",
+                _ => "unknown-float",
+            },
+            TypeKind::Int(_) => {
+                // Current nightly docs clearly expose TypeKind::Int(Int),
+                // but the fetched docs here don't expose Int's exact public fields.
+                // So for a compileable sample, dispatch by concrete type parameter.
+                if TypeId::of::<T>() == TypeId::of::<u8>() {
+                    "u8"
+                } else if TypeId::of::<T>() == TypeId::of::<u16>() {
+                    "u16"
+                } else if TypeId::of::<T>() == TypeId::of::<u32>() {
+                    "u32"
+                } else if TypeId::of::<T>() == TypeId::of::<u64>() {
+                    "u64"
+                } else if TypeId::of::<T>() == TypeId::of::<u128>() {
+                    "u128"
+                } else if TypeId::of::<T>() == TypeId::of::<usize>() {
+                    "usize"
+                } else if TypeId::of::<T>() == TypeId::of::<i8>() {
+                    "i8"
+                } else if TypeId::of::<T>() == TypeId::of::<i16>() {
+                    "i16"
+                } else if TypeId::of::<T>() == TypeId::of::<i32>() {
+                    "i32"
+                } else if TypeId::of::<T>() == TypeId::of::<i64>() {
+                    "i64"
+                } else if TypeId::of::<T>() == TypeId::of::<i128>() {
+                    "i128"
+                } else if TypeId::of::<T>() == TypeId::of::<isize>() {
+                    "isize"
+                } else {
+                    "unknown-int"
+                }
+            },
+            _ => "non-primitive",
+        } 
+    }
+}
+
+
 // ---------------------------------------------------------------------------
 // Integer type implementations
 // ---------------------------------------------------------------------------
