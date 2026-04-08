@@ -9,7 +9,7 @@
 //! byte slice that the `trace!` macro expands into variadic `(pointer, length)`
 //! FFI argument pairs.
 
-use super::result::{NtStatus, NtStatusError, NtStatusNonError};
+use super::result::{NtStatus, NtStatusError, NtStatusNonError, HResult};
 
 mod sealed {
     /// Sealed trait to prevent external implementations of
@@ -37,11 +37,14 @@ mod sealed {
 /// | `NtStatusError`    | Inner `i32` code bytes       |
 /// | `NtStatusNonError` | Inner `i32` code bytes       |
 pub trait TraceData: sealed::Sealed {
-    /// A compile-time string describing the WPP format specifier for this type.
-    /// Used by the `trace!` macro to pass type metadata into
-    /// `codeview_annotation!`.
+    /// The ETW type name for this traceable type (e.g., "ItemLong", "ItemString").
+    /// Used by the `trace!` macro's generic annotation function to emit
+    /// the correct type metadata in the PDB codeview annotation body.
+    const ETW_TYPE: &'static str;
+
     const FORMAT_SPEC: &'static str;
 
+    
     /// Returns the byte representation of this value for trace logging.
     ///
     /// The returned slice must remain valid for the duration of the trace
@@ -50,14 +53,12 @@ pub trait TraceData: sealed::Sealed {
     fn as_bytes(&self) -> &[u8];
 }
 
-/// Const helper to resolve [`TraceData::FORMAT_SPEC`] from a value reference.
-///
-/// This is a `const fn` so the compiler can evaluate it at compile time,
-/// returning the `&'static str` backed by each type's global static.
-#[rustc_force_inline]
-pub const fn format_spec_of<T: TraceData>(_: &T) -> &'static str {
-    T::FORMAT_SPEC
-}
+// /// Const helper — no longer needed; the `trace!` macro now uses a generic
+// /// function with `T::ETW_TYPE` directly in the codeview annotation.
+// #[rustc_force_inline]
+// pub const fn format_spec_of<T: TraceData>(_: &T) -> &'static str {
+//     T::ETW_TYPE
+// }
 
 // Compile time reflection using nightly rust features
 use core::any::TypeId;
@@ -173,13 +174,17 @@ pub const fn primitive_name_of_val<T: 'static>(_: &T) -> &'static str {
 // ---------------------------------------------------------------------------
 
 macro_rules! impl_trace_data_int {
-    ($ty:ty, $spec:expr) => {
+    ($ty:ty, $etw:expr, $fmt:expr) => {
         ::paste::paste! {
             #[doc(hidden)]
-            static [<__FORMAT_SPEC_ $ty:upper>]: &str = $spec;
+            static [<__ETW_TYPE_ $ty:upper>]: &str = $etw;
+
+            #[doc(hidden)]
+            static [<__FORMAT_SPEC_ $ty:upper>]: &str = $fmt;
 
             impl sealed::Sealed for $ty {}
             impl TraceData for $ty {
+                const ETW_TYPE: &'static str = [<__ETW_TYPE_ $ty:upper>];
                 const FORMAT_SPEC: &'static str = [<__FORMAT_SPEC_ $ty:upper>];
 
                 #[inline]
@@ -197,24 +202,29 @@ macro_rules! impl_trace_data_int {
 }
 
 // Signed integers
-impl_trace_data_int!(i8, "ItemLong");
-impl_trace_data_int!(i16, "ItemLong");
-impl_trace_data_int!(i32, "ItemLong");
-impl_trace_data_int!(i64, "ItemLongLong");
+impl_trace_data_int!(i8, "ItemChar", "c");
+impl_trace_data_int!(i16, "ItemShort", "hd");
+impl_trace_data_int!(i32, "ItemLong", "d");
+impl_trace_data_int!(i64, "ItemLongLong", "I64d");
 
 // Unsigned integers
-impl_trace_data_int!(u8, "ItemULong");
-impl_trace_data_int!(u16, "ItemULong");
-impl_trace_data_int!(u32, "ItemULong");
-impl_trace_data_int!(u64, "ItemULongLong");
+impl_trace_data_int!(u8, "ItemChar", "c");
+impl_trace_data_int!(u16, "ItemShort", "hu");
+impl_trace_data_int!(u32, "ItemLong", "u");
+impl_trace_data_int!(u64, "ItemULongLong", "I64u");
 
 // Pointer-sized integers — target-dependent ETW type
 impl sealed::Sealed for isize {}
 impl TraceData for isize {
-    const FORMAT_SPEC: &'static str = if core::mem::size_of::<isize>() == 8 {
+    const ETW_TYPE: &'static str = if core::mem::size_of::<isize>() == 8 {
         "ItemLongLong"
     } else {
         "ItemLong"
+    };
+    const FORMAT_SPEC: &'static str = if core::mem::size_of::<usize>() == 8 {
+        "I64d"
+    } else {
+        "d"
     };
 
     #[inline]
@@ -230,10 +240,15 @@ impl TraceData for isize {
 
 impl sealed::Sealed for usize {}
 impl TraceData for usize {
-    const FORMAT_SPEC: &'static str = if core::mem::size_of::<usize>() == 8 {
+    const ETW_TYPE: &'static str = if core::mem::size_of::<usize>() == 8 {
         "ItemULongLong"
     } else {
-        "ItemULong"
+        "ItemLong"
+    };
+    const FORMAT_SPEC: &'static str = if core::mem::size_of::<usize>() == 8 {
+        "I64u"
+    } else {
+        "u"
     };
 
     #[inline]
@@ -249,11 +264,12 @@ impl TraceData for usize {
 
 // Boolean — traced as an i32 (1 = true, 0 = false)
 #[doc(hidden)]
-static __FORMAT_SPEC_BOOL: &str = "ItemListLong(false,true)";
+static __ETW_TYPE_BOOL: &str = "ItemListByte(false,true)";
 
 impl sealed::Sealed for bool {}
 impl TraceData for bool {
-    const FORMAT_SPEC: &'static str = __FORMAT_SPEC_BOOL;
+    const ETW_TYPE: &'static str = __ETW_TYPE_BOOL;
+    const FORMAT_SPEC: &'static str = "s";
 
     #[inline]
     fn as_bytes(&self) -> &[u8] {
@@ -271,11 +287,12 @@ impl TraceData for bool {
 ///
 /// Returns the bytes of the inner `i32` status code via [`NtStatus::code_ref`].
 #[doc(hidden)]
-static __FORMAT_SPEC_NTSTATUS: &str = "ItemNTSTATUS";
+static __ETW_TYPE_NTSTATUS: &str = "ItemNTSTATUS";
 
 impl sealed::Sealed for NtStatus {}
 impl TraceData for NtStatus {
-    const FORMAT_SPEC: &'static str = __FORMAT_SPEC_NTSTATUS;
+    const ETW_TYPE: &'static str = __ETW_TYPE_NTSTATUS;
+    const FORMAT_SPEC: &'static str = "s";
 
     #[inline]
     fn as_bytes(&self) -> &[u8] {
@@ -291,7 +308,8 @@ impl TraceData for NtStatus {
 /// [`NtStatusError`] implementation — the error subset of NTSTATUS.
 impl sealed::Sealed for NtStatusError {}
 impl TraceData for NtStatusError {
-    const FORMAT_SPEC: &'static str = __FORMAT_SPEC_NTSTATUS;
+    const ETW_TYPE: &'static str = __ETW_TYPE_NTSTATUS;
+    const FORMAT_SPEC: &'static str = "s";
 
     #[inline]
     fn as_bytes(&self) -> &[u8] {
@@ -308,7 +326,8 @@ impl TraceData for NtStatusError {
 /// subset of NTSTATUS.
 impl sealed::Sealed for NtStatusNonError {}
 impl TraceData for NtStatusNonError {
-    const FORMAT_SPEC: &'static str = __FORMAT_SPEC_NTSTATUS;
+    const ETW_TYPE: &'static str = __ETW_TYPE_NTSTATUS;
+    const FORMAT_SPEC: &'static str = "s";
 
     #[inline]
     fn as_bytes(&self) -> &[u8] {
@@ -330,14 +349,62 @@ impl TraceData for NtStatusNonError {
 /// String arguments in `trace!` are first converted to `CString` by the macro,
 /// then `as_bytes()` returns the bytes including the null terminator.
 #[doc(hidden)]
-static __FORMAT_SPEC_CSTRING: &str = "ItemString";
+static __ETW_TYPE_CSTRING: &str = "ItemString";
 
 impl sealed::Sealed for alloc::ffi::CString {}
 impl TraceData for alloc::ffi::CString {
-    const FORMAT_SPEC: &'static str = __FORMAT_SPEC_CSTRING;
+    const ETW_TYPE: &'static str = __ETW_TYPE_CSTRING;
+    const FORMAT_SPEC: &'static str = "s";
 
     #[inline]
     fn as_bytes(&self) -> &[u8] {
         self.as_bytes_with_nul()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HRESULT implementation
+// ---------------------------------------------------------------------------
+#[doc(hidden)]
+static __ETW_TYPE_HRESULT: &str = "ItemHRESULT";
+
+impl sealed::Sealed for HResult {}
+impl TraceData for HResult {
+    const ETW_TYPE: &'static str = __ETW_TYPE_HRESULT;
+    const FORMAT_SPEC: &'static str = "s";
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self.code_ref() as *const i32 as *const u8,
+                core::mem::size_of::<i32>(),
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GUID implementation
+// ---------------------------------------------------------------------------
+
+use super::guid::Guid;
+
+#[doc(hidden)]
+static __ETW_TYPE_GUID: &str = "ItemGuid";
+
+impl sealed::Sealed for Guid {}
+impl TraceData for Guid {
+    const ETW_TYPE: &'static str = __ETW_TYPE_GUID;
+    const FORMAT_SPEC: &'static str = "s";
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self.as_lpcguid() as *const u8,
+                core::mem::size_of::<wdk_sys::GUID>(),
+            )
+        }
     }
 }

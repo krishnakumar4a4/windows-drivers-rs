@@ -27,7 +27,9 @@ pub mod __internal {
 
     pub use crate::{
         driver::{get_auto_log_context, get_wpp_logger, get_wpp_trace_message},
-        trace_data::{TraceData, format_spec_of, primitive_name_of_val},
+        trace_data::TraceData,
+        // format_spec_of and primitive_name_of_val removed — the trace! macro
+        // now uses a generic function with T::ETW_TYPE directly.
         tracing::{TRACE_GUID, WPP_TRACE_OPTIONS, WppAutoLogTrace, strlen},
     };
 }

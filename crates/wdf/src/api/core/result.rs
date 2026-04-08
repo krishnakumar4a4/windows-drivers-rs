@@ -3026,3 +3026,18 @@ pub mod status_codes {
     pub const STATUS_XML_ENCODING_MISMATCH: NTSTATUS = -1_072_365_535_i32;
     pub const STATUS_XML_PARSE_ERROR: NTSTATUS = -1_073_700_733_i32;
 }
+
+// HResult
+pub struct HResult(wdk_sys::HRESULT);
+
+impl HResult {
+    pub fn from(code: i32) -> Self {
+        HResult(code)
+    }
+
+    /// Return the raw NTSTATUS value for this typed status.
+    pub fn code_ref(&self) -> &i32 {
+        &self.0
+    }
+}
+    

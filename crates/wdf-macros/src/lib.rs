@@ -775,12 +775,15 @@ static TRACE_MESSAGE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::Atomi
 struct TraceArg {
     /// Display name for the argument in the annotation
     name: String,
-    /// ETW item type name for the annotation (e.g., "ItemLong")
-    etw_type: &'static str,
-    /// C format specifier for the WPP format string (e.g., "d")
-    format_spec: &'static str,
+    /// Optional display format override for the WPP typev line (e.g., "d", "x").
+    /// Empty string means no override — bare `%N` is used in the typev line.
+    display_format: String,
     /// The original expression for this argument
     expr: syn::Expr,
+    /// Whether this arg should be wrapped in `CString` (string literals or `{:s}`)
+    wrap_cstring: bool,
+    /// Whether this arg should be type-annotated as `i32` (unsuffixed int literals)
+    type_as_i32: bool,
 }
 
 /// Represents a single trace argument expression.
@@ -1049,105 +1052,71 @@ fn target_is_64bit() -> bool {
 
 /// Returns the (ETW type, format spec) for a signed pointer-sized integer
 /// on the current target.
-fn isize_etw() -> (&'static str, &'static str) {
-    if target_is_64bit() {
-        ("ItemLongLong", "I64d")
-    } else {
-        ("ItemLong", "d")
-    }
-}
+// fn isize_etw() -> (&'static str, &'static str) {
+//     if target_is_64bit() {
+//         ("ItemLongLong", "I64d")
+//     } else {
+//         ("ItemLong", "d")
+//     }
+// }
 
 /// Returns the (ETW type, format spec) for an unsigned pointer-sized integer
 /// on the current target.
-fn usize_etw() -> (&'static str, &'static str) {
-    if target_is_64bit() {
-        ("ItemULongLong", "I64u")
-    } else {
-        ("ItemULong", "u")
-    }
-}
+// fn usize_etw() -> (&'static str, &'static str) {
+//     if target_is_64bit() {
+//         ("ItemULongLong", "I64u")
+//     } else {
+//         ("ItemULong", "u")
+//     }
+// }
 
-/// Maps a user-facing format specifier to (ETW type, C format spec).
+/// Validates that a user-facing format specifier is known and returns
+/// the corresponding C printf format spec for the WPP typev line.
 ///
-/// # Supported specifiers
-///
-/// ## C-style (display format)
-/// | Specifier      | ETW Type         | WPP Format | Description               |
-/// |----------------|------------------|------------|---------------------------|
-/// | `d` or `i`     | `ItemLong`       | `d`        | Signed 32-bit decimal     |
-/// | `u`            | `ItemULong`      | `u`        | Unsigned 32-bit decimal   |
-/// | `x`            | `ItemLong`       | `x`        | 32-bit hex (lowercase)    |
-/// | `X`            | `ItemLong`       | `X`        | 32-bit hex (uppercase)    |
-/// | `o`            | `ItemLong`       | `o`        | 32-bit octal              |
-/// | `s` or `str`   | `ItemString`     | `s`        | ANSI string               |
-/// | `p`            | `ItemPtr`        | `p`        | Pointer                   |
-///
-/// ## Rust type names
-/// | Specifier      | ETW Type         | WPP Format | Description               |
-/// |----------------|------------------|------------|---------------------------|
-/// | `i8`/`i16`/`i32` | `ItemLong`    | `d`        | Signed ≤32-bit            |
-/// | `u8`/`u16`/`u32` | `ItemULong`   | `u`        | Unsigned ≤32-bit          |
-/// | `i64`          | `ItemLongLong`   | `I64d`     | Signed 64-bit             |
-/// | `u64`          | `ItemULongLong`  | `I64u`     | Unsigned 64-bit           |
-/// | `isize`        | target-dependent | target-dep | `ItemLong`/`ItemLongLong` |
-/// | `usize`        | target-dependent | target-dep | `ItemULong`/`ItemULongLong`|
-/// | `bool`         | `ItemListLong(false,true)` | `s` | Boolean as false/true |
-///
-/// ## WPP special types
-/// | Specifier          | ETW Type         | WPP Format | Description           |
-/// |--------------------|------------------|------------|-----------------------|
-/// | `NTSTATUS`/`STATUS`| `ItemNTSTATUS`   | `s`        | NT status code        |
-/// | `HRESULT`          | `ItemHRESULT`    | `s`        | COM result code       |
-/// | `GUID`             | `ItemGuid`       | `s`        | 128-bit GUID          |
-///
-/// ## 64-bit display variants
-/// | Specifier      | ETW Type         | WPP Format | Description               |
-/// |----------------|------------------|------------|---------------------------|
-/// | `I64d`         | `ItemLongLong`   | `I64d`     | Signed 64-bit decimal     |
-/// | `I64u`         | `ItemULongLong`  | `I64u`     | Unsigned 64-bit decimal   |
-/// | `I64x`         | `ItemULongLong`  | `I64x`     | 64-bit hex (lowercase)    |
-fn format_spec_override(spec: &str) -> Option<(&'static str, &'static str)> {
+/// Returns `Some(display_fmt)` for known specifiers, `None` for unknown.
+/// The ETW type is no longer resolved here — it comes from `T::ETW_TYPE`
+/// at monomorphization time via the generic annotation function.
+fn display_format_for(spec: &str) -> Option<String> {
     match spec {
-        // WPP special types
-        "NTSTATUS" | "STATUS" => Some(("ItemNTSTATUS", "s")),
-        "HRESULT" => Some(("ItemHRESULT", "s")),
-        "GUID" => Some(("ItemGuid", "s")),
+        // C-style format specifiers
+        "d" | "i" => Some("d".to_string()),
+        "u" => Some("u".to_string()),
+        "x" => Some("x".to_string()),
+        "X" => Some("X".to_string()),
+        "o" => Some("o".to_string()),
+        "s" | "str" => Some("s".to_string()),
+        "p" => Some("p".to_string()),
 
-        // C-style format specifiers (32-bit)
-        "d" | "i" => Some(("ItemLong", "d")),
-        "u" => Some(("ItemULong", "u")),
-        "x" => Some(("ItemLong", "x")),
-        "X" => Some(("ItemLong", "X")),
-        "o" => Some(("ItemLong", "o")),
-        "p" => Some(("ItemPtr", "p")),
-        "s" | "str" => Some(("ItemString", "s")),
+        // Rust type-name specifiers → mapped to C printf display format
+        "i8" | "i16" | "i32" => Some("d".to_string()),
+        "u8" | "u16" | "u32" => Some("u".to_string()),
+        "i64" | "I64d" => Some("I64d".to_string()),
+        "u64" | "I64u" => Some("I64u".to_string()),
+        "isize" => Some(if target_is_64bit() { "I64d" } else { "d" }.to_string()),
+        "usize" => Some(if target_is_64bit() { "I64u" } else { "u" }.to_string()),
+        "bool" => Some("d".to_string()),
+        "I64x" => Some("I64x".to_string()),
 
-        // Rust type-name specifiers
-        "i8" | "i16" | "i32" => Some(("ItemLong", "d")),
-        "u8" | "u16" | "u32" => Some(("ItemULong", "u")),
-        "i64" => Some(("ItemLongLong", "I64d")),
-        "u64" => Some(("ItemULongLong", "I64u")),
-        "isize" => Some(isize_etw()),
-        "usize" => Some(usize_etw()),
-        "bool" => Some(("ItemListLong(false,true)", "s")),
-
-        // Explicit 64-bit display variants
-        "I64d" => Some(("ItemLongLong", "I64d")),
-        "I64u" => Some(("ItemULongLong", "I64u")),
-        "I64x" => Some(("ItemULongLong", "I64x")),
+        // WPP special types — ETW_TYPE in the body handles identification,
+        // no specific display format needed in the typev line.
+        "NTSTATUS" | "STATUS" | "HRESULT" | "GUID" => Some(String::new()),
 
         _ => None,
     }
 }
 
-/// Infers the argument name and annotation metadata from an expression,
-/// with an optional format specifier override from the format string.
+// /// Old format_spec_override that mapped specifiers to (etw_type, format_spec)
+// /// pairs. No longer needed — ETW type comes from TraceData::ETW_TYPE via
+// /// generic monomorphization.
+// fn format_spec_override(spec: &str) -> Option<(&'static str, &'static str)> { ... }
+
+/// Infers the argument name and metadata from an expression,
+/// with an optional display format override from the format string.
 ///
-/// If `spec_override` is provided (e.g., from `{:NTSTATUS}`), it takes
-/// precedence over any inference from the expression structure.
-///
-/// **Variables require an explicit format specifier.** Only literals and
-/// well-known constructor calls (e.g., `NtStatus::from()`) can use bare `{}`.
+/// **Variables no longer require explicit format specifiers.** The ETW type
+/// is resolved at compile time via `TraceData::ETW_TYPE` through the generic
+/// annotation function. Format specifiers like `{:x}` are optional display
+/// hints for the WPP typev line.
 fn infer_arg_info(
     expr: &syn::Expr,
     idx: usize,
@@ -1156,16 +1125,14 @@ fn infer_arg_info(
     use syn::Expr;
 
     let name = extract_arg_name(expr, idx);
+    let mut display_format = String::new();
+    let mut wrap_cstring = false;
+    let mut type_as_i32 = false;
 
-    // Format specifier override takes precedence
+    // Handle display format override from {:spec}
     if let Some(spec) = spec_override {
-        if let Some((etw_type, format_spec)) = format_spec_override(spec) {
-            return Ok(TraceArg {
-                name,
-                etw_type,
-                format_spec,
-                expr: expr.clone(),
-            });
+        if let Some(fmt) = display_format_for(spec) {
+            display_format = fmt;
         } else {
             return Err(Error::new_spanned(
                 expr,
@@ -1177,83 +1144,44 @@ fn infer_arg_info(
                 ),
             ));
         }
-    }
-
-    // Check for NtStatus, NtStatusError, NtStatusNonError constructor call
-    // expressions
-    if let Expr::Call(call) = expr {
-        if let Expr::Path(func_path) = call.func.as_ref() {
-            for seg in &func_path.path.segments {
-                let ident_str = seg.ident.to_string();
-                if matches!(
-                    ident_str.as_str(),
-                    "NtStatus" | "NtStatusError" | "NtStatusNonError"
-                ) {
-                    return Ok(TraceArg {
-                        name,
-                        etw_type: "ItemNTSTATUS",
-                        format_spec: "s",
-                        expr: expr.clone(),
-                    });
-                }
-            }
+        if matches!(spec, "s" | "str") {
+            wrap_cstring = true;
         }
     }
 
-    // Infer type from expression structure — only literals are auto-detected
+    // Detect string literals → auto CString wrap
     match expr {
         Expr::Lit(lit) => match &lit.lit {
-            Lit::Str(_) => Ok(TraceArg {
-                name,
-                etw_type: "ItemString",
-                format_spec: "s",
-                expr: expr.clone(),
-            }),
-            Lit::Int(int_lit) => {
-                let (etw_type, format_spec) = match int_lit.suffix() {
-                    "i8" | "i16" | "i32" => ("ItemLong", "d"),
-                    "u8" | "u16" | "u32" => ("ItemULong", "u"),
-                    "i64" => ("ItemLongLong", "I64d"),
-                    "u64" => ("ItemULongLong", "I64u"),
-                    "isize" => isize_etw(),
-                    "usize" => usize_etw(),
-                    _ => ("ItemLong", "d"),
-                };
-                Ok(TraceArg {
-                    name,
-                    etw_type,
-                    format_spec,
-                    expr: expr.clone(),
-                })
+            Lit::Str(_) => {
+                wrap_cstring = true;
             }
-            _ => Err(Error::new_spanned(
-                lit,
-                "Unsupported literal type for tracing",
-            )),
+            Lit::Int(int_lit) if int_lit.suffix().is_empty() => {
+                type_as_i32 = true;
+            }
+            _ => {}
         },
-        Expr::Reference(r) => match r.expr.as_ref() {
-            Expr::Lit(lit) if matches!(&lit.lit, Lit::Str(_)) => Ok(TraceArg {
-                name,
-                etw_type: "ItemString",
-                format_spec: "s",
-                expr: expr.clone(),
-            }),
-            _ => Err(Error::new_spanned(
-                expr,
-                "Variables require an explicit format specifier. Use {:d}, {:u}, {:x}, {:s}, \
-                 {:NTSTATUS}, {:HRESULT}, etc.",
-            )),
-        },
-        // All other expressions (variables, method calls, field access, etc.)
-        // require an explicit format specifier — the proc macro cannot determine
-        // the type from syntax alone.
-        _ => Err(Error::new_spanned(
-            expr,
-            "Variables require an explicit format specifier. Use {:d}, {:u}, {:x}, {:s}, \
-             {:NTSTATUS}, {:HRESULT}, etc.",
-        )),
+        Expr::Reference(r) => {
+            if let Expr::Lit(lit) = r.expr.as_ref() {
+                if matches!(&lit.lit, Lit::Str(_)) {
+                    wrap_cstring = true;
+                }
+            }
+        }
+        _ => {}
     }
+
+    Ok(TraceArg {
+        name,
+        display_format,
+        expr: expr.clone(),
+        wrap_cstring,
+        type_as_i32,
+    })
 }
+
+// /// Old infer_arg_info that required explicit format specifiers for variables.
+// /// No longer needed — the generic annotation function resolves ETW types
+// /// via TraceData::ETW_TYPE at monomorphization time.
 
 /// Extracts a human-readable name from an expression for use in trace
 /// annotations.
@@ -1301,6 +1229,8 @@ fn extract_arg_name(expr: &syn::Expr, idx: usize) -> String {
 
 /// Generates the WPP-style format string with numbered placeholders.
 /// Strips any `:SPEC` suffixes from the format string.
+/// Uses bare `%N` when no display format override is specified,
+/// or `%N!spec!` when an explicit display format is given.
 fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
     let mut result = String::new();
     let mut arg_idx = 0;
@@ -1319,8 +1249,12 @@ fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
                 }
                 if arg_idx < args.len() {
                     let param_num = 10 + arg_idx;
-                    let spec = args[arg_idx].format_spec;
-                    result.push_str(&format!("%{}!{}!", param_num, spec));
+                    let spec = &args[arg_idx].display_format;
+                    if spec.is_empty() {
+                        result.push_str(&format!("%{}", param_num));
+                    } else {
+                        result.push_str(&format!("%{}!{}!", param_num, spec));
+                    }
                     arg_idx += 1;
                 }
             }
@@ -1342,58 +1276,52 @@ fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
 ///
 /// # Format Specifiers
 ///
-/// **All variables require an explicit format specifier** in the format string
-/// using the `{:SPEC}` syntax. This ensures correct ETW type metadata in the
-/// PDB annotation, which WPP trace decoders rely on.
+/// Format specifiers are **optional**. The ETW type metadata (e.g., `ItemLong`,
+/// `ItemString`) is resolved at compile time via `TraceData::ETW_TYPE` through
+/// generic monomorphization — the proc macro does not need to know the type.
 ///
-/// ## Auto-detected (bare `{}` allowed):
-/// - **Integer literals**: `1001` → `ItemLong`, `1000u64` → `ItemULongLong`
-/// - **String literals**: `"hello"` → `ItemString`
-/// - **`NtStatus::from(val)`**: → `ItemNTSTATUS`
-/// - **HRESULT variable**: use `{:HRESULT}` format specifier
+/// Optional display format overrides can be specified using `{:SPEC}` syntax
+/// to control how the value appears in trace decoder output.
 ///
-/// ## Specifiers for variables:
+/// ## Auto-detected:
+/// - **Integer literals**: `42` → `i32`, `1000u64` → `u64`
+/// - **String literals**: `"hello"` → wrapped in `CString`
+/// - **All typed variables**: ETW type resolved via `TraceData::ETW_TYPE`
 ///
-/// | Specifier          | ETW Type         | WPP Format | Use for                |
-/// |--------------------|------------------|------------|------------------------|
-/// | `{:d}` or `{:i}`   | `ItemLong`       | `%!d!`     | Signed 32-bit int      |
-/// | `{:u}`             | `ItemULong`      | `%!u!`     | Unsigned 32-bit int    |
-/// | `{:x}` / `{:X}`   | `ItemLong`       | `%!x!`     | 32-bit hex             |
-/// | `{:o}`             | `ItemLong`       | `%!o!`     | 32-bit octal           |
-/// | `{:s}`             | `ItemString`     | `%!s!`     | ANSI string            |
-/// | `{:p}`             | `ItemPtr`        | `%!p!`     | Pointer                |
-/// | `{:u64}`           | `ItemULongLong`  | `%!I64u!`  | Unsigned 64-bit        |
-/// | `{:i64}`           | `ItemLongLong`   | `%!I64d!`  | Signed 64-bit          |
-/// | `{:NTSTATUS}`      | `ItemNTSTATUS`   | `%!s!`     | NTSTATUS code          |
-/// | `{:HRESULT}`       | `ItemHRESULT`    | `%!s!`     | HRESULT code           |
-/// | `{:GUID}`          | `ItemGuid`       | `%!s!`     | 128-bit GUID           |
-/// | `{:bool}`          | `ItemLong`       | `%!d!`     | Boolean as integer     |
+/// ## Optional display overrides:
 ///
-/// See [`format_spec_override`] for the full list of supported specifiers.
+/// | Override           | Display Format | Use for                    |
+/// |--------------------|----------------|----------------------------|
+/// | `{:x}` / `{:X}`   | hex            | Hex display                |
+/// | `{:o}`             | octal          | Octal display              |
+/// | `{:d}`             | decimal        | Explicit decimal           |
+/// | `{:s}`             | string         | Wrap variable in `CString` |
+/// | `{:p}`             | pointer        | Pointer display            |
 ///
 /// # Usage
 ///
 /// ```ignore
-/// // Integer variable — must specify {:d}
+/// // Variables — no format specifier needed!
 /// let code: i32 = 42;
-/// trace!("Code: {:d}", code);
+/// trace!("Code: {}", code);
 ///
-/// // Integer literal — auto-detected, bare {} ok
+/// // Integer literal — auto-typed as i32
 /// trace!("Value: {}", 42);
 ///
-/// // NtStatus variable — must specify {:NTSTATUS}
+/// // NtStatus variable — auto-detected via TraceData
 /// let status = NtStatus::from(0);
-/// trace!("Status: {:NTSTATUS}", status);
+/// trace!("Status: {}", status);
 ///
-/// // NtStatus constructor — auto-detected, bare {} ok
-/// trace!("Status: {}", NtStatus::from(0));
+/// // HRESULT — use HResult wrapper
+/// let hr = HResult(0);
+/// trace!("Result: {}", hr);
 ///
-/// // Hex display
+/// // Hex display override
 /// let flags: u32 = 0xFF;
 /// trace!("Flags: {:x}", flags);
 ///
 /// // With flag and level
-/// trace!(FLAG_ONE, Information, "Status: {:NTSTATUS}", status);
+/// trace!(FLAG_ONE, Information, "Status: {}", status);
 /// ```
 #[proc_macro]
 pub fn trace(item: TokenStream) -> TokenStream {
@@ -1436,11 +1364,20 @@ pub fn trace(item: TokenStream) -> TokenStream {
 
     let (arg_bindings, byte_slice_bindings, byte_slice_idents) = generate_arg_code(&args);
 
-    // Build annotation args with split descriptors. Each arg descriptor becomes
-    // three array entries so the ETW type name comes from TraceData::FORMAT_SPEC
-    // (resolved at compile time via format_spec_of) rather than from the proc
-    // macro.   "name, ",  __trace_argN_etw_type,  " -- N"
-    let mut annotation_args: Vec<proc_macro2::TokenStream> = vec![
+    // Build generic type parameters and annotation body entries.
+    // Each arg gets a type parameter TN with TraceData bound, and the
+    // annotation body uses TN::ETW_TYPE for the ETW type string.
+    let type_params: Vec<syn::Ident> = (0..args.len())
+        .map(|i| syn::Ident::new(&format!("T{}", i), proc_macro2::Span::call_site()))
+        .collect();
+
+    let fn_name = syn::Ident::new(
+        &format!("__trace_codeview_{}", message_id),
+        proc_macro2::Span::call_site(),
+    );
+
+    // Build annotation array entries with T::ETW_TYPE from generic params
+    let mut annotation_entries: Vec<proc_macro2::TokenStream> = vec![
         quote! { "TMF:" },
         quote! { #param2 },
         quote! { #param3 },
@@ -1450,29 +1387,38 @@ pub fn trace(item: TokenStream) -> TokenStream {
         let param_num = 10 + idx;
         let prefix = format!("{}, ", arg.name);
         let suffix = format!(" -- {}", param_num);
-        let etw_type_ident = syn::Ident::new(
-            &format!("__trace_arg{}_etw_type", idx),
-            proc_macro2::Span::call_site(),
-        );
-        annotation_args.push(quote! { #prefix });
-        annotation_args.push(quote! { #etw_type_ident });
-        annotation_args.push(quote! { #suffix });
+        let tp = &type_params[idx];
+        annotation_entries.push(quote! { #prefix });
+        annotation_entries.push(quote! { #tp::ETW_TYPE });
+        annotation_entries.push(quote! { #suffix });
     }
-    annotation_args.push(quote! { "}" });
+    annotation_entries.push(quote! { "}" });
 
-    // Generate let bindings that resolve each arg's ETW type name from
-    // TraceData::FORMAT_SPEC via the const fn format_spec_of helper.
-    let etw_type_bindings: Vec<proc_macro2::TokenStream> = (0..args.len())
-        .map(|idx| {
-            let arg_name = syn::Ident::new(
-                &format!("__trace_arg{}", idx),
-                proc_macro2::Span::call_site(),
-            );
-            let etw_type_name = syn::Ident::new(
-                &format!("__trace_arg{}_etw_type", idx),
-                proc_macro2::Span::call_site(),
-            );
-            quote! { let #etw_type_name = ::wdf::__internal::format_spec_of(&#arg_name); }
+    // Build the generic function: type params, bounds, parameters, and call args
+    let generics = if type_params.is_empty() {
+        quote! {}
+    } else {
+        let bounds: Vec<proc_macro2::TokenStream> = type_params
+            .iter()
+            .map(|tp| quote! { #tp: ::wdf::__internal::TraceData })
+            .collect();
+        quote! { <#(#bounds),*> }
+    };
+
+    let fn_params: Vec<proc_macro2::TokenStream> = type_params
+        .iter()
+        .enumerate()
+        .map(|(i, tp)| {
+            let pname = syn::Ident::new(&format!("_arg{}", i), proc_macro2::Span::call_site());
+            quote! { #pname: &#tp }
+        })
+        .collect();
+
+    let call_args: Vec<proc_macro2::TokenStream> = (0..args.len())
+        .map(|i| {
+            let arg_name =
+                syn::Ident::new(&format!("__trace_arg{}", i), proc_macro2::Span::call_site());
+            quote! { &#arg_name }
         })
         .collect();
 
@@ -1513,17 +1459,18 @@ pub fn trace(item: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         {
+            extern crate alloc;
+
             #(#arg_bindings)*
 
-            #(#etw_type_bindings)*
-
-            unsafe {
+            #[inline(always)]
+            fn #fn_name #generics (#(#fn_params),*) {
                 core::intrinsics::codeview_annotation(
-                    core::mem::transmute::<&[&str], &'static [&'static str]>(
-                        &[#(#annotation_args),*]
-                    )
+                    &[#(#annotation_entries),*]
                 );
             }
+
+            #fn_name(#(#call_args),*);
 
             #(#byte_slice_bindings)*
 
@@ -1555,7 +1502,7 @@ pub fn trace(item: TokenStream) -> TokenStream {
                             __auto_log_context,
                             __trace_level,
                             __trace_flags,
-                            (&::wdf::__internal::TRACE_GUID as *const _ as *mut _),
+                            &::wdf::__internal::TRACE_GUID as *const _ as *mut _,
                             #message_id_lit,
                             #(#variadic_args)*
                             core::ptr::null::<core::ffi::c_void>(),
@@ -1571,6 +1518,11 @@ pub fn trace(item: TokenStream) -> TokenStream {
 
 /// Generates argument bindings, byte-slice conversions via `as_bytes()`, and
 /// byte-slice identifiers.
+///
+/// String literals (and `{:s}` overrides) are wrapped in `CString`.
+/// Unsuffixed integer literals are type-annotated as `i32`.
+/// All other expressions are passed through — the `TraceData` bound on the
+/// generic annotation function ensures type safety at compile time.
 fn generate_arg_code(
     args: &[TraceArg],
 ) -> (
@@ -1593,25 +1545,22 @@ fn generate_arg_code(
         );
         let expr = &arg.expr;
 
-        if arg.etw_type == "ItemString" {
+        if arg.wrap_cstring {
             // String arguments: convert to CString first
             bindings.push(quote! {
                 let #arg_name = alloc::ffi::CString::new(#expr).unwrap();
             });
+        } else if arg.type_as_i32 {
+            // Unsuffixed integer literals: type as i32
+            bindings.push(quote! {
+                let #arg_name: i32 = #expr;
+            });
         } else {
-            let is_unsuffixed_int = matches!(
-                expr,
-                syn::Expr::Lit(syn::ExprLit { lit: Lit::Int(il), .. }) if il.suffix().is_empty()
-            );
-            if is_unsuffixed_int {
-                bindings.push(quote! {
-                    let #arg_name: i32 = #expr;
-                });
-            } else {
-                bindings.push(quote! {
-                    let #arg_name = #expr;
-                });
-            }
+            // All other expressions: pass through, TraceData bound
+            // ensures correctness at compile time
+            bindings.push(quote! {
+                let #arg_name = #expr;
+            });
         }
 
         byte_slices.push(quote! {
