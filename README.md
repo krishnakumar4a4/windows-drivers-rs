@@ -178,7 +178,7 @@ Minimal examples of `WDM`, `KMDF`, and `UMDF` drivers can be found in the [examp
 
 ## Cargo Make
 
-> **Preview:** A new purpose-built tool, [`cargo-wdk`](./crates/cargo-wdk), is now available to simplify building drivers. The first preview release has been published on [crates.io](https://crates.io/crates/cargo-wdk) and can be installed with `cargo install cargo-wdk`. Over the coming months, it will replace the current `cargo-make`-based development workflow. Please try it out and share your feedback and suggestions.
+> **Preview:** We are developing a new cargo-extension [`cargo-wdk`](https://crates.io/crates/cargo-wdk) that will replace `cargo-make` as the recommended tool for building Rust drivers. Please try it out and share your feedback.
 
 [`cargo-make`](https://github.com/sagiegurari/cargo-make) is used to facilitate builds using `windows-drivers-rs`, including for executing post-build driver packaging steps.
 
