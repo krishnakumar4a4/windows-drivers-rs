@@ -1227,10 +1227,56 @@ fn extract_arg_name(expr: &syn::Expr, idx: usize) -> String {
     }
 }
 
+/// Extracts the literal text segments between `{}` placeholders in a format
+/// string.  For N placeholders (args), returns N+1 segments.
+///
+/// # Example
+/// ```ignore
+/// extract_format_literal_segments("i32={}, u64={}")
+///   => ["i32=", ", u64=", ""]
+/// ```
+fn extract_format_literal_segments(format_str: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut chars = format_str.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '{' {
+            if chars.peek() == Some(&'{') {
+                chars.next(); // Escaped {{
+                current.push('{');
+                continue;
+            }
+            // Skip everything inside {}
+            while let Some(inner) = chars.next() {
+                if inner == '}' {
+                    break;
+                }
+            }
+            segments.push(std::mem::take(&mut current));
+        } else if c == '}' {
+            if chars.peek() == Some(&'}') {
+                chars.next();
+                current.push('}');
+            } else {
+                current.push(c);
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    segments.push(current);
+    segments
+}
+
 /// Generates the WPP-style format string with numbered placeholders.
 /// Strips any `:SPEC` suffixes from the format string.
 /// Uses bare `%N` when no display format override is specified,
 /// or `%N!spec!` when an explicit display format is given.
+///
+/// NOTE: This function is retained for reference / zero-arg fallback.
+/// For args > 0 the format string is now constructed at compile time via
+/// `generic_const_exprs` and `TraceData::FORMAT_SPEC`.
 fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
     let mut result = String::new();
     let mut arg_idx = 0;
@@ -1358,9 +1404,7 @@ pub fn trace(item: TokenStream) -> TokenStream {
 
     // Build the codeview_annotation parameters
     let param2 = format!("{} {} // SRC={} MJ= MN=", msg_guid, driver_name, file_name);
-    let wpp_format = generate_wpp_format_string(&format_str, &args);
     let typev_name = format!("{}_{}", driver_name, line_number);
-    let param3 = format!("#typev {} {} \"%0{}\"", typev_name, message_id, wpp_format);
 
     let (arg_bindings, byte_slice_bindings, byte_slice_idents) = generate_arg_code(&args);
 
@@ -1376,23 +1420,225 @@ pub fn trace(item: TokenStream) -> TokenStream {
         proc_macro2::Span::call_site(),
     );
 
-    // Build annotation array entries with T::ETW_TYPE from generic params
-    let mut annotation_entries: Vec<proc_macro2::TokenStream> = vec![
-        quote! { "TMF:" },
-        quote! { #param2 },
-        quote! { #param3 },
-        quote! { "{" },
-    ];
+    // -----------------------------------------------------------------------
+    // Compile-time format string construction via generic_const_exprs.
+    //
+    // For args > 0: a helper struct concatenates static typev segments with
+    // T::FORMAT_SPEC at compile time, producing a single &'static str.
+    // For args == 0: the typev line is fully static.
+    // -----------------------------------------------------------------------
+    let fmt_segments = extract_format_literal_segments(&format_str);
+    let typev_prefix = format!("#typev {} {} \"%0", typev_name, message_id);
+    let typev_suffix = "\"";
+
+    // Build the N+1 static segments that interleave with T::FORMAT_SPEC.
+    // Pattern: static[0] + T0::FORMAT_SPEC + static[1] + T1::FORMAT_SPEC + ... + static[N]
+    // Where static[0] = prefix + seg[0] + "%10!"
+    //       static[i] = "!" + seg[i] + "%{10+i}!"   for 1 <= i < N
+    //       static[N] = "!" + seg[N] + suffix
+    let mut typev_static_segs: Vec<String> = Vec::new();
+    if args.is_empty() {
+        typev_static_segs
+            .push(format!("{}{}{}", typev_prefix, fmt_segments[0], typev_suffix));
+    } else {
+        for i in 0..=args.len() {
+            if i == 0 {
+                typev_static_segs
+                    .push(format!("{}{}%{}!", typev_prefix, fmt_segments[i], 10 + i));
+            } else if i == args.len() {
+                typev_static_segs
+                    .push(format!("!{}{}", fmt_segments[i], typev_suffix));
+            } else {
+                typev_static_segs
+                    .push(format!("!{}%{}!", fmt_segments[i], 10 + i));
+            }
+        }
+    }
+
+    // Compute total static segment length (known at proc-macro time).
+    let static_total: usize = typev_static_segs.iter().map(|s| s.len()).sum();
+
+    // ---- Generate the format-builder struct / where clause / param3 entry ----
+    let (fmt_struct_code, fn_where_clause, param3_annotation) = if args.is_empty() {
+        // Zero args: the typev line is fully static, no generic const needed.
+        let param3 = typev_static_segs[0].clone();
+        (quote! {}, quote! {}, quote! { #param3 })
+    } else {
+        let fmt_struct_name = syn::Ident::new(
+            &format!("__TraceFmt{}", message_id),
+            proc_macro2::Span::call_site(),
+        );
+
+        let static_total_lit =
+            proc_macro2::Literal::usize_suffixed(static_total);
+
+        // Sum expression:  static_total + T0::FORMAT_SPEC.len() + T1::FORMAT_SPEC.len() + ...
+        let format_spec_lens: Vec<proc_macro2::TokenStream> = type_params
+            .iter()
+            .map(|tp| quote! { + #tp::FORMAT_SPEC.len() })
+            .collect();
+
+        // Build byte-copy loops: interleave static segment copies and
+        // generic FORMAT_SPEC copies.
+        let mut copy_loops: Vec<proc_macro2::TokenStream> = Vec::new();
+        for (i, seg) in typev_static_segs.iter().enumerate() {
+            // Static segment
+            let seg_lit = proc_macro2::Literal::string(seg);
+            copy_loops.push(quote! {
+                {
+                    let s = #seg_lit.as_bytes();
+                    let mut i = 0usize;
+                    while i < s.len() { buf[pos] = s[i]; pos += 1; i += 1; }
+                }
+            });
+            // Generic FORMAT_SPEC segment (N generic segs between N+1 static segs)
+            if i < args.len() {
+                let tp = &type_params[i];
+                copy_loops.push(quote! {
+                    {
+                        let s = #tp::FORMAT_SPEC.as_bytes();
+                        let mut i = 0usize;
+                        while i < s.len() { buf[pos] = s[i]; pos += 1; i += 1; }
+                    }
+                });
+            }
+        }
+
+        // Struct bounds (shared between struct def and impl)
+        let struct_bounds: Vec<proc_macro2::TokenStream> = type_params
+            .iter()
+            .map(|tp| quote! { #tp: ::wdf::__internal::TraceData })
+            .collect();
+
+        let struct_code = quote! {
+            struct #fmt_struct_name <#(#struct_bounds),*> (
+                core::marker::PhantomData<(#(#type_params),*)>
+            );
+
+            #[allow(unused_parens)]
+            impl<#(#struct_bounds),*> #fmt_struct_name <#(#type_params),*>
+            where [(); #static_total_lit #(#format_spec_lens)* ]:
+            {
+                const BYTES: [u8; #static_total_lit #(#format_spec_lens)*] = {
+                    let mut buf = [0u8; #static_total_lit #(#format_spec_lens)*];
+                    let mut pos = 0usize;
+                    #(#copy_loops)*
+                    buf
+                };
+                const VALUE: &'static str =
+                    unsafe { core::str::from_utf8_unchecked(&Self::BYTES) };
+            }
+        };
+
+        let where_clause = quote! {
+            where [(); #static_total_lit #(#format_spec_lens)* ]:
+        };
+
+        let param3_entry =
+            quote! { #fmt_struct_name::<#(#type_params),*>::VALUE };
+
+        (struct_code, where_clause, param3_entry)
+    };
+
+    // Build per-argument concat structs that merge "name, " + T::ETW_TYPE + " -- N"
+    // into a single &'static str at compile time, using the same generic_const_exprs
+    // approach as the format string.
+    let mut arg_concat_struct_codes: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut arg_concat_value_tokens: Vec<proc_macro2::TokenStream> = Vec::new();
+
     for (idx, arg) in args.iter().enumerate() {
         let param_num = 10 + idx;
         let prefix = format!("{}, ", arg.name);
         let suffix = format!(" -- {}", param_num);
         let tp = &type_params[idx];
-        annotation_entries.push(quote! { #prefix });
-        annotation_entries.push(quote! { #tp::ETW_TYPE });
-        annotation_entries.push(quote! { #suffix });
+
+        let prefix_len = prefix.len();
+        let suffix_len = suffix.len();
+        let static_part_len = prefix_len + suffix_len;
+        let static_part_lit = proc_macro2::Literal::usize_suffixed(static_part_len);
+
+        let prefix_lit = proc_macro2::Literal::string(&prefix);
+        let suffix_lit = proc_macro2::Literal::string(&suffix);
+
+        let struct_name = syn::Ident::new(
+            &format!("__TraceArg{}_{}", idx, message_id),
+            proc_macro2::Span::call_site(),
+        );
+
+        let arg_struct = quote! {
+            struct #struct_name <__TA: ::wdf::__internal::TraceData> (
+                core::marker::PhantomData<__TA>
+            );
+
+            #[allow(unused_parens)]
+            impl<__TA: ::wdf::__internal::TraceData> #struct_name <__TA>
+            where [(); #static_part_lit + __TA::ETW_TYPE.len() ]:
+            {
+                const BYTES: [u8; #static_part_lit + __TA::ETW_TYPE.len()] = {
+                    let mut buf = [0u8; #static_part_lit + __TA::ETW_TYPE.len()];
+                    let mut pos = 0usize;
+                    {
+                        let s = #prefix_lit .as_bytes();
+                        let mut i = 0usize;
+                        while i < s.len() { buf[pos] = s[i]; pos += 1; i += 1; }
+                    }
+                    {
+                        let s = __TA::ETW_TYPE.as_bytes();
+                        let mut i = 0usize;
+                        while i < s.len() { buf[pos] = s[i]; pos += 1; i += 1; }
+                    }
+                    {
+                        let s = #suffix_lit .as_bytes();
+                        let mut i = 0usize;
+                        while i < s.len() { buf[pos] = s[i]; pos += 1; i += 1; }
+                    }
+                    buf
+                };
+                const VALUE: &'static str =
+                    unsafe { core::str::from_utf8_unchecked(&Self::BYTES) };
+            }
+        };
+        arg_concat_struct_codes.push(arg_struct);
+
+        // Reference:  __TraceArgN_M::<TN>::VALUE
+        arg_concat_value_tokens.push(quote! { #struct_name :: <#tp> :: VALUE });
+    }
+
+    // Build annotation array entries — each arg is now a single concatenated line.
+    let mut annotation_entries: Vec<proc_macro2::TokenStream> = vec![
+        quote! { "TMF:" },
+        quote! { #param2 },
+        param3_annotation,
+        quote! { "{" },
+    ];
+    for arg_value in &arg_concat_value_tokens {
+        annotation_entries.push(quote! { #arg_value });
     }
     annotation_entries.push(quote! { "}" });
+
+    // Also add per-arg where bounds to the function where clause so the
+    // arg concat structs' const exprs are constrained.
+    let mut arg_where_bounds: Vec<proc_macro2::TokenStream> = Vec::new();
+    for (idx, _arg) in args.iter().enumerate() {
+        let prefix = format!("{}, ", _arg.name);
+        let suffix = format!(" -- {}", 10 + idx);
+        let static_part_len = prefix.len() + suffix.len();
+        let static_part_lit = proc_macro2::Literal::usize_suffixed(static_part_len);
+        let tp = &type_params[idx];
+        arg_where_bounds.push(quote! { [(); #static_part_lit + #tp::ETW_TYPE.len() ]: });
+    }
+
+    // Merge the format-string where clause with per-arg where clauses.
+    // All bounds go under a single `where` keyword, comma-separated.
+    let fn_where_clause = if args.is_empty() {
+        fn_where_clause  // already empty
+    } else {
+        // fn_where_clause is `where [(); <fmt_len_expr>]:` — strip it and
+        // rebuild with all bounds comma-separated under one `where`.
+        quote! {
+            #fn_where_clause , #(#arg_where_bounds),*
+        }
+    };
 
     // Build the generic function: type params, bounds, parameters, and call args
     let generics = if type_params.is_empty() {
@@ -1463,8 +1709,12 @@ pub fn trace(item: TokenStream) -> TokenStream {
 
             #(#arg_bindings)*
 
+            #fmt_struct_code
+
+            #(#arg_concat_struct_codes)*
+
             #[inline(always)]
-            fn #fn_name #generics (#(#fn_params),*) {
+            fn #fn_name #generics (#(#fn_params),*) #fn_where_clause {
                 core::intrinsics::codeview_annotation(
                     &[#(#annotation_entries),*]
                 );

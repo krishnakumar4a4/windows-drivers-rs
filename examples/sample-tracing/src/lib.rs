@@ -1,6 +1,8 @@
 #![no_std]
 #![feature(codeview_annotation)]
 #![feature(core_intrinsics)]
+#![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
 
 // Nightly features for compile time reflection (kept for future exploration,
 // no longer required by the trace! macro)
@@ -49,86 +51,7 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
 
     trace!(FLAG_ONE, "i8={}, i16={}", val_i8, val_i16);
     trace!(FLAG_ONE, "i32={}, i64={}", val_i32, val_i64);
-   //  trace!(FLAG_ONE, "u8={}, u16={}", val_u8, val_u16);
-
-   {
-        let __trace_arg0 = val_u8;
-        let __trace_arg1 = val_u16;
-        #[inline(always)]
-        fn __trace_codeview_15<
-            T0: ::wdf::__internal::TraceData,
-            T1: ::wdf::__internal::TraceData,
-        >(_arg0: &T0, _arg1: &T1) {
-               core::intrinsics::codeview_annotation(
-                  &[
-                     "TMF:",
-                     "e7602a7b-5034-321b-d450-a986113fc2e1 sample_tracing // SRC=lib.rs MJ= MN=",
-                     "#typev sample_tracing_52 15 \"%0u8=%10!d!, u16=%11!d!\"",
-                     "{",
-                     "val_u8, ",
-                     T0::ETW_TYPE,
-                     " -- 10",
-                     "val_u16, ",
-                     T1::ETW_TYPE,
-                     " -- 11",
-                     "}",
-                  ],
-               );
-        }
-        __trace_codeview_15(&__trace_arg0, &__trace_arg1);
-        let __trace_bytes0 = ::wdf::__internal::TraceData::as_bytes(&__trace_arg0);
-        let __trace_bytes1 = ::wdf::__internal::TraceData::as_bytes(&__trace_arg1);
-        let __trace_level: u8 = TraceLevel::None as u8;
-        let __trace_flags: u32 = {
-            let __flag = WppFlag::by_name("FLAG_ONE").expect("Unknown WppFlag");
-            (__flag.flag_index() + 1) as u32
-        };
-        let __control_index: usize = {
-            let __flag = WppFlag::by_name("FLAG_ONE").expect("Unknown WppFlag");
-            __flag.control_index()
-        };
-        if let Some(__trace_writer) = ::wdf::get_trace_writer() {
-            let __should_trace_wpp = (__trace_flags == 0
-                || __trace_writer.is_flag_enabled(__control_index, __trace_flags))
-                && __trace_writer.is_level_enabled(__control_index, __trace_level);
-            let __should_auto_log = __trace_level < TraceLevel::Verbose as u8
-                || __trace_writer.is_auto_log_verbose_enabled(__control_index);
-            unsafe {
-                if __should_trace_wpp {
-                    let __logger = ::wdf::__internal::get_wpp_logger().unwrap();
-                    let _ = ::wdf::__internal::get_wpp_trace_message()
-                        .unwrap()(
-                        __logger,
-                        ::wdf::__internal::WPP_TRACE_OPTIONS,
-                        &::wdf::__internal::TRACE_GUID,
-                        15,
-                        __trace_bytes0.as_ptr() as *const core::ffi::c_void,
-                        __trace_bytes0.len(),
-                        __trace_bytes1.as_ptr() as *const core::ffi::c_void,
-                        __trace_bytes1.len(),
-                        core::ptr::null::<core::ffi::c_void>(),
-                    );
-                }
-                if __should_auto_log {
-                    let __auto_log_context = ::wdf::__internal::get_auto_log_context()
-                        .unwrap();
-                    let _ = ::wdf::__internal::WppAutoLogTrace(
-                        __auto_log_context,
-                        __trace_level,
-                        __trace_flags,
-                        &::wdf::__internal::TRACE_GUID as *const _ as *mut _,
-                        15,
-                        __trace_bytes0.as_ptr() as *const core::ffi::c_void,
-                        __trace_bytes0.len(),
-                        __trace_bytes1.as_ptr() as *const core::ffi::c_void,
-                        __trace_bytes1.len(),
-                        core::ptr::null::<core::ffi::c_void>(),
-                    );
-                }
-            }
-        }
-    };
-
+    trace!(FLAG_ONE, "u8={}, u16={}", val_u8, val_u16);
     trace!(FLAG_ONE, "u32={}, u64={}", val_u32, val_u64);
     trace!(FLAG_ONE, "isize={}, usize={}", val_isize, val_usize);
 

@@ -6,6 +6,8 @@
 #![no_std]
 #![allow(non_snake_case, non_camel_case_types)]
 #![feature(rustc_attrs)]
+#![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
 // Nightly features to get compile time reflection
 #![feature(type_info)]
 #![feature(const_cmp)]
