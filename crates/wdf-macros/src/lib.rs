@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit, Token, Type, meta::parser, parse_macro_input};
+use syn::{Error, Ident, ItemFn, ItemImpl, ItemStruct, Lit, Token, meta::parser, parse_macro_input};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 
@@ -746,146 +746,354 @@ fn should_generate_trait(key: &str) -> bool {
     }
 }
 
-/// Represents the type of a trace argument for WPP tracing
+/// Represents the type of a trace argument for WPP tracing, derived from
+/// C-style format specifiers as defined in defaultwpp.ini.
+///
+/// Supports both short-form (`%d`, `%I64u`) and long-form (`%!STATUS!`, `%!GUID!`)
+/// format specifiers.
 #[derive(Debug, Clone)]
-enum TraceArgType {
-    /// Signed integer types up to 32 bits (i8, i16, i32) - maps to ItemLong
-    Long,
-    /// Unsigned integer types up to 32 bits (u8, u16, u32) - maps to ItemULong
-    ULong,
-    /// Signed integer types 33-64 bits (i64, isize) - maps to ItemLongLong
-    LongLong,
-    /// Unsigned integer types 33-64 bits (u64, usize) - maps to ItemULongLong
-    ULongLong,
-    /// String types (&str, String) - maps to ItemString  
-    String,
-    // Future: Add more types as needed
-    // Pointer,
-    // Guid,
-    // etc.
-}
-
-impl TraceArgType {
-    /// Returns the WPP item type name
-    fn item_type_name(&self) -> &'static str {
-        match self {
-            TraceArgType::Long => "ItemLong",
-            TraceArgType::ULong => "ItemULong",
-            TraceArgType::LongLong => "ItemLongLong",
-            TraceArgType::ULongLong => "ItemULongLong",
-            TraceArgType::String => "ItemString",
-        }
-    }
-
-    /// Returns the C-style format specifier
-    fn format_specifier(&self) -> &'static str {
-        match self {
-            TraceArgType::Long => "d",
-            TraceArgType::ULong => "u",
-            TraceArgType::LongLong => "I64d",
-            TraceArgType::ULongLong => "I64u",
-            TraceArgType::String => "s",
-        }
-    }
-
-    /// Returns the single-character suffix for method naming
-    fn method_char(&self) -> char {
-        match self {
-            TraceArgType::Long => 'd',
-            TraceArgType::ULong => 'u',
-            TraceArgType::LongLong => 'D',
-            TraceArgType::ULongLong => 'U',
-            TraceArgType::String => 's',
-        }
-    }
-
-    /// Returns the Rust type used for this trace argument
-    fn rust_type(&self) -> &'static str {
-        match self {
-            TraceArgType::Long => "i32",
-            TraceArgType::ULong => "u32",
-            TraceArgType::LongLong => "i64",
-            TraceArgType::ULongLong => "u64",
-            TraceArgType::String => "LPCSTR",
-        }
-    }
-}
-
-/// Generates a method suffix from argument types (e.g., [Long, String] -> "ds")
-fn generate_method_suffix(args: &[TraceArg]) -> String {
-    args.iter().map(|a| a.arg_type.method_char()).collect()
-}
-
-/// Represents a parsed trace argument
-struct TraceArg {
+struct CFormatSpec {
+    /// The format specifier name as it appears in the format string (e.g. "d", "I64u", "STATUS")
     name: String,
-    arg_type: TraceArgType,
-    /// The original expression for this argument
-    expr: syn::Expr,
+    /// The WPP/ETW item type name (e.g. "ItemLong", "ItemNTSTATUS")
+    etw_type: String,
+    /// The format spec string to use in the TMF annotation (e.g. "d", "I64u", "s")
+    format_spec: String,
+    /// The Rust assertion type - the type we assign the trace arg to for compile-time checking
+    rust_assert_type: String,
+    /// Single character for method naming
+    method_char: char,
+    /// Whether this is a "complex" type that needs special handling (strings, GUID, etc.)
+    is_complex: bool,
 }
 
-/// Represents a trace argument input that may have an explicit type annotation
-/// Syntax: `expr` or `expr: Type`
-struct TraceArgInput {
-    expr: syn::Expr,
-    explicit_type: Option<syn::Type>,
-}
+/// Builds the mapping from C format specifier names to CFormatSpec.
+/// This is derived from the DEFINE_SIMPLE_TYPE, DEFINE_FLAVOR, and DEFINE_CPLX_TYPE
+/// definitions in defaultwpp.ini.
+fn build_format_spec_map() -> std::collections::HashMap<String, CFormatSpec> {
+    let mut map = std::collections::HashMap::new();
 
-impl Parse for TraceArgInput {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let expr: syn::Expr = input.parse()?;
-        
-        // Check if there's a colon followed by a type
-        let explicit_type = if input.peek(Token![:]) {
-            input.parse::<Token![:]>()?;
-            Some(input.parse::<Type>()?)
-        } else {
-            None
+    // Helper to insert a spec
+    macro_rules! spec {
+        ($name:expr, $etw:expr, $fmt:expr, $rust_ty:expr, $ch:expr) => {
+            map.insert($name.to_string(), CFormatSpec {
+                name: $name.to_string(),
+                etw_type: $etw.to_string(),
+                format_spec: $fmt.to_string(),
+                rust_assert_type: $rust_ty.to_string(),
+                method_char: $ch,
+                is_complex: false,
+            });
         };
-        
-        Ok(TraceArgInput { expr, explicit_type })
+        ($name:expr, $etw:expr, $fmt:expr, $rust_ty:expr, $ch:expr, complex) => {
+            map.insert($name.to_string(), CFormatSpec {
+                name: $name.to_string(),
+                etw_type: $etw.to_string(),
+                format_spec: $fmt.to_string(),
+                rust_assert_type: $rust_ty.to_string(),
+                method_char: $ch,
+                is_complex: true,
+            });
+        };
     }
+
+    // ---- Short-form specifiers (DEFINE_FLAVOR entries from defaultwpp.ini) ----
+    
+    // Char — %c can be used with both i8 and u8; we map to u8 since that's
+    // the more common Rust unsigned byte type (UBYTE in defaultwpp.ini)
+    spec!("c", "ItemChar", "c", "u8", 'b');
+    spec!("hc", "ItemChar", "c", "u8", 'b');
+
+    // Signed short
+    spec!("hi", "ItemShort", "hd", "i16", 'h');
+    spec!("hd", "ItemShort", "hd", "i16", 'h');
+
+    // Unsigned short
+    spec!("hu", "ItemShort", "hu", "u16", 'H');
+    spec!("hx", "ItemShort", "x", "u16", 'H');
+    spec!("hX", "ItemShort", "X", "u16", 'H');
+    spec!("ho", "ItemShort", "o", "u16", 'H');
+
+    // Signed int (32-bit)
+    spec!("i", "ItemLong", "d", "i32", 'd');
+    spec!("d", "ItemLong", "d", "i32", 'd');
+
+    // Unsigned int (32-bit)
+    spec!("u", "ItemLong", "u", "u32", 'u');
+    spec!("x", "ItemLong", "x", "u32", 'u');
+    spec!("X", "ItemLong", "X", "u32", 'u');
+    spec!("o", "ItemLong", "o", "u32", 'u');
+
+    // Signed long (32-bit, same as int on Windows)
+    spec!("li", "ItemLong", "d", "i32", 'd');
+    spec!("ld", "ItemLong", "d", "i32", 'd');
+
+    // Unsigned long (32-bit)
+    spec!("lu", "ItemLong", "u", "u32", 'u');
+    spec!("lx", "ItemLong", "x", "u32", 'u');
+    spec!("lX", "ItemLong", "X", "u32", 'u');
+    spec!("lo", "ItemLong", "o", "u32", 'u');
+
+    // Signed 64-bit
+    spec!("I64d", "ItemLongLong", "I64d", "i64", 'D');
+    spec!("lld", "ItemLongLong", "I64d", "i64", 'D');
+
+    // Unsigned 64-bit
+    spec!("I64u", "ItemULongLong", "I64u", "u64", 'U');
+    spec!("llu", "ItemULongLong", "I64u", "u64", 'U');
+
+    // Hex 64-bit
+    spec!("I64x", "ItemLongLongX", "I64x", "i64", 'D');
+    spec!("I64X", "ItemLongLongXX", "I64X", "i64", 'D');
+    spec!("I64o", "ItemLongLongO", "I64o", "i64", 'D');
+    spec!("llx", "ItemLongLongX", "I64x", "i64", 'D');
+    spec!("llX", "ItemLongLongXX", "I64X", "i64", 'D');
+    spec!("llo", "ItemLongLongO", "I64o", "i64", 'D');
+
+    // Pointer-sized (signed vs unsigned)
+    spec!("Id", "ItemPtr", "Id", "isize", 'P');
+    spec!("Iu", "ItemPtr", "Iu", "usize", 'P');
+    spec!("Ix", "ItemPtr", "Ix", "usize", 'P');
+    spec!("IX", "ItemPtr", "IX", "usize", 'P');
+    spec!("Io", "ItemPtr", "Io", "usize", 'P');
+
+    // Pointer
+    spec!("p", "ItemPtr", "p", "usize", 'P');
+
+    // Strings
+    spec!("s", "ItemString", "s", "&str", 's', complex);
+    spec!("hs", "ItemString", "s", "&str", 's', complex);
+    spec!("S", "ItemWString", "s", "&str", 'S', complex);
+    // TODO: ws, ls?
+
+    // Double/float
+    spec!("e", "ItemDouble", "s", "f64", 'g');
+    spec!("E", "ItemDouble", "s", "f64", 'g');
+    spec!("f", "ItemDouble", "s", "f64", 'g');
+    spec!("g", "ItemDouble", "s", "f64", 'g');
+    spec!("G", "ItemDouble", "s", "f64", 'g');
+
+    // ---- Long-form specifiers (%!NAME!) from defaultwpp.ini ----
+
+    // Basic integer types (long form)
+    spec!("SINT", "ItemLong", "d", "i32", 'd');
+    spec!("UINT", "ItemLong", "u", "u32", 'u');
+    spec!("SINT64", "ItemLongLong", "I64d", "i64", 'D');
+    spec!("UINT64", "ItemULongLong", "I64u", "u64", 'U');
+    spec!("SBYTE", "ItemChar", "c", "i8", 'b');
+    spec!("UBYTE", "ItemChar", "c", "u8", 'B');
+    spec!("SSHORT", "ItemShort", "hd", "i16", 'h');
+    spec!("USHORT", "ItemShort", "hu", "u16", 'H');
+    spec!("SLONG", "ItemLong", "ld", "i32", 'd');
+    spec!("ULONG", "ItemLong", "lu", "u32", 'u');
+    spec!("DOUBLE", "ItemDouble", "s", "f64", 'g');
+
+    // Hex display variants
+    spec!("XINT", "ItemLong", "08x", "i32", 'd');
+    spec!("OINT", "ItemLong", "o", "i32", 'd');
+    spec!("XLONG", "ItemLong", "08lX", "i32", 'd');
+    spec!("OLONG", "ItemLong", "lo", "i32", 'd');
+    spec!("XSHORT", "ItemShort", "04hX", "i16", 'h');
+    spec!("OSHORT", "ItemShort", "ho", "i16", 'h');
+    spec!("XBYTE", "ItemChar", "02x", "i8", 'b');
+    spec!("OBYTE", "ItemChar", "o", "i8", 'b');
+    spec!("XINT64", "ItemLongLongX", "I64x", "i64", 'D');
+    spec!("XXINT64", "ItemLongLongXX", "I64X", "i64", 'D');
+    spec!("OINT64", "ItemLongLongO", "I64o", "i64", 'D');
+
+    // Pointer types
+    spec!("PTR", "ItemPtr", "p", "usize", 'P');
+    spec!("HANDLE", "ItemPtr", "p", "usize", 'P');
+    spec!("SLONGPTR", "ItemPtr", "Id", "isize", 'P');
+    spec!("ULONGPTR", "ItemPtr", "Iu", "usize", 'P');
+    spec!("XLONGPTR", "ItemPtr", "Ix", "isize", 'P');
+    spec!("OLONGPTR", "ItemPtr", "Io", "isize", 'P');
+
+    // Special format types (map to i32/u32 with special ETW decoding)
+    spec!("STATUS", "ItemNTSTATUS", "s", "NtStatus", 'N');
+    spec!("status", "ItemNTSTATUS", "s", "NtStatus", 'N');
+    spec!("HRESULT", "ItemHRESULT", "s", "HResult", 'R');
+    spec!("hresult", "ItemHRESULT", "s", "HResult", 'R');
+    spec!("WINERROR", "ItemWINERROR", "s", "u32", 'u');
+    spec!("winerr", "ItemWINERROR", "s", "u32", 'u');
+    spec!("NDIS_STATUS", "ItemNDIS_STATUS", "s", "i32", 'd');
+    spec!("NDIS_OID", "ItemNDIS_OID", "s", "u16", 'H');
+
+    // GUID
+    spec!("GUID", "ItemGuid", "s", "Guid", 'G', complex);
+    spec!("guid", "ItemGuid", "s", "Guid", 'G', complex);
+    spec!("CLSID", "ItemCLSID", "s", "Guid", 'G', complex);
+    spec!("IID", "ItemIID", "s", "Guid", 'G', complex);
+
+    // String types (long form)
+    spec!("ASTR", "ItemString", "s", "&str", 's', complex); // TODO: WPP_LOGASTR?
+    spec!("WSTR", "ItemWString", "s", "&str", 'S', complex); // TODO: WPP_LOGWSTR?
+    // TODO: Other types ARSTR, ARWSTR, CSTR, USTR, ANSTR, sid, BIN?
+
+    // Network types
+    spec!("IPADDR", "ItemIPAddr", "s", "u32", 'u');
+    spec!("ipaddr", "ItemIPAddr", "s", "u32", 'u');
+    spec!("PORT", "ItemPort", "s", "u16", 'H');
+    spec!("port", "ItemPort", "s", "u16", 'H');
+
+    // Boolean types
+    spec!("bool", "ItemListLong(false,true)", "s", "bool", 'L');
+    spec!("BOOLEAN", "ItemListByte(FALSE,TRUE)", "s", "bool", 'L');
+
+    // Time types (all map to i64)
+    spec!("TIMESTAMP", "ItemTimestamp", "s", "i64", 'D');
+    spec!("TIME", "ItemTimestamp", "s", "i64", 'D');
+    spec!("DATE", "ItemTimestamp", "s", "i64", 'D');
+    spec!("WAITTIME", "ItemTimestamp", "s", "i64", 'D');
+
+    map
 }
 
-/// Maps a syn::Type to a TraceArgType
-/// Signed types up to 32 bits → Long, Unsigned up to 32 bits → ULong
-/// Signed 64 bits → LongLong, Unsigned 64 bits → ULongLong
-/// Types over 64 bits (i128, u128) are not supported
-fn type_to_trace_arg_type(ty: &syn::Type) -> Result<TraceArgType, Error> {
-    match ty {
-        Type::Path(type_path) => {
-            let ident = type_path.path.segments.last()
-                .map(|s| s.ident.to_string());
+/// Parses a C-style format string and extracts format specifiers.
+///
+/// Supports:
+/// - Short form: `%d`, `%I64u`, `%hu`, `%p`, `%s`
+/// - Long form (shrieks): `%!STATUS!`, `%!GUID!`, `%!HRESULT!`
+/// - Numbered: `%10!d!`, `%11!STATUS!`
+/// - Escaped: `%%` (literal percent)
+///
+/// Returns the list of CFormatSpec for each format specifier found.
+fn parse_c_format_string(format_str: &str) -> Result<Vec<CFormatSpec>, String> {
+    let spec_map = build_format_spec_map();
+    let mut specs = Vec::new();
+    let mut chars = format_str.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            continue;
+        }
+
+        // Check for escaped %%
+        if chars.peek() == Some(&'%') {
+            chars.next();
+            continue;
+        }
+
+        // Skip %0 (STDPREFIX) at start
+        // Skip width/flag digits and prefix chars like '-', '+', '#', '.'
+        while chars.peek().map_or(false, |c| matches!(c, '-' | '+' | '#' | '0'..='9' | '.')) {
+            chars.next();
+        }
+
+        // Now determine if this is short-form or long-form (shriek)
+        if chars.peek() == Some(&'!') {
+            // Long form: %!NAME! or %NUM!NAME!
+            chars.next(); // consume first '!'
+            let mut name = String::new();
+            while let Some(&ch) = chars.peek() {
+                if ch == '!' {
+                    chars.next(); // consume closing '!'
+                    break;
+                }
+                name.push(ch);
+                chars.next();
+            }
+
+            if name.is_empty() {
+                continue; // skip empty %!!
+            }
+
+            match spec_map.get(&name) {
+                Some(spec) => specs.push(spec.clone()),
+                None => return Err(format!("Unknown format specifier '%!{}!'", name)),
+            }
+        } else {
+            // Short form: collect the type specifier
+            // Short type names: optional length prefix (I64, I, h, l, ll, w) + single specifier char
+            let mut name = String::new();
             
-            match ident.as_deref() {
-                // Signed types up to 32 bits → Long
-                Some("i8" | "i16" | "i32") => Ok(TraceArgType::Long),
-                // Unsigned types up to 32 bits → ULong
-                Some("u8" | "u16" | "u32") => Ok(TraceArgType::ULong),
-                // Signed 64-bit types → LongLong (isize treated as 64-bit)
-                Some("i64" | "isize") => Ok(TraceArgType::LongLong),
-                // Unsigned 64-bit types → ULongLong (usize treated as 64-bit)
-                Some("u64" | "usize") => Ok(TraceArgType::ULongLong),
-                // Types over 64 bits are not supported
-                Some("i128" | "u128") => Err(Error::new_spanned(
-                    ty,
-                    "128-bit integer types (i128, u128) are not supported for tracing"
-                )),
-                // String types
-                Some("str" | "String") => Ok(TraceArgType::String),
-                Some(other) => Err(Error::new_spanned(
-                    ty,
-                    format!("Unsupported type '{}' for tracing. Supported types: i8-i64, u8-u64, isize, usize, &str, String", other)
-                )),
-                None => Err(Error::new_spanned(ty, "Cannot determine type for tracing")),
+            // Collect length prefix
+            if chars.peek() == Some(&'I') {
+                name.push('I');
+                chars.next();
+                // Check for I64
+                if chars.peek() == Some(&'6') {
+                    name.push('6');
+                    chars.next();
+                    if chars.peek() == Some(&'4') {
+                        name.push('4');
+                        chars.next();
+                    }
+                }
+            } else if chars.peek() == Some(&'l') {
+                name.push('l');
+                chars.next();
+                // Check for ll
+                if chars.peek() == Some(&'l') {
+                    name.push('l');
+                    chars.next();
+                }
+            } else if chars.peek() == Some(&'h') {
+                name.push('h');
+                chars.next();
+            } else if chars.peek() == Some(&'w') {
+                name.push('w');
+                chars.next();
+            }
+
+            // Now the specifier character
+            if let Some(&ch) = chars.peek() {
+                if ch.is_alphabetic() {
+                    name.push(ch);
+                    chars.next();
+                }
+            }
+
+            if name.is_empty() {
+                continue;
+            }
+
+            match spec_map.get(&name) {
+                Some(spec) => specs.push(spec.clone()),
+                None => return Err(format!("Unknown format specifier '%{}'", name)),
             }
         }
-        Type::Reference(type_ref) => {
-            // Handle &str and &String
-            type_to_trace_arg_type(&type_ref.elem)
-        }
-        _ => Err(Error::new_spanned(ty, "Unsupported type syntax for tracing. Supported types: integer types, &str, String")),
     }
+
+    Ok(specs)
+}
+
+/// Returns the Rust assertion type token stream for compile-time type checking.
+/// This generates a `let _: AssertType = expr;` statement that will fail compilation
+/// if the expression type doesn't match.
+fn rust_assert_type_tokens(rust_type: &str) -> proc_macro2::TokenStream {
+    match rust_type {
+        "i8" => quote! { i8 },
+        "i16" => quote! { i16 },
+        "i32" => quote! { i32 },
+        "i64" => quote! { i64 },
+        "u8" => quote! { u8 },
+        "u16" => quote! { u16 },
+        "u32" => quote! { u32 },
+        "u64" => quote! { u64 },
+        "isize" => quote! { isize },
+        "usize" => quote! { usize },
+        "bool" => quote! { bool },
+        "f64" => quote! { f64 },
+        "&str" => quote! { &str },
+        "NtStatus" => quote! { ::wdf::NtStatus },
+        "HResult" => quote! { ::wdf::HResult },
+        "Guid" => quote! { ::wdf::Guid },
+        _ => quote! { i32 }, // fallback
+    }
+}
+
+/// Generates a method suffix from format specs (e.g., [d, s] -> "ds")
+fn generate_method_suffix(specs: &[CFormatSpec]) -> String {
+    specs.iter().map(|s| s.method_char).collect()
+}
+
+/// Represents a parsed trace argument (expression paired with its format spec)
+struct TraceArg {
+    name: String,
+    spec: CFormatSpec,
+    /// The original expression for this argument
+    expr: syn::Expr,
 }
 
 /// Result of parsing trace macro arguments
@@ -894,9 +1102,11 @@ struct ParsedTraceArgs {
     flag: Option<syn::Ident>,
     /// Optional trace level (e.g., TraceLevel::Information)
     level: Option<syn::Ident>,
-    /// The format string
+    /// The format string (C-style, with %d, %!STATUS!, etc.)
     format_str: String,
-    /// The trace arguments
+    /// The parsed format specifiers from the format string
+    format_specs: Vec<CFormatSpec>,
+    /// The trace arguments (expressions)
     args: Vec<TraceArg>,
 }
 
@@ -906,24 +1116,23 @@ const TRACE_LEVEL_NAMES: &[&str] = &[
     "Information", "Verbose", "Reserved6", "Reserved7", "Reserved8", "Reserved9"
 ];
 
-/// Parses the trace! macro input and extracts optional flag, optional level, format string and arguments
-/// 
+/// Parses the trace! macro input with C-style format specifiers.
+///
 /// Supported syntaxes:
-/// - `trace!("fmt", args...)` - no flag, no level (defaults to TraceLevel::None)
-/// - `trace!(FLAG, "fmt", args...)` - with flag, no level
-/// - `trace!(FLAG, Level, "fmt", args...)` - with flag and level
-/// - `trace!(Level, "fmt", args...)` - with level only (uses default control block)
+/// - `trace!("fmt %d %!STATUS!", arg1, arg2)` - no flag, no level
+/// - `trace!(FLAG, "fmt %d", arg1)` - with flag
+/// - `trace!(FLAG, Level, "fmt %d", arg1)` - with flag and level
+/// - `trace!(Level, "fmt %d", arg1)` - with level only
 fn parse_trace_args(item: TokenStream) -> Result<ParsedTraceArgs, Error> {
     use syn::{Expr, ExprLit, punctuated::Punctuated};
     
-    // Parse as comma-separated TraceArgInput items
+    // Parse as comma-separated expressions
     let args = syn::parse::Parser::parse(
-        Punctuated::<TraceArgInput, Token![,]>::parse_terminated,
+        Punctuated::<Expr, Token![,]>::parse_terminated,
         item,
     )?;
     
-    // Convert to Vec for easier manipulation
-    let mut all_args: Vec<TraceArgInput> = args.into_iter().collect();
+    let all_args: Vec<Expr> = args.into_iter().collect();
     
     if all_args.is_empty() {
         return Err(Error::new(proc_macro2::Span::call_site(), "trace! requires at least a format string"));
@@ -935,84 +1144,132 @@ fn parse_trace_args(item: TokenStream) -> Result<ParsedTraceArgs, Error> {
     let remaining_start_idx: usize;
     
     // Determine the pattern based on the first few arguments
-    let first_is_path = matches!(&all_args[0].expr, Expr::Path(_));
-    let first_is_string = matches!(&all_args[0].expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
+    let first_is_path = matches!(&all_args[0], Expr::Path(_));
+    let first_is_string = matches!(&all_args[0], Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
     
     if first_is_string {
-        // Pattern: trace!("fmt", args...)
-        format_str = match &all_args[0].expr {
+        format_str = match &all_args[0] {
             Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value(),
             _ => unreachable!(),
         };
         remaining_start_idx = 1;
     } else if first_is_path && all_args.len() >= 2 {
-        let second_is_string = matches!(&all_args[1].expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
-        let second_is_path = matches!(&all_args[1].expr, Expr::Path(_));
+        let second_is_string = matches!(&all_args[1], Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
+        let second_is_path = matches!(&all_args[1], Expr::Path(_));
         
         if second_is_string {
-            // Pattern: trace!(IDENT, "fmt", ...) - could be FLAG or Level
-            let ident = extract_path_ident(&all_args[0].expr)?;
+            let ident = extract_path_ident(&all_args[0])?;
             let ident_str = ident.to_string();
             
             if TRACE_LEVEL_NAMES.contains(&ident_str.as_str()) {
-                // It's a level: trace!(Level, "fmt", ...)
                 level = Some(ident);
             } else {
-                // It's a flag: trace!(FLAG, "fmt", ...)
                 flag = Some(ident);
             }
             
-            format_str = match &all_args[1].expr {
+            format_str = match &all_args[1] {
                 Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value(),
                 _ => unreachable!(),
             };
             remaining_start_idx = 2;
         } else if second_is_path && all_args.len() >= 3 {
-            let third_is_string = matches!(&all_args[2].expr, Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
+            let third_is_string = matches!(&all_args[2], Expr::Lit(ExprLit { lit: Lit::Str(_), .. }));
             
             if third_is_string {
-                // Pattern: trace!(FLAG, Level, "fmt", ...)
-                let first_ident = extract_path_ident(&all_args[0].expr)?;
-                let second_ident = extract_path_ident(&all_args[1].expr)?;
+                let first_ident = extract_path_ident(&all_args[0])?;
+                let second_ident = extract_path_ident(&all_args[1])?;
                 
-                // Second should be a level
                 let second_str = second_ident.to_string();
                 if !TRACE_LEVEL_NAMES.contains(&second_str.as_str()) {
-                    return Err(Error::new_spanned(&all_args[1].expr, 
+                    return Err(Error::new_spanned(&all_args[1], 
                         format!("Expected a trace level (one of: {:?}), got '{}'", TRACE_LEVEL_NAMES, second_str)));
                 }
                 
                 flag = Some(first_ident);
                 level = Some(second_ident);
                 
-                format_str = match &all_args[2].expr {
+                format_str = match &all_args[2] {
                     Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => s.value(),
                     _ => unreachable!(),
                 };
                 remaining_start_idx = 3;
             } else {
-                return Err(Error::new_spanned(&all_args[0].expr, "Expected a format string"));
+                return Err(Error::new_spanned(&all_args[0], "Expected a format string"));
             }
         } else {
-            return Err(Error::new_spanned(&all_args[0].expr, "Expected a format string"));
+            return Err(Error::new_spanned(&all_args[0], "Expected a format string"));
         }
     } else {
-        return Err(Error::new_spanned(&all_args[0].expr, "Expected a format string or flag identifier"));
+        return Err(Error::new_spanned(&all_args[0], "Expected a format string or flag identifier"));
     }
-    
-    // Remaining arguments are the trace parameters (with optional type annotations)
+
+    // Parse format specifiers from the C-style format string
+    let format_specs = match parse_c_format_string(&format_str) {
+        Ok(specs) => specs,
+        Err(e) => return Err(Error::new(proc_macro2::Span::call_site(), e)),
+    };
+
+    // Validate argument count matches format specifier count
+    let arg_count = all_args.len() - remaining_start_idx;
+    let spec_count = format_specs.len();
+    if arg_count != spec_count {
+        return Err(Error::new(
+            proc_macro2::Span::call_site(),
+            format!(
+                "Format string has {} specifier(s) but {} argument(s) were provided",
+                spec_count, arg_count
+            ),
+        ));
+    }
+
+    // Build trace args pairing expressions with their format specs
     let mut trace_args = Vec::new();
-    for (idx, arg_input) in all_args.into_iter().skip(remaining_start_idx).enumerate() {
-        let (name, arg_type) = infer_arg_info(&arg_input.expr, idx, arg_input.explicit_type.as_ref())?;
-        trace_args.push(TraceArg { name, arg_type, expr: arg_input.expr });
+    for (idx, expr) in all_args.into_iter().skip(remaining_start_idx).enumerate() {
+        let name = extract_arg_name(&expr, idx);
+        trace_args.push(TraceArg {
+            name,
+            spec: format_specs[idx].clone(),
+            expr,
+        });
     }
     
     Ok(ParsedTraceArgs {
         flag,
         level,
         format_str,
+        format_specs,
         args: trace_args,
     })
+}
+
+/// Extracts a human-readable name from an expression for TMF annotations
+fn extract_arg_name(expr: &syn::Expr, idx: usize) -> String {
+    use syn::Expr;
+    match expr {
+        Expr::Path(p) => p.path.segments.last()
+            .map(|s| s.ident.to_string())
+            .unwrap_or_else(|| format!("arg{}", idx)),
+        Expr::Lit(lit) => match &lit.lit {
+            Lit::Int(_) => format!("literal{}", idx),
+            Lit::Str(_) => format!("str{}", idx),
+            _ => format!("arg{}", idx),
+        },
+        Expr::Reference(r) => {
+            if let Expr::Path(p) = r.expr.as_ref() {
+                p.path.segments.last()
+                    .map(|s| s.ident.to_string())
+                    .unwrap_or_else(|| format!("arg{}", idx))
+            } else {
+                format!("arg{}", idx)
+            }
+        }
+        Expr::Field(f) => match &f.member {
+            syn::Member::Named(ident) => ident.to_string(),
+            syn::Member::Unnamed(index) => format!("field{}", index.index),
+        },
+        Expr::MethodCall(m) => m.method.to_string(),
+        _ => format!("arg{}", idx),
+    }
 }
 
 /// Extracts an identifier from a path expression
@@ -1025,184 +1282,86 @@ fn extract_path_ident(expr: &syn::Expr) -> Result<syn::Ident, Error> {
     Err(Error::new_spanned(expr, "Expected an identifier"))
 }
 
-/// Infers the argument name and type from an expression
-/// If explicit_type is provided, uses that instead of inferring
-fn infer_arg_info(
-    expr: &syn::Expr,
-    idx: usize,
-    explicit_type: Option<&syn::Type>,
-) -> Result<(String, TraceArgType), Error> {
-    use syn::Expr;
-    
-    // Extract argument name from expression
-    let name = match expr {
-        Expr::Path(p) => {
-            // Variable reference like `my_var`
-            p.path.segments.last()
-                .map(|s| s.ident.to_string())
-                .unwrap_or_else(|| format!("arg{}", idx))
-        }
-        Expr::Lit(lit) => {
-            // Literal value
-            match &lit.lit {
-                Lit::Int(_) => format!("literal{}", idx),
-                Lit::Str(_) => format!("str{}", idx),
-                _ => format!("arg{}", idx),
-            }
-        }
-        Expr::Reference(r) => {
-            // Reference like `&my_var`
-            if let Expr::Path(p) = r.expr.as_ref() {
-                p.path.segments.last()
-                    .map(|s| s.ident.to_string())
-                    .unwrap_or_else(|| format!("arg{}", idx))
-            } else {
-                format!("arg{}", idx)
-            }
-        }
-        Expr::Field(f) => {
-            // Field access like `obj.field`
-            match &f.member {
-                syn::Member::Named(ident) => ident.to_string(),
-                syn::Member::Unnamed(index) => format!("field{}", index.index),
-            }
-        }
-        Expr::MethodCall(m) => {
-            // Method call like `obj.method()`
-            m.method.to_string()
-        }
-        _ => format!("arg{}", idx),
-    };
-    
-    // If explicit type is provided, use it
-    if let Some(ty) = explicit_type {
-        let arg_type = type_to_trace_arg_type(ty)?;
-        return Ok((name, arg_type));
-    }
-    
-    // Otherwise, infer type based on expression structure
-    let arg_type = match expr {
-        Expr::Lit(lit) => {
-            match &lit.lit {
-                Lit::Str(_) => TraceArgType::String,
-                Lit::Int(_) => TraceArgType::ULong,
-                _ => return Err(Error::new_spanned(lit, "Unsupported literal type for tracing")),
-            }
-        }
-        Expr::Reference(r) => {
-            // Match only &str (reference to a string literal)
-            match r.expr.as_ref() {
-                Expr::Lit(lit) if matches!(&lit.lit, Lit::Str(_)) => TraceArgType::String,
-                _ => return Err(Error::new_spanned(
-                    expr,
-                    "Cannot infer type for reference. Add explicit type annotation: `&var: &str`"
-                )),
-            }
-        }
-        Expr::Path(_) => {
-            return Err(Error::new_spanned(
-                expr,
-                "Cannot infer type for variable. Add explicit type annotation, e.g.: `my_var: i32` or `my_var: &str`"
-            ));
-        }
-        Expr::Field(_) => {
-            return Err(Error::new_spanned(
-                expr,
-                "Cannot infer type for field access. Add explicit type annotation, e.g.: `obj.field: i32`"
-            ));
-        }
-        Expr::MethodCall(_) => {
-            return Err(Error::new_spanned(
-                expr,
-                "Cannot infer type for method call. Add explicit type annotation, e.g.: `obj.method(): i32`"
-            ));
-        }
-        _ => return Err(Error::new_spanned(
-            expr,
-            "Cannot infer type for this expression. Add explicit type annotation, e.g.: `expr: i32` or `expr: &str`"
-        )),
-    };
-    
-    Ok((name, arg_type))
-}
-
-/// Generates the WPP-style format string with numbered placeholders
-fn generate_wpp_format_string(format_str: &str, args: &[TraceArg]) -> String {
+/// Generates the WPP-style format string with numbered placeholders from C-style format specifiers.
+fn generate_wpp_format_string(format_str: &str, specs: &[CFormatSpec]) -> String {
     let mut result = String::new();
-    let mut arg_idx = 0;
+    let mut spec_idx = 0;
     let mut chars = format_str.chars().peekable();
-    
+
     while let Some(c) = chars.next() {
-        if c == '{' {
-            if chars.peek() == Some(&'{') {
-                // Escaped {{ -> {
+        if c != '%' {
+            result.push(c);
+            continue;
+        }
+
+        if chars.peek() == Some(&'%') {
+            chars.next();
+            result.push('%');
+            result.push('%');
+            continue;
+        }
+
+        // Skip width/flag chars
+        while chars.peek().map_or(false, |c| matches!(c, '-' | '+' | '#' | '0'..='9' | '.')) {
+            chars.next();
+        }
+
+        if chars.peek() == Some(&'!') {
+            chars.next();
+            while let Some(&ch) = chars.peek() {
+                if ch == '!' { chars.next(); break; }
                 chars.next();
-                result.push('{');
-            } else {
-                // Format placeholder {}
-                // Skip until closing }
-                while let Some(inner) = chars.next() {
-                    if inner == '}' {
-                        break;
-                    }
-                }
-                
-                if arg_idx < args.len() {
-                    let param_num = 10 + arg_idx;
-                    let spec = args[arg_idx].arg_type.format_specifier();
-                    result.push_str(&format!("%{}!{}!", param_num, spec));
-                    arg_idx += 1;
-                }
-            }
-        } else if c == '}' {
-            if chars.peek() == Some(&'}') {
-                // Escaped }} -> }
-                chars.next();
-                result.push('}');
-            } else {
-                result.push(c);
             }
         } else {
-            result.push(c);
+            if chars.peek() == Some(&'I') {
+                chars.next();
+                if chars.peek() == Some(&'6') { chars.next(); if chars.peek() == Some(&'4') { chars.next(); } }
+            } else if chars.peek() == Some(&'l') {
+                chars.next();
+                if chars.peek() == Some(&'l') { chars.next(); }
+            } else if chars.peek().map_or(false, |c| matches!(c, 'h' | 'w')) {
+                chars.next();
+            }
+            if chars.peek().map_or(false, |c| c.is_alphabetic()) {
+                chars.next();
+            }
+        }
+
+        if spec_idx < specs.len() {
+            let param_num = 10 + spec_idx;
+            let fmt = &specs[spec_idx].format_spec;
+            result.push_str(&format!("%{}!{}!", param_num, fmt));
+            spec_idx += 1;
         }
     }
-    
+
     result
 }
 
-/// A procedural macro for WPP-style tracing that generates codeview annotations.
+/// A procedural macro for WPP-style tracing with C-style format specifiers.
 ///
 /// # Usage
-/// 
-/// ## Basic usage (no flag, no level - uses default control block and TraceLevel::None):
+///
+/// ## Short form specifiers:
 /// ```ignore
-/// trace!("My message with value: {} and string: {}", my_int: i32, my_string: &str);
+/// trace!("Value: %d, Hex: %x, Str: %s", my_int, my_hex, my_str);
+/// trace!("64-bit: %I64u", my_u64);
 /// ```
 ///
-/// ## With flag only:
+/// ## Long form specifiers (shrieks):
 /// ```ignore
-/// trace!(FLAG_ONE, "Message with flag {}", value: i32);
+/// trace!("Status: %!STATUS!, HR: %!HRESULT!", nt_status, hresult);
 /// ```
 ///
-/// ## With flag and level:
+/// ## With flag and/or level:
 /// ```ignore
-/// trace!(FLAG_ONE, Information, "Informational message {}", value: i32);
+/// trace!(FLAG_ONE, "Value: %d", value);
+/// trace!(FLAG_ONE, Information, "Status: %!STATUS!", status);
 /// ```
-///
-/// ## With level only (uses default control block):
-/// ```ignore
-/// trace!(Warning, "Warning message {}", value: i32);
-/// ```
-///
-/// This generates a `codeview_annotation!` call with WPP trace metadata.
-/// The wpp_trace_message is conditionally called based on the flag's control block.
-/// The wpp_auto_log_trace is conditionally called based on level (skipped for Verbose
-/// unless AutoLogVerboseEnabled is set on the control block).
 #[proc_macro]
 pub fn trace(item: TokenStream) -> TokenStream {
     let span = proc_macro::Span::call_site();
     
-    // Get source file information
     let source_file = span.file();
     let file_name = std::path::Path::new(&source_file)
         .file_name()
@@ -1210,57 +1369,43 @@ pub fn trace(item: TokenStream) -> TokenStream {
         .unwrap_or("unknown.rs");
     let line_number = span.line();
     
-    // Parse the macro arguments
     let parsed = match parse_trace_args(item) {
         Ok(parsed) => parsed,
         Err(e) => return e.to_compile_error().into(),
     };
     
-    let ParsedTraceArgs { flag, level, format_str, args } = parsed;
+    let ParsedTraceArgs { flag, level, format_str, format_specs, args } = parsed;
     
-    // Generate unique message ID
     let message_id = TRACE_MESSAGE_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     
-    // Get driver/crate name from environment
     let driver_name = std::env::var("CARGO_PKG_NAME")
         .unwrap_or_else(|_| "unknown_driver".to_string())
         .replace('-', "_");
     
-    // TODO: Get actual msg GUID - for now use a placeholder
     let msg_guid = "e7602a7b-5034-321b-d450-a986113fc2e1";
-    
-    // Build the codeview_annotation parameters
-    // Parameter 2: "<guid> <driver_name> // SRC=<filename> MJ= MN="
     let param2 = format!("{} {} // SRC={} MJ= MN=", msg_guid, driver_name, file_name);
     
-    // Parameter 3: "#typev <driver_name>_<line> <msg_id> \"<format_with_placeholders>\""
-    let wpp_format = generate_wpp_format_string(&format_str, &args);
+    let wpp_format = generate_wpp_format_string(&format_str, &format_specs);
     let typev_name = format!("{}_{}", driver_name, line_number);
     let param3 = format!("#typev {} {} \"%0{}\"", typev_name, message_id, wpp_format);
     
-    // Build argument descriptors (parameters 5..n-1)
     let arg_descriptors: Vec<String> = args.iter().enumerate().map(|(idx, arg)| {
         let param_num = 10 + idx;
-        format!("{}, {} -- {}", arg.name, arg.arg_type.item_type_name(), param_num)
+        format!("{}, {} -- {}", arg.name, arg.spec.etw_type, param_num)
     }).collect();
     
-    // Generate the codeview_annotation! call
     let mut annotation_args = vec![
         quote! { "TMF:" },
         quote! { #param2 },
         quote! { #param3 },
         quote! { "{" },
     ];
-    
     for desc in &arg_descriptors {
         annotation_args.push(quote! { #desc });
     }
-    
     annotation_args.push(quote! { "}" });
     
-    // Generate method suffix based on argument types only
-    // One trait/method per unique argument signature, shared across all flag/level combinations
-    let method_suffix = generate_method_suffix(&args);
+    let method_suffix = generate_method_suffix(&format_specs);
     let trait_key = if method_suffix.is_empty() { "empty".to_string() } else { method_suffix.clone() };
     
     let method_name = format!("trace_{}", trait_key);
@@ -1270,80 +1415,37 @@ pub fn trace(item: TokenStream) -> TokenStream {
     let trait_name = format!("TraceWriterExt{}", trait_suffix);
     let trait_ident = syn::Ident::new(&trait_name, proc_macro2::Span::call_site());
     
-    // Only generate trait definition if we haven't already for this signature
-    let trait_and_impl = if should_generate_trait(&trait_key) {
-        generate_trace_writer_ext_method(&method_ident, &trait_ident, &args)
-    } else {
-        quote! {}
-    };
+    let trait_and_impl = generate_trace_writer_ext_method(&method_ident, &trait_ident, &args);
     
-    // Generate the method call with arguments (now with flag and level)
     let method_call = generate_trace_method_call(&method_ident, &trait_ident, message_id as u16, &args, flag.as_ref(), level.as_ref());
     
     let expanded = quote! {
         core::hint::codeview_annotation!(#(#annotation_args),*);
-        #trait_and_impl
-        #method_call
+        {
+            #trait_and_impl
+            #method_call
+        }
     };
     
     expanded.into()
 }
 
-/// Generates the TraceWriterExt trait method definition and implementation
+/// Generates the TraceWriterExt trait - uses TraceArgData::as_bytes() for all types.
 fn generate_trace_writer_ext_method(
     method_ident: &syn::Ident,
     trait_ident: &syn::Ident,
     args: &[TraceArg],
 ) -> proc_macro2::TokenStream {
-    // Generate parameter declarations for the trait method
-    let param_decls: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
-        let param_name = syn::Ident::new(&format!("a{}", idx + 1), proc_macro2::Span::call_site());
-        match arg.arg_type {
-            TraceArgType::Long => quote! { #param_name: i32 },
-            TraceArgType::ULong => quote! { #param_name: u32 },
-            TraceArgType::LongLong => quote! { #param_name: i64 },
-            TraceArgType::ULongLong => quote! { #param_name: u64 },
-            TraceArgType::String => quote! { #param_name: ::wdf::__internal::LPCSTR },
-        }
+    let param_decls: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, _)| {
+        let ptr_name = syn::Ident::new(&format!("a{}_ptr", idx + 1), proc_macro2::Span::call_site());
+        let len_name = syn::Ident::new(&format!("a{}_len", idx + 1), proc_macro2::Span::call_site());
+        quote! { #ptr_name: *const u8, #len_name: usize }
     }).collect();
     
-    // Generate length calculations for each argument
-    let len_calculations: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
-        let param_name = syn::Ident::new(&format!("a{}", idx + 1), proc_macro2::Span::call_site());
+    let arg_pairs: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, _)| {
+        let ptr_name = syn::Ident::new(&format!("a{}_ptr", idx + 1), proc_macro2::Span::call_site());
         let len_name = syn::Ident::new(&format!("a{}_len", idx + 1), proc_macro2::Span::call_site());
-        match arg.arg_type {
-            TraceArgType::Long => quote! {
-                let #len_name = core::mem::size_of::<i32>();
-            },
-            TraceArgType::ULong => quote! {
-                let #len_name = core::mem::size_of::<u32>();
-            },
-            TraceArgType::LongLong => quote! {
-                let #len_name = core::mem::size_of::<i64>();
-            },
-            TraceArgType::ULongLong => quote! {
-                let #len_name = core::mem::size_of::<u64>();
-            },
-            TraceArgType::String => quote! {
-                let #param_name = if !#param_name.is_null() {
-                    #param_name
-                } else {
-                    c"NULL".as_ptr()
-                };
-                let #len_name = unsafe { ::wdf::__internal::strlen(#param_name) + 1 };
-            },
-        }
-    }).collect();
-    
-    // Generate argument pairs for wpp_trace_message and WppAutoLogTrace
-    let arg_pairs: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
-        let param_name = syn::Ident::new(&format!("a{}", idx + 1), proc_macro2::Span::call_site());
-        let len_name = syn::Ident::new(&format!("a{}_len", idx + 1), proc_macro2::Span::call_site());
-        match arg.arg_type {
-            TraceArgType::Long | TraceArgType::ULong | 
-            TraceArgType::LongLong | TraceArgType::ULongLong => quote! { &#param_name, #len_name, },
-            TraceArgType::String => quote! { #param_name, #len_name, },
-        }
+        quote! { #ptr_name, #len_name, }
     }).collect();
     
     quote! {
@@ -1373,10 +1475,7 @@ fn generate_trace_writer_ext_method(
                 should_auto_log: bool,
                 #(#param_decls),*
             ) {
-                #(#len_calculations)*
-                
                 unsafe {
-                    // Only call wpp_trace_message if should_trace_wpp is true
                     if should_trace_wpp {
                         let logger = ::wdf::__internal::get_wpp_logger().unwrap();
                         let _ = ::wdf::__internal::get_wpp_trace_message().unwrap()(
@@ -1385,11 +1484,10 @@ fn generate_trace_writer_ext_method(
                             trace_guid,
                             id,
                             #(#arg_pairs)*
-                            core::ptr::null::<core::ffi::c_void>(), // sentinel
+                            core::ptr::null::<core::ffi::c_void>(),
                         );
                     }
 
-                    // Only call auto log trace if should_auto_log is true
                     if should_auto_log {
                         let auto_log_context = ::wdf::__internal::get_auto_log_context().unwrap();
                         let _ = ::wdf::__internal::WppAutoLogTrace(
@@ -1399,7 +1497,7 @@ fn generate_trace_writer_ext_method(
                             trace_guid.cast_mut().cast(),
                             id,
                             #(#arg_pairs)*
-                            core::ptr::null::<core::ffi::c_void>(), // sentinel
+                            core::ptr::null::<core::ffi::c_void>(),
                         );
                     }
                 }
@@ -1408,7 +1506,7 @@ fn generate_trace_writer_ext_method(
     }
 }
 
-/// Generates the method call to the TraceWriterExt method
+/// Generates the method call with compile-time type assertions via TraceArgData.
 fn generate_trace_method_call(
     method_ident: &syn::Ident,
     trait_ident: &syn::Ident,
@@ -1417,64 +1515,44 @@ fn generate_trace_method_call(
     flag: Option<&syn::Ident>,
     level: Option<&syn::Ident>,
 ) -> proc_macro2::TokenStream {
-    // Generate argument conversions using the original expressions
-    let arg_conversions: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
-        let var_name = syn::Ident::new(&format!("__trace_arg{}", idx), proc_macro2::Span::call_site());
+    let type_assertions: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
+        let assert_var = syn::Ident::new(&format!("__assert_type_{}", idx), proc_macro2::Span::call_site());
+        let bytes_var = syn::Ident::new(&format!("__trace_bytes_{}", idx), proc_macro2::Span::call_site());
         let expr = &arg.expr;
-        match arg.arg_type {
-            TraceArgType::Long => quote! {
-                let #var_name: i32 = (#expr) as i32;
-            },
-            TraceArgType::ULong => quote! {
-                let #var_name: u32 = (#expr) as u32;
-            },
-            TraceArgType::LongLong => quote! {
-                let #var_name: i64 = (#expr) as i64;
-            },
-            TraceArgType::ULongLong => quote! {
-                let #var_name: u64 = (#expr) as u64;
-            },
-            TraceArgType::String => quote! {
-                let #var_name = alloc::ffi::CString::new(#expr).unwrap();
-            },
+        let rust_type = &arg.spec.rust_assert_type;
+        
+        if arg.spec.is_complex && rust_type == "&str" {
+            quote! {
+                let #assert_var = ::wdf::__internal::CString::new(#expr).unwrap();
+                let #bytes_var = ::wdf::__internal::TraceArgData::as_bytes(&#assert_var);
+            }
+        } else {
+            let assert_type = rust_assert_type_tokens(rust_type);
+            quote! {
+                let #assert_var: #assert_type = #expr;
+                let #bytes_var = ::wdf::__internal::TraceArgData::as_bytes(&#assert_var);
+            }
         }
     }).collect();
     
-    let arg_values: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
-        let var_name = syn::Ident::new(&format!("__trace_arg{}", idx), proc_macro2::Span::call_site());
-        match arg.arg_type {
-            TraceArgType::Long | TraceArgType::ULong |
-            TraceArgType::LongLong | TraceArgType::ULongLong => quote! { #var_name },
-            TraceArgType::String => quote! { #var_name.as_ptr() },
-        }
+    let arg_values: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, _)| {
+        let bytes_var = syn::Ident::new(&format!("__trace_bytes_{}", idx), proc_macro2::Span::call_site());
+        quote! { #bytes_var.as_ptr(), #bytes_var.len() }
     }).collect();
     
     let message_id_lit = proc_macro2::Literal::u16_unsuffixed(message_id);
     
-    // Generate level value
     let level_value = if let Some(level_ident) = level {
         quote! { TraceLevel::#level_ident as u8 }
     } else {
         quote! { TraceLevel::None as u8 }
     };
     
-    // Generate flags value and control index from the WppFlag
-    // Use WppFlag::by_name to look up the flag at compile time
     let (flags_value, control_index) = if let Some(flag_ident) = flag {
         let flag_name = flag_ident.to_string();
         (
-            quote! { 
-                {
-                    let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag");
-                    (__flag.flag_index() + 1) as u32
-                }
-            },
-            quote! {
-                {
-                    let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag");
-                    __flag.control_index()
-                }
-            }
+            quote! { { let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag"); (__flag.flag_index() + 1) as u32 } },
+            quote! { { let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag"); __flag.control_index() } }
         )
     } else {
         (quote! { 0u32 }, quote! { 0usize })
@@ -1482,21 +1560,15 @@ fn generate_trace_method_call(
 
     quote! {
         {
-            #(#arg_conversions)*
+            #(#type_assertions)*
             
-            // Determine if we should trace based on flag's control block
             let __trace_level: u8 = #level_value;
             let __trace_flags: u32 = #flags_value;
             let __control_index: usize = #control_index;
             
             if let Some(__trace_writer) = ::wdf::get_trace_writer() {
-                // Check if the flag is enabled in the control block
-                // If no flag is specified (__trace_flags == 0), default to tracing enabled
                 let __should_trace_wpp = (__trace_flags == 0 || __trace_writer.is_flag_enabled(__control_index, __trace_flags)) 
                                             && __trace_writer.is_level_enabled(__control_index, __trace_level);
-                
-                // Check if we should call auto log trace
-                // Skip if level > Verbose (5) and AutoLogVerboseEnabled is false
                 let __should_auto_log = __trace_level < TraceLevel::Verbose as u8 || __trace_writer.is_auto_log_verbose_enabled(__control_index);
                 
                 <::wdf::tracing::TraceWriter as #trait_ident>::#method_ident(

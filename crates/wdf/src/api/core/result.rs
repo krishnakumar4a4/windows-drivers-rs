@@ -68,6 +68,15 @@ impl NtStatus {
     pub fn is_error(&self) -> bool {
         matches!(*self, Self::Error(_))
     }
+
+    /// Returns a reference to the inner i32 status code.
+    /// Used by TraceArgData to get a pointer to the code for WPP tracing.
+    pub fn code_ref(&self) -> &i32 {
+        match self {
+            Self::NonError(c) => c.code_ref(),
+            Self::Error(c) => c.code_ref(),
+        }
+    }
 }
 
 impl From<NtStatusNonError> for NtStatus {
@@ -141,6 +150,15 @@ impl NtStatusNonError {
     pub fn is_warning(&self) -> bool {
         matches!(*self, Self::Warning(_))
     }
+
+    /// Returns a reference to the inner i32 status code.
+    pub fn code_ref(&self) -> &i32 {
+        match self {
+            Self::Success(c) => c,
+            Self::Informational(c) => c,
+            Self::Warning(c) => c,
+        }
+    }
 }
 
 impl From<i32> for NtStatusNonError {
@@ -173,6 +191,11 @@ impl NtStatusError {
     pub const fn code(&self) -> i32 {
         self.0
     }
+
+    /// Returns a reference to the inner i32 status code.
+    pub fn code_ref(&self) -> &i32 {
+        &self.0
+    }
 }
 
 impl From<i32> for NtStatusError {
@@ -195,6 +218,44 @@ impl Debug for NtStatusError {
 }
 
 pub type NtResult<T> = Result<T, NtStatusError>;
+
+/// A wrapper around the Win32 HRESULT type for use in WPP tracing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HResult(i32);
+
+impl HResult {
+    /// Creates an HResult from a raw i32 value.
+    pub fn from(code: i32) -> Self {
+        Self(code)
+    }
+
+    /// Returns the raw HRESULT code.
+    pub const fn code(&self) -> i32 {
+        self.0
+    }
+
+    /// Returns a reference to the inner i32 code.
+    /// Used by TraceArgData for WPP tracing.
+    pub fn code_ref(&self) -> &i32 {
+        &self.0
+    }
+
+    /// Returns true if the HRESULT indicates success (non-negative).
+    pub fn is_success(&self) -> bool {
+        self.0 >= 0
+    }
+
+    /// Returns true if the HRESULT indicates failure (negative).
+    pub fn is_failure(&self) -> bool {
+        self.0 < 0
+    }
+}
+
+impl From<i32> for HResult {
+    fn from(code: i32) -> Self {
+        Self(code)
+    }
+}
 
 impl<T> Into<NtStatus> for &NtResult<T> {
     fn into(self) -> NtStatus {

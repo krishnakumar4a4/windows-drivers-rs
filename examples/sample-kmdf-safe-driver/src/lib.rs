@@ -110,26 +110,25 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     // core::hint::codeview_annotation!("TMF:", "e7602a7b-5034-321b-d450-a986113fc2e1 sample_kmdf_safe_driver // SRC=lib.rs MJ= MN=", 
     // "#typev sample_kmdf_safe_driver_109 10 \"%0Trace: Safe Rust driver entry complete %10!d!\"", "{", "test, ItemLong -- 10", "}");
 
-    for i in 0..1000 {
-        // Use the new type annotation syntax: `variable: Type`
-        trace!("Trace: Safe Rust driver entry trace, int - {}, int - {}, int - {}, int - {}, int - {}, int - {}", i: i32, i: i32, i: i32, i: i32, i: i32, i: i32);
+    for i in 0..1000_i32 {
+        trace!("Trace: Safe Rust driver entry trace, int - %d, int - %d, int - %d, int - %d, int - %d, int - %d", i, i, i, i, i, i);
     }
 
-    trace!(FLAG_ONE, "1 Trace: Safe Rust driver entry complete, int - {}", 1001);
+    trace!(FLAG_ONE, "1 Trace: Safe Rust driver entry complete, int - %d", 1001i32);
 
-    trace!(FLAG_TWO, "2 Trace: Safe Rust driver entry complete, int - {}", 1002);
-
-    // Trace with level only (no flag)
-    trace!(Information, "3 Trace: Safe Rust driver entry complete, int - {}", 1003);
+    trace!(FLAG_TWO, "2 Trace: Safe Rust driver entry complete, int - %d", 1002i32);
 
     // Trace with level only (no flag)
-    trace!(Verbose, "4 Trace: Safe Rust driver entry complete, int - {}", 1004);
+    trace!(Information, "3 Trace: Safe Rust driver entry complete, int - %d", 1003i32);
 
-    trace!(FLAG_TWO, Information, "5 Trace: Safe Rust driver entry complete, int - {}", 1005);
+    // Trace with level only (no flag)
+    trace!(Verbose, "4 Trace: Safe Rust driver entry complete, int - %d", 1004i32);
 
-    trace!("Trace: Safe Rust driver entry with basic data, int - {}, str - {}", 9999, "hello");
+    trace!(FLAG_TWO, Information, "5 Trace: Safe Rust driver entry complete, int - %d", 1005i32);
 
-    trace!(FLAG_TWO, Information, "Trace: Safe Rust driver entry complete, int - {}, str - {}", 1006, "examplestring!@#$%^&*()_+-=1234567890`~[]{}|;:'\"<>,./?  E");
+    trace!("Trace: Safe Rust driver entry with basic data, int - %d, str - %s", 9999i32, "hello");
+
+    trace!(FLAG_TWO, Information, "Trace: Safe Rust driver entry complete, int - %d, str - %s", 1006i32, "examplestring!@#$%^&*()_+-=1234567890`~[]|;:'\"<>,./?  E");
 
     Ok(())
 }

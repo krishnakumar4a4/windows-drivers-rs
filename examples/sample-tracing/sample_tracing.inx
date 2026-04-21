@@ -1,0 +1,62 @@
+;
+; sample_tracing.inf
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Sample
+ClassGuid   = {78A1C341-4539-11d3-B88D-00C04FAD5171}
+Provider    = %ManufacturerName%
+CatalogFile = sample_tracing.cat
+DriverVer   = 1.2
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+sample_tracing.sys  = 1,,
+
+;*****************************************
+; Install Section
+;*****************************************
+
+[Manufacturer]
+%ManufacturerName% = Standard,NT$ARCH$.10.0...16299 ; %13% support introduced in build 16299
+
+[Standard.NT$ARCH$.10.0...16299]
+%sample_tracing.DeviceDesc% = sample_tracing_Device, root\sample_tracing
+
+[sample_tracing_Device.NT]
+CopyFiles = File_Copy
+
+[File_Copy]
+sample_tracing.sys
+
+;-------------- Service installation
+[sample_tracing_Device.NT.Services]
+AddService = sample_tracing,%SPSVCINST_ASSOCSERVICE%, sample_tracing_Service_Inst
+
+; -------------- KMDF driver install sections
+[sample_tracing_Service_Inst]
+DisplayName    = %sample_tracing.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\sample_tracing.sys
+
+[sample_tracing_Device.NT.Wdf]
+KmdfService = sample_tracing, sample_tracing_wdfsect
+
+[sample_tracing_wdfsect]
+KmdfLibraryVersion = $KMDFVERSION$
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName = "Sample Manufacturer" ;TODO: Replace with your manufacturer name
+DiskName = "KMDF Installation Disk"
+sample_tracing.DeviceDesc = "Sample Tracing Device"
+sample_tracing.SVCDESC = "Sameple Tracing Service"
