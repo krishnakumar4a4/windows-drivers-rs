@@ -946,6 +946,13 @@ fn build_format_spec_map() -> std::collections::HashMap<String, CFormatSpec> {
     spec!("DATE", "ItemTimestamp", "s", "i64", 'D');
     spec!("WAITTIME", "ItemTimestamp", "s", "i64", 'D');
 
+    // Custom Display types — any struct implementing core::fmt::Display
+    // Usage: trace!("my obj: %!DISPLAY!", my_struct);
+    // The macro formats the value via Display, collects into TraceFmtBuf,
+    // and sends as ItemString. One Vec allocation, zero copies.
+    spec!("DISPLAY", "ItemString", "s", "Display", 'T', complex);
+    spec!("display", "ItemString", "s", "Display", 'T', complex);
+
     map
 }
 
@@ -1522,9 +1529,23 @@ fn generate_trace_method_call(
         let rust_type = &arg.spec.rust_assert_type;
         
         if arg.spec.is_complex && rust_type == "&str" {
+            // String path: convert &str → CString → bytes (one alloc)
             quote! {
                 let #assert_var = ::wdf::__internal::CString::new(#expr).unwrap();
                 let #bytes_var = ::wdf::__internal::TraceArgData::as_bytes(&#assert_var);
+            }
+        } else if arg.spec.is_complex && rust_type == "Display" {
+            // Custom Display type path: format via TraceFmtBuf → bytes (one alloc)
+            // The inline function asserts Display is implemented at compile time.
+            let buf_var = syn::Ident::new(&format!("__trace_fmt_buf_{}", idx), proc_macro2::Span::call_site());
+            let assert_fn = syn::Ident::new(&format!("__assert_display_{}", idx), proc_macro2::Span::call_site());
+            quote! {
+                fn #assert_fn(_: &impl core::fmt::Display) {}
+                let #assert_var = &#expr;
+                #assert_fn(#assert_var);
+                let mut #buf_var = ::wdf::__internal::TraceFmtBuf::new();
+                core::fmt::write(&mut #buf_var, format_args!("{}", #assert_var)).unwrap();
+                let #bytes_var = #buf_var.finish();
             }
         } else {
             let assert_type = rust_assert_type_tokens(rust_type);

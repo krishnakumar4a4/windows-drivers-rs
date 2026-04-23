@@ -13,6 +13,26 @@ use wdf::{
     driver_entry, println, trace, Driver, DeviceInit, HResult, NtResult, NtStatus,
 };
 
+use core::fmt;
+
+/// Example custom struct with a manual `Display` implementation.
+/// The `trace!` macro serializes it via `%!DISPLAY!` using `TraceFmtBuf`.
+struct DeviceInfo {
+    vendor_id: u16,
+    device_id: u16,
+    revision: u8,
+}
+
+impl fmt::Display for DeviceInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{{vendor_id=0x{:04X}, device_id=0x{:04X}, revision={}}}",
+            self.vendor_id, self.device_id, self.revision
+        )
+    }
+}
+
 /// The entry point for the driver.
 ///
 /// Demonstrates the `trace!` macro with every category of C-style format
@@ -228,6 +248,15 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     // === Mixed types in single trace ======================================
     trace!(FLAG_ONE, "mixed: i32=%d, u64=%I64u, bool=%!bool!, str=%s",
         val_i32, val_u64, flag_on, msg);
+
+    // === Custom Display type (%!DISPLAY!) =================================
+    // Any struct implementing core::fmt::Display can be traced.
+    // One Vec allocation per call, zero copies, validated C-string output.
+    let dev = DeviceInfo { vendor_id: 0x8086, device_id: 0x1234, revision: 3 };
+    trace!(FLAG_ONE, "device: %!DISPLAY!", dev);
+
+    // Mixed with custom type
+    trace!(FLAG_ONE, "status=%!STATUS!, device=%!DISPLAY!", status, dev);
 
     driver.set_evt_device_add(evt_device_add);
     Ok(())
