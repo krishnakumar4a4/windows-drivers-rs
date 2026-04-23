@@ -231,6 +231,13 @@ impl TraceWriter {
             control.Logger != 0 && level <= control.Level
         }
     }
+
+    // Pre-generated `trace_0`..`trace_8` inherent methods. Each method is
+    // generic over its argument types (each constrained by `TraceArgData`)
+    // and feeds the values to WPP / AutoLog as `(*const u8, usize)` pairs.
+    // The `trace!` macro picks the matching arity and calls into one of
+    // these instead of synthesising a new trait+impl per call site.
+    wdf_macros::define_trace_writer_methods!();
 }
 
 impl Drop for TraceWriter {

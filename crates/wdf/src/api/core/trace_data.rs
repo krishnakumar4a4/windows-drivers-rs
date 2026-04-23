@@ -329,7 +329,9 @@ impl TraceArgData for Guid {
 /// ```ignore
 /// let mut buf = TraceFmtBuf::new();
 /// core::fmt::write(&mut buf, format_args!("{}", &my_struct)).unwrap();
-/// let bytes = buf.finish();  // validates + appends \0, returns &[u8]
+/// buf.finalize();                       // truncates at interior null, appends \0
+/// // Pass &buf to a trace_N(...) inherent method — TraceArgData::as_bytes
+/// // returns the finalized buffer.
 /// ```
 pub struct TraceFmtBuf {
     buf: alloc::vec::Vec<u8>,
@@ -347,20 +349,19 @@ impl TraceFmtBuf {
         }
     }
 
-    /// Finishes formatting: appends a null terminator and returns the byte
-    /// slice including the null. If interior null bytes were written by the
-    /// `Display` impl, the buffer is truncated at the first null to produce
-    /// a valid C string.
+    /// Finalizes formatting: truncates at any interior null byte and appends a
+    /// trailing null terminator so the buffer can be passed to WPP as a valid
+    /// C string. Must be called before [`TraceArgData::as_bytes`] is invoked.
     #[inline]
-    pub fn finish(&mut self) -> &[u8] {
+    pub fn finalize(&mut self) {
         if self.has_interior_null {
-            // Truncate at first interior null to produce a valid C string
+            // Truncate at first interior null to produce a valid C string —
+            // WPP/ETW `ItemString` arguments are read until the first NUL byte.
             if let Some(pos) = self.buf.iter().position(|&b| b == 0) {
                 self.buf.truncate(pos);
             }
         }
         self.buf.push(0); // null terminator
-        &self.buf
     }
 }
 
@@ -373,5 +374,16 @@ impl core::fmt::Write for TraceFmtBuf {
         }
         self.buf.extend_from_slice(bytes);
         Ok(())
+    }
+}
+
+impl sealed::Sealed for TraceFmtBuf {}
+impl TraceArgData for TraceFmtBuf {
+    const ETW_TYPE: &'static str = "ItemString";
+    const FORMAT_SPEC: &'static str = "s";
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        &self.buf
     }
 }

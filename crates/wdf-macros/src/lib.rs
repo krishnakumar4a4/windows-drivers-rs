@@ -229,6 +229,8 @@ fn generate_wpp_flags_declaration(trace_controls: &[TraceControlDef]) -> proc_ma
     // Check if there are any flags defined
     let has_flags = trace_controls.iter().any(|tc| !tc.flags.is_empty());
     
+    // TODO: TraceLevel enum declaration generation is skipped when flags are absent. Fix this as we 
+    // want TraceLevel to be available regardless of flags.
     if !has_flags {
         return quote! {};
     }
@@ -728,22 +730,29 @@ fn is_valid_guid(guid_str: &str) -> bool {
 /// This is incremented for each trace! macro expansion.
 static TRACE_MESSAGE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(10);
 
-/// A static set to track generated trait names and avoid duplicate declarations.
-/// Key format: "<arg_types_suffix>" - we generate one method per unique argument signature.
-static GENERATED_TRAITS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+/// Generates a deterministic GUID from the source file path using SHA-256.
+///
+/// SHA-256 hashes the normalised source path and the first 16 bytes of the
+/// digest are formatted as a GUID. The same file path always produces the
+/// same GUID regardless of toolchain version, compilation order, or host
+/// platform.
+fn generate_deterministic_guid(source_file: &str) -> String {
+    use sha2::{Sha256, Digest};
 
-/// Checks if a trait with the given key has already been generated.
-/// If not, marks it as generated and returns true (should generate).
-/// If already generated, returns false (skip generation).
-fn should_generate_trait(key: &str) -> bool {
-    let mut guard = GENERATED_TRAITS.lock().unwrap();
-    let set = guard.get_or_insert_with(HashSet::new);
-    if set.contains(key) {
-        false
-    } else {
-        set.insert(key.to_string());
-        true
-    }
+    // Normalise path separators so Windows and Unix paths hash identically.
+    let normalised = source_file.replace('\\', "/");
+
+    let hash = Sha256::digest(normalised.as_bytes());
+    let b = &hash[..16];
+
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        b[0], b[1], b[2], b[3],
+        b[4], b[5],
+        b[6], b[7],
+        b[8], b[9],
+        b[10], b[11], b[12], b[13], b[14], b[15],
+    )
 }
 
 /// Represents the type of a trace argument for WPP tracing, derived from
@@ -761,37 +770,48 @@ struct CFormatSpec {
     format_spec: String,
     /// The Rust assertion type - the type we assign the trace arg to for compile-time checking
     rust_assert_type: String,
-    /// Single character for method naming
-    method_char: char,
     /// Whether this is a "complex" type that needs special handling (strings, GUID, etc.)
     is_complex: bool,
+}
+
+/// Returns the mapping from C format specifier names to [`CFormatSpec`].
+///
+/// The map is derived from the `DEFINE_SIMPLE_TYPE`, `DEFINE_FLAVOR`, and
+/// `DEFINE_CPLX_TYPE` definitions in `defaultwpp.ini` and is identical for
+/// every `trace!` invocation, so it is built lazily once per `rustc` process
+/// via [`OnceLock`] and then handed out as a shared `&'static` reference.
+fn format_spec_map() -> &'static std::collections::HashMap<String, CFormatSpec> {
+    static SPEC_MAP: std::sync::OnceLock<std::collections::HashMap<String, CFormatSpec>> =
+        std::sync::OnceLock::new();
+    SPEC_MAP.get_or_init(build_format_spec_map)
 }
 
 /// Builds the mapping from C format specifier names to CFormatSpec.
 /// This is derived from the DEFINE_SIMPLE_TYPE, DEFINE_FLAVOR, and DEFINE_CPLX_TYPE
 /// definitions in defaultwpp.ini.
+///
+/// Prefer [`format_spec_map`] over calling this directly — it caches the
+/// result so the (~80-entry) map is only constructed once per process.
 fn build_format_spec_map() -> std::collections::HashMap<String, CFormatSpec> {
     let mut map = std::collections::HashMap::new();
 
     // Helper to insert a spec
     macro_rules! spec {
-        ($name:expr, $etw:expr, $fmt:expr, $rust_ty:expr, $ch:expr) => {
+        ($name:expr, $etw:expr, $fmt:expr, $rust_ty:expr) => {
             map.insert($name.to_string(), CFormatSpec {
                 name: $name.to_string(),
                 etw_type: $etw.to_string(),
                 format_spec: $fmt.to_string(),
                 rust_assert_type: $rust_ty.to_string(),
-                method_char: $ch,
                 is_complex: false,
             });
         };
-        ($name:expr, $etw:expr, $fmt:expr, $rust_ty:expr, $ch:expr, complex) => {
+        ($name:expr, $etw:expr, $fmt:expr, $rust_ty:expr, complex) => {
             map.insert($name.to_string(), CFormatSpec {
                 name: $name.to_string(),
                 etw_type: $etw.to_string(),
                 format_spec: $fmt.to_string(),
                 rust_assert_type: $rust_ty.to_string(),
-                method_char: $ch,
                 is_complex: true,
             });
         };
@@ -801,157 +821,157 @@ fn build_format_spec_map() -> std::collections::HashMap<String, CFormatSpec> {
     
     // Char — %c can be used with both i8 and u8; we map to u8 since that's
     // the more common Rust unsigned byte type (UBYTE in defaultwpp.ini)
-    spec!("c", "ItemChar", "c", "u8", 'b');
-    spec!("hc", "ItemChar", "c", "u8", 'b');
+    spec!("c", "ItemChar", "c", "u8");
+    spec!("hc", "ItemChar", "c", "u8");
 
     // Signed short
-    spec!("hi", "ItemShort", "hd", "i16", 'h');
-    spec!("hd", "ItemShort", "hd", "i16", 'h');
+    spec!("hi", "ItemShort", "hd", "i16");
+    spec!("hd", "ItemShort", "hd", "i16");
 
     // Unsigned short
-    spec!("hu", "ItemShort", "hu", "u16", 'H');
-    spec!("hx", "ItemShort", "x", "u16", 'H');
-    spec!("hX", "ItemShort", "X", "u16", 'H');
-    spec!("ho", "ItemShort", "o", "u16", 'H');
+    spec!("hu", "ItemShort", "hu", "u16");
+    spec!("hx", "ItemShort", "x", "u16");
+    spec!("hX", "ItemShort", "X", "u16");
+    spec!("ho", "ItemShort", "o", "u16");
 
     // Signed int (32-bit)
-    spec!("i", "ItemLong", "d", "i32", 'd');
-    spec!("d", "ItemLong", "d", "i32", 'd');
+    spec!("i", "ItemLong", "d", "i32");
+    spec!("d", "ItemLong", "d", "i32");
 
     // Unsigned int (32-bit)
-    spec!("u", "ItemLong", "u", "u32", 'u');
-    spec!("x", "ItemLong", "x", "u32", 'u');
-    spec!("X", "ItemLong", "X", "u32", 'u');
-    spec!("o", "ItemLong", "o", "u32", 'u');
+    spec!("u", "ItemLong", "u", "u32");
+    spec!("x", "ItemLong", "x", "u32");
+    spec!("X", "ItemLong", "X", "u32");
+    spec!("o", "ItemLong", "o", "u32");
 
     // Signed long (32-bit, same as int on Windows)
-    spec!("li", "ItemLong", "d", "i32", 'd');
-    spec!("ld", "ItemLong", "d", "i32", 'd');
+    spec!("li", "ItemLong", "d", "i32");
+    spec!("ld", "ItemLong", "d", "i32");
 
     // Unsigned long (32-bit)
-    spec!("lu", "ItemLong", "u", "u32", 'u');
-    spec!("lx", "ItemLong", "x", "u32", 'u');
-    spec!("lX", "ItemLong", "X", "u32", 'u');
-    spec!("lo", "ItemLong", "o", "u32", 'u');
+    spec!("lu", "ItemLong", "u", "u32");
+    spec!("lx", "ItemLong", "x", "u32");
+    spec!("lX", "ItemLong", "X", "u32");
+    spec!("lo", "ItemLong", "o", "u32");
 
     // Signed 64-bit
-    spec!("I64d", "ItemLongLong", "I64d", "i64", 'D');
-    spec!("lld", "ItemLongLong", "I64d", "i64", 'D');
+    spec!("I64d", "ItemLongLong", "I64d", "i64");
+    spec!("lld", "ItemLongLong", "I64d", "i64");
 
     // Unsigned 64-bit
-    spec!("I64u", "ItemULongLong", "I64u", "u64", 'U');
-    spec!("llu", "ItemULongLong", "I64u", "u64", 'U');
+    spec!("I64u", "ItemULongLong", "I64u", "u64");
+    spec!("llu", "ItemULongLong", "I64u", "u64");
 
     // Hex 64-bit
-    spec!("I64x", "ItemLongLongX", "I64x", "i64", 'D');
-    spec!("I64X", "ItemLongLongXX", "I64X", "i64", 'D');
-    spec!("I64o", "ItemLongLongO", "I64o", "i64", 'D');
-    spec!("llx", "ItemLongLongX", "I64x", "i64", 'D');
-    spec!("llX", "ItemLongLongXX", "I64X", "i64", 'D');
-    spec!("llo", "ItemLongLongO", "I64o", "i64", 'D');
+    spec!("I64x", "ItemLongLongX", "I64x", "i64");
+    spec!("I64X", "ItemLongLongXX", "I64X", "i64");
+    spec!("I64o", "ItemLongLongO", "I64o", "i64");
+    spec!("llx", "ItemLongLongX", "I64x", "i64");
+    spec!("llX", "ItemLongLongXX", "I64X", "i64");
+    spec!("llo", "ItemLongLongO", "I64o", "i64");
 
     // Pointer-sized (signed vs unsigned)
-    spec!("Id", "ItemPtr", "Id", "isize", 'P');
-    spec!("Iu", "ItemPtr", "Iu", "usize", 'P');
-    spec!("Ix", "ItemPtr", "Ix", "usize", 'P');
-    spec!("IX", "ItemPtr", "IX", "usize", 'P');
-    spec!("Io", "ItemPtr", "Io", "usize", 'P');
+    spec!("Id", "ItemPtr", "Id", "isize");
+    spec!("Iu", "ItemPtr", "Iu", "usize");
+    spec!("Ix", "ItemPtr", "Ix", "usize");
+    spec!("IX", "ItemPtr", "IX", "usize");
+    spec!("Io", "ItemPtr", "Io", "usize");
 
     // Pointer
-    spec!("p", "ItemPtr", "p", "usize", 'P');
+    spec!("p", "ItemPtr", "p", "usize");
 
     // Strings
-    spec!("s", "ItemString", "s", "&str", 's', complex);
-    spec!("hs", "ItemString", "s", "&str", 's', complex);
-    spec!("S", "ItemWString", "s", "&str", 'S', complex);
+    spec!("s", "ItemString", "s", "&str", complex);
+    spec!("hs", "ItemString", "s", "&str", complex);
+    spec!("S", "ItemWString", "s", "&str", complex);
     // TODO: ws, ls?
 
     // Double/float
-    spec!("e", "ItemDouble", "s", "f64", 'g');
-    spec!("E", "ItemDouble", "s", "f64", 'g');
-    spec!("f", "ItemDouble", "s", "f64", 'g');
-    spec!("g", "ItemDouble", "s", "f64", 'g');
-    spec!("G", "ItemDouble", "s", "f64", 'g');
+    spec!("e", "ItemDouble", "s", "f64");
+    spec!("E", "ItemDouble", "s", "f64");
+    spec!("f", "ItemDouble", "s", "f64");
+    spec!("g", "ItemDouble", "s", "f64");
+    spec!("G", "ItemDouble", "s", "f64");
 
     // ---- Long-form specifiers (%!NAME!) from defaultwpp.ini ----
 
     // Basic integer types (long form)
-    spec!("SINT", "ItemLong", "d", "i32", 'd');
-    spec!("UINT", "ItemLong", "u", "u32", 'u');
-    spec!("SINT64", "ItemLongLong", "I64d", "i64", 'D');
-    spec!("UINT64", "ItemULongLong", "I64u", "u64", 'U');
-    spec!("SBYTE", "ItemChar", "c", "i8", 'b');
-    spec!("UBYTE", "ItemChar", "c", "u8", 'B');
-    spec!("SSHORT", "ItemShort", "hd", "i16", 'h');
-    spec!("USHORT", "ItemShort", "hu", "u16", 'H');
-    spec!("SLONG", "ItemLong", "ld", "i32", 'd');
-    spec!("ULONG", "ItemLong", "lu", "u32", 'u');
-    spec!("DOUBLE", "ItemDouble", "s", "f64", 'g');
+    spec!("SINT", "ItemLong", "d", "i32");
+    spec!("UINT", "ItemLong", "u", "u32");
+    spec!("SINT64", "ItemLongLong", "I64d", "i64");
+    spec!("UINT64", "ItemULongLong", "I64u", "u64");
+    spec!("SBYTE", "ItemChar", "c", "i8");
+    spec!("UBYTE", "ItemChar", "c", "u8");
+    spec!("SSHORT", "ItemShort", "hd", "i16");
+    spec!("USHORT", "ItemShort", "hu", "u16");
+    spec!("SLONG", "ItemLong", "ld", "i32");
+    spec!("ULONG", "ItemLong", "lu", "u32");
+    spec!("DOUBLE", "ItemDouble", "s", "f64");
 
     // Hex display variants
-    spec!("XINT", "ItemLong", "08x", "i32", 'd');
-    spec!("OINT", "ItemLong", "o", "i32", 'd');
-    spec!("XLONG", "ItemLong", "08lX", "i32", 'd');
-    spec!("OLONG", "ItemLong", "lo", "i32", 'd');
-    spec!("XSHORT", "ItemShort", "04hX", "i16", 'h');
-    spec!("OSHORT", "ItemShort", "ho", "i16", 'h');
-    spec!("XBYTE", "ItemChar", "02x", "i8", 'b');
-    spec!("OBYTE", "ItemChar", "o", "i8", 'b');
-    spec!("XINT64", "ItemLongLongX", "I64x", "i64", 'D');
-    spec!("XXINT64", "ItemLongLongXX", "I64X", "i64", 'D');
-    spec!("OINT64", "ItemLongLongO", "I64o", "i64", 'D');
+    spec!("XINT", "ItemLong", "08x", "i32");
+    spec!("OINT", "ItemLong", "o", "i32");
+    spec!("XLONG", "ItemLong", "08lX", "i32");
+    spec!("OLONG", "ItemLong", "lo", "i32");
+    spec!("XSHORT", "ItemShort", "04hX", "i16");
+    spec!("OSHORT", "ItemShort", "ho", "i16");
+    spec!("XBYTE", "ItemChar", "02x", "i8");
+    spec!("OBYTE", "ItemChar", "o", "i8");
+    spec!("XINT64", "ItemLongLongX", "I64x", "i64");
+    spec!("XXINT64", "ItemLongLongXX", "I64X", "i64");
+    spec!("OINT64", "ItemLongLongO", "I64o", "i64");
 
     // Pointer types
-    spec!("PTR", "ItemPtr", "p", "usize", 'P');
-    spec!("HANDLE", "ItemPtr", "p", "usize", 'P');
-    spec!("SLONGPTR", "ItemPtr", "Id", "isize", 'P');
-    spec!("ULONGPTR", "ItemPtr", "Iu", "usize", 'P');
-    spec!("XLONGPTR", "ItemPtr", "Ix", "isize", 'P');
-    spec!("OLONGPTR", "ItemPtr", "Io", "isize", 'P');
+    spec!("PTR", "ItemPtr", "p", "usize");
+    spec!("HANDLE", "ItemPtr", "p", "usize");
+    spec!("SLONGPTR", "ItemPtr", "Id", "isize");
+    spec!("ULONGPTR", "ItemPtr", "Iu", "usize");
+    spec!("XLONGPTR", "ItemPtr", "Ix", "isize");
+    spec!("OLONGPTR", "ItemPtr", "Io", "isize");
 
     // Special format types (map to i32/u32 with special ETW decoding)
-    spec!("STATUS", "ItemNTSTATUS", "s", "NtStatus", 'N');
-    spec!("status", "ItemNTSTATUS", "s", "NtStatus", 'N');
-    spec!("HRESULT", "ItemHRESULT", "s", "HResult", 'R');
-    spec!("hresult", "ItemHRESULT", "s", "HResult", 'R');
-    spec!("WINERROR", "ItemWINERROR", "s", "u32", 'u');
-    spec!("winerr", "ItemWINERROR", "s", "u32", 'u');
-    spec!("NDIS_STATUS", "ItemNDIS_STATUS", "s", "i32", 'd');
-    spec!("NDIS_OID", "ItemNDIS_OID", "s", "u16", 'H');
+    spec!("STATUS", "ItemNTSTATUS", "s", "NtStatus");
+    spec!("status", "ItemNTSTATUS", "s", "NtStatus");
+    spec!("HRESULT", "ItemHRESULT", "s", "HResult");
+    spec!("hresult", "ItemHRESULT", "s", "HResult");
+    spec!("WINERROR", "ItemWINERROR", "s", "u32");
+    spec!("winerr", "ItemWINERROR", "s", "u32");
+    spec!("NDIS_STATUS", "ItemNDIS_STATUS", "s", "i32");
+    spec!("NDIS_OID", "ItemNDIS_OID", "s", "u16");
 
     // GUID
-    spec!("GUID", "ItemGuid", "s", "Guid", 'G', complex);
-    spec!("guid", "ItemGuid", "s", "Guid", 'G', complex);
-    spec!("CLSID", "ItemCLSID", "s", "Guid", 'G', complex);
-    spec!("IID", "ItemIID", "s", "Guid", 'G', complex);
+    spec!("GUID", "ItemGuid", "s", "Guid", complex);
+    spec!("guid", "ItemGuid", "s", "Guid", complex);
+    spec!("CLSID", "ItemCLSID", "s", "Guid", complex);
+    spec!("IID", "ItemIID", "s", "Guid", complex);
 
     // String types (long form)
-    spec!("ASTR", "ItemString", "s", "&str", 's', complex); // TODO: WPP_LOGASTR?
-    spec!("WSTR", "ItemWString", "s", "&str", 'S', complex); // TODO: WPP_LOGWSTR?
+    spec!("ASTR", "ItemString", "s", "&str", complex); // TODO: WPP_LOGASTR?
+    spec!("WSTR", "ItemWString", "s", "&str", complex); // TODO: WPP_LOGWSTR?
     // TODO: Other types ARSTR, ARWSTR, CSTR, USTR, ANSTR, sid, BIN?
 
     // Network types
-    spec!("IPADDR", "ItemIPAddr", "s", "u32", 'u');
-    spec!("ipaddr", "ItemIPAddr", "s", "u32", 'u');
-    spec!("PORT", "ItemPort", "s", "u16", 'H');
-    spec!("port", "ItemPort", "s", "u16", 'H');
+    spec!("IPADDR", "ItemIPAddr", "s", "u32");
+    spec!("ipaddr", "ItemIPAddr", "s", "u32");
+    spec!("PORT", "ItemPort", "s", "u16");
+    spec!("port", "ItemPort", "s", "u16");
 
     // Boolean types
-    spec!("bool", "ItemListLong(false,true)", "s", "bool", 'L');
-    spec!("BOOLEAN", "ItemListByte(FALSE,TRUE)", "s", "bool", 'L');
+    spec!("bool", "ItemListLong(false,true)", "s", "bool");
+    spec!("BOOLEAN", "ItemListByte(FALSE,TRUE)", "s", "bool");
 
     // Time types (all map to i64)
-    spec!("TIMESTAMP", "ItemTimestamp", "s", "i64", 'D');
-    spec!("TIME", "ItemTimestamp", "s", "i64", 'D');
-    spec!("DATE", "ItemTimestamp", "s", "i64", 'D');
-    spec!("WAITTIME", "ItemTimestamp", "s", "i64", 'D');
+    spec!("TIMESTAMP", "ItemTimestamp", "s", "i64");
+    spec!("TIME", "ItemTimestamp", "s", "i64");
+    spec!("DATE", "ItemTimestamp", "s", "i64");
+    spec!("WAITTIME", "ItemTimestamp", "s", "i64");
 
     // Custom Display types — any struct implementing core::fmt::Display
     // Usage: trace!("my obj: %!DISPLAY!", my_struct);
     // The macro formats the value via Display, collects into TraceFmtBuf,
     // and sends as ItemString. One Vec allocation, zero copies.
-    spec!("DISPLAY", "ItemString", "s", "Display", 'T', complex);
-    spec!("display", "ItemString", "s", "Display", 'T', complex);
+    spec!("DISPLAY", "ItemString", "s", "Display", complex);
+    spec!("display", "ItemString", "s", "Display", complex);
 
     map
 }
@@ -966,7 +986,7 @@ fn build_format_spec_map() -> std::collections::HashMap<String, CFormatSpec> {
 ///
 /// Returns the list of CFormatSpec for each format specifier found.
 fn parse_c_format_string(format_str: &str) -> Result<Vec<CFormatSpec>, String> {
-    let spec_map = build_format_spec_map();
+    let spec_map = format_spec_map();
     let mut specs = Vec::new();
     let mut chars = format_str.chars().peekable();
 
@@ -1088,11 +1108,6 @@ fn rust_assert_type_tokens(rust_type: &str) -> proc_macro2::TokenStream {
         "Guid" => quote! { ::wdf::Guid },
         _ => quote! { i32 }, // fallback
     }
-}
-
-/// Generates a method suffix from format specs (e.g., [d, s] -> "ds")
-fn generate_method_suffix(specs: &[CFormatSpec]) -> String {
-    specs.iter().map(|s| s.method_char).collect()
 }
 
 /// Represents a parsed trace argument (expression paired with its format spec)
@@ -1382,14 +1397,24 @@ pub fn trace(item: TokenStream) -> TokenStream {
     };
     
     let ParsedTraceArgs { flag, level, format_str, format_specs, args } = parsed;
-    
+
+    if args.len() > 8 {
+        return Error::new(
+            proc_macro2::Span::call_site(),
+            format!("trace! supports at most 8 arguments (got {}); add a new pre-generated trace_N method on TraceWriter to raise the limit", args.len()),
+        ).to_compile_error().into();
+    }
+
     let message_id = TRACE_MESSAGE_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     
     let driver_name = std::env::var("CARGO_PKG_NAME")
         .unwrap_or_else(|_| "unknown_driver".to_string())
         .replace('-', "_");
     
-    let msg_guid = "e7602a7b-5034-321b-d450-a986113fc2e1";
+    // Generate a deterministic UUIDv5 message GUID from the source file path
+    // so that the same trace site always produces the same GUID across builds,
+    // regardless of compilation order or toolchain version.
+    let msg_guid = generate_deterministic_guid(&source_file);
     let param2 = format!("{} {} // SRC={} MJ= MN=", msg_guid, driver_name, file_name);
     
     let wpp_format = generate_wpp_format_string(&format_str, &format_specs);
@@ -1412,24 +1437,14 @@ pub fn trace(item: TokenStream) -> TokenStream {
     }
     annotation_args.push(quote! { "}" });
     
-    let method_suffix = generate_method_suffix(&format_specs);
-    let trait_key = if method_suffix.is_empty() { "empty".to_string() } else { method_suffix.clone() };
-    
-    let method_name = format!("trace_{}", trait_key);
+    let method_name = format!("trace_{}", args.len());
     let method_ident = syn::Ident::new(&method_name, proc_macro2::Span::call_site());
-    
-    let trait_suffix = if method_suffix.is_empty() { "Empty".to_string() } else { method_suffix.to_uppercase() };
-    let trait_name = format!("TraceWriterExt{}", trait_suffix);
-    let trait_ident = syn::Ident::new(&trait_name, proc_macro2::Span::call_site());
-    
-    let trait_and_impl = generate_trace_writer_ext_method(&method_ident, &trait_ident, &args);
-    
-    let method_call = generate_trace_method_call(&method_ident, &trait_ident, message_id as u16, &args, flag.as_ref(), level.as_ref());
-    
+
+    let method_call = generate_trace_method_call(&method_ident, message_id as u16, &args, flag.as_ref(), level.as_ref());
+
     let expanded = quote! {
         core::hint::codeview_annotation!(#(#annotation_args),*);
         {
-            #trait_and_impl
             #method_call
         }
     };
@@ -1437,138 +1452,73 @@ pub fn trace(item: TokenStream) -> TokenStream {
     expanded.into()
 }
 
-/// Generates the TraceWriterExt trait - uses TraceArgData::as_bytes() for all types.
-fn generate_trace_writer_ext_method(
-    method_ident: &syn::Ident,
-    trait_ident: &syn::Ident,
-    args: &[TraceArg],
-) -> proc_macro2::TokenStream {
-    let param_decls: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, _)| {
-        let ptr_name = syn::Ident::new(&format!("a{}_ptr", idx + 1), proc_macro2::Span::call_site());
-        let len_name = syn::Ident::new(&format!("a{}_len", idx + 1), proc_macro2::Span::call_site());
-        quote! { #ptr_name: *const u8, #len_name: usize }
-    }).collect();
-    
-    let arg_pairs: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, _)| {
-        let ptr_name = syn::Ident::new(&format!("a{}_ptr", idx + 1), proc_macro2::Span::call_site());
-        let len_name = syn::Ident::new(&format!("a{}_len", idx + 1), proc_macro2::Span::call_site());
-        quote! { #ptr_name, #len_name, }
-    }).collect();
-    
-    quote! {
-        #[doc(hidden)]
-        #[allow(non_camel_case_types)]
-        trait #trait_ident {
-            fn #method_ident(
-                &self,
-                level: ::wdf::__internal::UCHAR,
-                flags: ::wdf::__internal::ULONG,
-                id: ::wdf::__internal::USHORT,
-                trace_guid: ::wdf::__internal::LPCGUID,
-                should_trace_wpp: bool,
-                should_auto_log: bool,
-                #(#param_decls),*
-            );
-        }
-        
-        impl #trait_ident for ::wdf::tracing::TraceWriter {
-            fn #method_ident(
-                &self,
-                level: ::wdf::__internal::UCHAR,
-                flags: ::wdf::__internal::ULONG,
-                id: ::wdf::__internal::USHORT,
-                trace_guid: ::wdf::__internal::LPCGUID,
-                should_trace_wpp: bool,
-                should_auto_log: bool,
-                #(#param_decls),*
-            ) {
-                unsafe {
-                    if should_trace_wpp {
-                        let logger = ::wdf::__internal::get_wpp_logger().unwrap();
-                        let _ = ::wdf::__internal::get_wpp_trace_message().unwrap()(
-                            logger,
-                            ::wdf::__internal::WPP_TRACE_OPTIONS,
-                            trace_guid,
-                            id,
-                            #(#arg_pairs)*
-                            core::ptr::null::<core::ffi::c_void>(),
-                        );
-                    }
-
-                    if should_auto_log {
-                        let auto_log_context = ::wdf::__internal::get_auto_log_context().unwrap();
-                        let _ = ::wdf::__internal::WppAutoLogTrace(
-                            auto_log_context,
-                            level,
-                            flags,
-                            trace_guid.cast_mut().cast(),
-                            id,
-                            #(#arg_pairs)*
-                            core::ptr::null::<core::ffi::c_void>(),
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Generates the method call with compile-time type assertions via TraceArgData.
+/// Generates the call site that invokes one of the pre-generated
+/// `TraceWriter::trace_N` inherent methods.
+///
+/// For each argument, this emits a per-arg binding that:
+///   * coerces the user expression into a value implementing `TraceArgData`
+///     (`CString` for `&str`, finalised `TraceFmtBuf` for `Display`, or a
+///     type-ascribed primitive),
+///   * surfaces a clear compile error if the expression's type does not
+///     match the format spec (e.g. `%d` requires `i32`),
+///   * keeps the binding alive across the trace call so its byte slice
+///     remains valid.
+///
+/// The bindings are then passed by reference into `trace_N`, which is
+/// generic over each `Ai: TraceArgData` and forwards the bytes to WPP.
 fn generate_trace_method_call(
     method_ident: &syn::Ident,
-    trait_ident: &syn::Ident,
     message_id: u16,
     args: &[TraceArg],
     flag: Option<&syn::Ident>,
     level: Option<&syn::Ident>,
 ) -> proc_macro2::TokenStream {
-    let type_assertions: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
-        let assert_var = syn::Ident::new(&format!("__assert_type_{}", idx), proc_macro2::Span::call_site());
-        let bytes_var = syn::Ident::new(&format!("__trace_bytes_{}", idx), proc_macro2::Span::call_site());
+    let arg_bindings: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
+        let arg_var = syn::Ident::new(&format!("__trace_arg_{}", idx), proc_macro2::Span::call_site());
         let expr = &arg.expr;
         let rust_type = &arg.spec.rust_assert_type;
-        
+
         if arg.spec.is_complex && rust_type == "&str" {
-            // String path: convert &str → CString → bytes (one alloc)
+            // String path: coerce &str → CString (single allocation, null-terminated)
             quote! {
-                let #assert_var = ::wdf::__internal::CString::new(#expr).unwrap();
-                let #bytes_var = ::wdf::__internal::TraceArgData::as_bytes(&#assert_var);
+                let #arg_var = ::wdf::__internal::CString::new(#expr).unwrap();
             }
         } else if arg.spec.is_complex && rust_type == "Display" {
-            // Custom Display type path: format via TraceFmtBuf → bytes (one alloc)
-            // The inline function asserts Display is implemented at compile time.
-            let buf_var = syn::Ident::new(&format!("__trace_fmt_buf_{}", idx), proc_macro2::Span::call_site());
+            // Custom Display type path: format via TraceFmtBuf, then finalize.
+            // The inline assertion fn surfaces a clear compile error if the
+            // expression's type does not implement core::fmt::Display.
             let assert_fn = syn::Ident::new(&format!("__assert_display_{}", idx), proc_macro2::Span::call_site());
             quote! {
                 fn #assert_fn(_: &impl core::fmt::Display) {}
-                let #assert_var = &#expr;
-                #assert_fn(#assert_var);
-                let mut #buf_var = ::wdf::__internal::TraceFmtBuf::new();
-                core::fmt::write(&mut #buf_var, format_args!("{}", #assert_var)).unwrap();
-                let #bytes_var = #buf_var.finish();
+                let __display_value = &#expr;
+                #assert_fn(__display_value);
+                let mut #arg_var = ::wdf::__internal::TraceFmtBuf::new();
+                core::fmt::write(&mut #arg_var, format_args!("{}", __display_value)).unwrap();
+                #arg_var.finalize();
             }
         } else {
+            // Primitive path: type-ascribe the expression to enforce the
+            // expected Rust type at compile time.
             let assert_type = rust_assert_type_tokens(rust_type);
             quote! {
-                let #assert_var: #assert_type = #expr;
-                let #bytes_var = ::wdf::__internal::TraceArgData::as_bytes(&#assert_var);
+                let #arg_var: #assert_type = #expr;
             }
         }
     }).collect();
-    
-    let arg_values: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, _)| {
-        let bytes_var = syn::Ident::new(&format!("__trace_bytes_{}", idx), proc_macro2::Span::call_site());
-        quote! { #bytes_var.as_ptr(), #bytes_var.len() }
+
+    let arg_refs: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, _)| {
+        let arg_var = syn::Ident::new(&format!("__trace_arg_{}", idx), proc_macro2::Span::call_site());
+        quote! { &#arg_var }
     }).collect();
-    
+
     let message_id_lit = proc_macro2::Literal::u16_unsuffixed(message_id);
-    
+
     let level_value = if let Some(level_ident) = level {
         quote! { TraceLevel::#level_ident as u8 }
     } else {
         quote! { TraceLevel::None as u8 }
     };
-    
+
     let (flags_value, control_index) = if let Some(flag_ident) = flag {
         let flag_name = flag_ident.to_string();
         (
@@ -1581,28 +1531,165 @@ fn generate_trace_method_call(
 
     quote! {
         {
-            #(#type_assertions)*
-            
+            // Per-argument bindings keep coerced values alive for the
+            // duration of the trace call so their byte slices stay valid.
+            #(#arg_bindings)*
+
             let __trace_level: u8 = #level_value;
             let __trace_flags: u32 = #flags_value;
             let __control_index: usize = #control_index;
-            
+
             if let Some(__trace_writer) = ::wdf::get_trace_writer() {
-                let __should_trace_wpp = (__trace_flags == 0 || __trace_writer.is_flag_enabled(__control_index, __trace_flags)) 
+                // WPP fires only when the configured flag bit is set (or no
+                // flag was specified) AND the message level is at or below
+                // the control block's level (lower numeric = more severe).
+                let __should_trace_wpp = (__trace_flags == 0 || __trace_writer.is_flag_enabled(__control_index, __trace_flags))
                                             && __trace_writer.is_level_enabled(__control_index, __trace_level);
+                // AutoLog always captures messages above Verbose; Verbose is
+                // gated by the per-control-block AutoLogVerboseEnabled flag.
                 let __should_auto_log = __trace_level < TraceLevel::Verbose as u8 || __trace_writer.is_auto_log_verbose_enabled(__control_index);
-                
-                <::wdf::tracing::TraceWriter as #trait_ident>::#method_ident(
-                    __trace_writer,
+
+                __trace_writer.#method_ident(
                     __trace_level,
                     __trace_flags,
                     #message_id_lit,
                     &::wdf::__internal::TRACE_GUID,
                     __should_trace_wpp,
                     __should_auto_log,
-                    #(#arg_values),*
+                    #(#arg_refs),*
                 );
             }
         }
     }
+}
+
+/// Emits inherent `trace_0`..`trace_8` methods on `wdf::tracing::TraceWriter`.
+///
+/// # Why pre-generated methods?
+///
+/// An earlier design synthesised a fresh `TraceWriterExtXX` trait + impl per
+/// `trace!` call site, parameterised by the exact argument arity. That worked
+/// but produced one anonymous trait per unique combination of format specs,
+/// bloated codegen, and forced the macro to invent unique trait names per
+/// call. Replacing it with a small fixed family of generic methods keeps the
+/// public surface small while still type-checking each argument through
+/// [`TraceArgData`].
+///
+/// # Generated shape
+///
+/// Each method has the signature:
+/// ```ignore
+/// pub fn trace_N<A1: TraceArgData, ..., AN: TraceArgData>(
+///     &self,
+///     level: UCHAR,
+///     flags: ULONG,
+///     id: USHORT,
+///     trace_guid: LPCGUID,
+///     should_trace_wpp: bool,
+///     should_auto_log: bool,
+///     a1: &A1, ..., aN: &AN,
+/// );
+/// ```
+///
+/// The body calls `TraceArgData::as_bytes` on each argument and forwards the
+/// resulting `(ptr, len)` pairs to `WppTraceMessage` and `WppAutoLogTrace`,
+/// terminated by a single `null` sentinel as required by the variadic ABI.
+///
+/// The macro takes no input — it always emits methods for arities 0..=8.
+/// Adding more arities only requires bumping `MAX_ARITY` here. Intended for
+/// internal use from inside the `wdf` crate; the emitted code uses
+/// `crate::...` paths and assumes the surrounding `impl TraceWriter` block
+/// lives in a module where those resolve correctly.
+#[proc_macro]
+pub fn define_trace_writer_methods(_input: TokenStream) -> TokenStream {
+    const MAX_ARITY: usize = 8;
+    let mut methods: Vec<proc_macro2::TokenStream> = Vec::with_capacity(MAX_ARITY + 1);
+
+    for n in 0..=MAX_ARITY {
+        let method_ident = syn::Ident::new(&format!("trace_{}", n), proc_macro2::Span::call_site());
+
+        let type_params: Vec<syn::Ident> = (0..n)
+            .map(|i| syn::Ident::new(&format!("A{}", i + 1), proc_macro2::Span::call_site()))
+            .collect();
+        let arg_idents: Vec<syn::Ident> = (0..n)
+            .map(|i| syn::Ident::new(&format!("a{}", i + 1), proc_macro2::Span::call_site()))
+            .collect();
+        let bytes_idents: Vec<syn::Ident> = (0..n)
+            .map(|i| syn::Ident::new(&format!("__b{}", i + 1), proc_macro2::Span::call_site()))
+            .collect();
+
+        let generics = if n == 0 {
+            quote! {}
+        } else {
+            quote! { < #(#type_params : crate::trace_data::TraceArgData),* > }
+        };
+
+        let arg_params = arg_idents.iter().zip(type_params.iter()).map(|(a, t)| {
+            quote! { #a: & #t }
+        });
+
+        let byte_bindings = arg_idents.iter().zip(bytes_idents.iter()).map(|(a, b)| {
+            quote! { let #b = crate::trace_data::TraceArgData::as_bytes(#a); }
+        });
+
+        let arg_pairs: Vec<proc_macro2::TokenStream> = bytes_idents.iter().map(|b| {
+            quote! { #b.as_ptr(), #b.len(), }
+        }).collect();
+
+        methods.push(quote! {
+            #[doc(hidden)]
+            #[inline]
+            pub fn #method_ident #generics (
+                &self,
+                level: ::wdk_sys::UCHAR,
+                flags: ::wdk_sys::ULONG,
+                id: ::wdk_sys::USHORT,
+                trace_guid: ::wdk_sys::LPCGUID,
+                should_trace_wpp: bool,
+                should_auto_log: bool,
+                #(#arg_params),*
+            ) {
+                // Resolve every arg into its byte representation up front.
+                // The borrows live for the entire body so the WPP variadic
+                // call below sees stable pointers.
+                #(#byte_bindings)*
+                unsafe {
+                    if should_trace_wpp {
+                        // WppTraceMessage takes a variadic list of
+                        // (*const u8, usize) pairs terminated by a single
+                        // null sentinel; the trailing nullptr below is
+                        // required by that ABI contract.
+                        let logger = crate::driver::get_wpp_logger().unwrap();
+                        let _ = crate::driver::get_wpp_trace_message().unwrap()(
+                            logger,
+                            crate::tracing::WPP_TRACE_OPTIONS,
+                            trace_guid,
+                            id,
+                            #(#arg_pairs)*
+                            core::ptr::null::<core::ffi::c_void>(),
+                        );
+                    }
+
+                    if should_auto_log {
+                        // AutoLog mirrors the same (ptr, len)+nullptr ABI;
+                        // it is the in-flight-recorder sink WPP feeds into
+                        // crash dumps when verbose tracing is captured.
+                        let auto_log_context = crate::driver::get_auto_log_context().unwrap();
+                        let _ = crate::tracing::WppAutoLogTrace(
+                            auto_log_context,
+                            level,
+                            flags,
+                            trace_guid.cast_mut().cast(),
+                            id,
+                            #(#arg_pairs)*
+                            core::ptr::null::<core::ffi::c_void>(),
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    let expanded = quote! { #(#methods)* };
+    expanded.into()
 }
