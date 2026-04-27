@@ -5,11 +5,7 @@
 //! operations such as reading, writing, copying, and checking file existence.
 //! It also integrates with `mockall` to enable mocking for unit tests.
 
-// Warns the methods are not used, however they are used.
-// The intellisense confusion seems to come from automock
-#![allow(dead_code)]
 #![allow(clippy::unused_self)]
-
 use std::{
     fs::{
         DirEntry,
@@ -26,15 +22,20 @@ use std::{
     path::Path,
 };
 
-use mockall::automock;
-
 use super::error::FileError;
 
 /// Provides limited access to `std::fs` methods
 #[derive(Default)]
 pub struct Fs {}
 
-#[automock]
+#[cfg_attr(test, mockall::automock)]
+#[cfg_attr(
+    test,
+    allow(
+        dead_code,
+        reason = "This implementation is mocked in test configuration."
+    )
+)]
 impl Fs {
     pub fn copy(&self, src: &Path, dest: &Path) -> Result<u64, FileError> {
         copy(src, dest).map_err(|e| FileError::CopyError(src.to_owned(), dest.to_owned(), e))
