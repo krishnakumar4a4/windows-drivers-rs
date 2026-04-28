@@ -734,21 +734,26 @@ fn is_valid_guid(guid_str: &str) -> bool {
 /// This is incremented for each trace! macro expansion.
 static TRACE_MESSAGE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(10);
 
-/// Generates a deterministic GUID from the source file path using SHA-256.
+/// Generates a deterministic 16-byte GUID from the source file path using
+/// SHA-256.
 ///
 /// SHA-256 hashes the normalised source path and the first 16 bytes of the
-/// digest are formatted as a GUID. The same file path always produces the
-/// same GUID regardless of toolchain version, compilation order, or host
-/// platform.
-fn generate_deterministic_guid(source_file: &str) -> String {
+/// digest become the GUID. The same file path always produces the same GUID
+/// regardless of toolchain version, compilation order, or host platform.
+fn generate_deterministic_guid(source_file: &str) -> [u8; 16] {
     use sha2::{Sha256, Digest};
 
     // Normalise path separators so Windows and Unix paths hash identically.
     let normalised = source_file.replace('\\', "/");
 
     let hash = Sha256::digest(normalised.as_bytes());
-    let b = &hash[..16];
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&hash[..16]);
+    bytes
+}
 
+/// Formats 16 raw GUID bytes as a standard `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` string.
+fn format_guid(b: &[u8; 16]) -> String {
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
         b[0], b[1], b[2], b[3],
@@ -757,6 +762,31 @@ fn generate_deterministic_guid(source_file: &str) -> String {
         b[8], b[9],
         b[10], b[11], b[12], b[13], b[14], b[15],
     )
+}
+
+/// Generates a `proc_macro2::TokenStream` that constructs a `::wdk_sys::GUID`
+/// struct literal from raw bytes, suitable for embedding in generated code.
+fn guid_to_tokens(b: &[u8; 16]) -> proc_macro2::TokenStream {
+    let data1 = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+    let data2 = u16::from_be_bytes([b[4], b[5]]);
+    let data3 = u16::from_be_bytes([b[6], b[7]]);
+    let d4_0 = b[8];
+    let d4_1 = b[9];
+    let d4_2 = b[10];
+    let d4_3 = b[11];
+    let d4_4 = b[12];
+    let d4_5 = b[13];
+    let d4_6 = b[14];
+    let d4_7 = b[15];
+
+    quote! {
+        ::wdk_sys::GUID {
+            Data1: #data1,
+            Data2: #data2,
+            Data3: #data3,
+            Data4: [#d4_0, #d4_1, #d4_2, #d4_3, #d4_4, #d4_5, #d4_6, #d4_7],
+        }
+    }
 }
 
 /// Represents the type of a trace argument for WPP tracing, derived from
@@ -1415,11 +1445,12 @@ pub fn trace(item: TokenStream) -> TokenStream {
         .unwrap_or_else(|_| "unknown_driver".to_string())
         .replace('-', "_");
     
-    // Generate a deterministic UUIDv5 message GUID from the source file path
+    // Generate a deterministic message GUID from the source file path
     // so that the same trace site always produces the same GUID across builds,
     // regardless of compilation order or toolchain version.
-    let msg_guid = generate_deterministic_guid(&source_file);
-    let param2 = format!("{} {} // SRC={} MJ= MN=", msg_guid, driver_name, file_name);
+    let trace_guid_bytes = generate_deterministic_guid(&source_file);
+    let trace_guid_str = format_guid(&trace_guid_bytes);
+    let param2 = format!("{} {} // SRC={} MJ= MN=", trace_guid_str, driver_name, file_name);
     
     let wpp_format = generate_wpp_format_string(&format_str, &format_specs);
     let typev_name = format!("{}_{}", driver_name, line_number);
@@ -1444,7 +1475,7 @@ pub fn trace(item: TokenStream) -> TokenStream {
     let method_name = format!("trace_{}", args.len());
     let method_ident = syn::Ident::new(&method_name, proc_macro2::Span::call_site());
 
-    let method_call = generate_trace_method_call(&method_ident, message_id as u16, &args, flag.as_ref(), level.as_ref());
+    let method_call = generate_trace_method_call(&method_ident, &trace_guid_bytes, message_id as u16, &args, flag.as_ref(), level.as_ref());
 
     let expanded = quote! {
         core::hint::codeview_annotation!(#(#annotation_args),*);
@@ -1472,11 +1503,13 @@ pub fn trace(item: TokenStream) -> TokenStream {
 /// generic over each `Ai: TraceArgData` and forwards the bytes to WPP.
 fn generate_trace_method_call(
     method_ident: &syn::Ident,
+    trace_guid_bytes: &[u8; 16],
     message_id: u16,
     args: &[TraceArg],
     flag: Option<&syn::Ident>,
     level: Option<&syn::Ident>,
 ) -> proc_macro2::TokenStream {
+    let guid_literal = guid_to_tokens(trace_guid_bytes);
     let arg_bindings: Vec<proc_macro2::TokenStream> = args.iter().enumerate().map(|(idx, arg)| {
         let arg_var = syn::Ident::new(&format!("__trace_arg_{}", idx), proc_macro2::Span::call_site());
         let expr = &arg.expr;
@@ -1557,7 +1590,7 @@ fn generate_trace_method_call(
                     __trace_level,
                     __trace_flags,
                     #message_id_lit,
-                    &::wdf::__internal::TRACE_GUID,
+                    &#guid_literal,
                     __should_trace_wpp,
                     __should_auto_log,
                     #(#arg_refs),*

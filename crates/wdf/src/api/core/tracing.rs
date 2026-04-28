@@ -54,6 +54,18 @@ pub static mut WPP_MAIN_CB: WPP_PROJECT_CONTROL_BLOCK = WPP_PROJECT_CONTROL_BLOC
     }),
 };
 
+// Trace control codes used by WPP classic provider callback
+// These were originally defined in evntrace.h as below
+// #define EVENT_CONTROL_CODE_DISABLE_PROVIDER 0
+// #define EVENT_CONTROL_CODE_ENABLE_PROVIDER  1
+// #define EVENT_CONTROL_CODE_CAPTURE_STATE    2
+// The enum corresponds to these control codes and is used in the WppClassicProviderCallback function
+enum TraceControlCode {
+    Enable = 1,
+    Disable = 0,
+    CaptureState = 2,
+}
+
 const WPP_FLAG_LEN: UCHAR = 1;
 
 unsafe extern "C" {
@@ -353,42 +365,56 @@ extern "C" fn WppClassicProviderCallback(
     EnableContext: PVOID,
     CallbackContext: PVOID,
 ) {
-    let TraceCb = CallbackContext.cast::<WPP_TRACE_CONTROL_BLOCK>();
-    let TraceContext = EnableContext.cast::<WPP_TRACE_ENABLE_CONTEXT>();
+    let trace_cb = CallbackContext.cast::<WPP_TRACE_CONTROL_BLOCK>();
+    let trace_context = EnableContext.cast::<WPP_TRACE_ENABLE_CONTEXT>();
 
-    if ControlCode != 1 && ControlCode != 0 {
+    if ControlCode != TraceControlCode::Enable as u8 && ControlCode != TraceControlCode::Disable as u8 {
+        // Explicitly ignore Capture state control code
         return;
     }
 
     unsafe {
-        if ControlCode != 0 {
-            (*TraceCb).Flags[0] = (*TraceContext).EnableFlags;
-            (*TraceCb).Level = (*TraceContext).Level as UCHAR;
-            (*TraceCb).Logger = *(TraceContext.cast::<TRACEHANDLE>());
+        if ControlCode != TraceControlCode::Disable as u8 {
+            (*trace_cb).Flags[0] = (*trace_context).EnableFlags;
+            (*trace_cb).Level = (*trace_context).Level as UCHAR;
+            (*trace_cb).Logger = *(trace_context.cast::<TRACEHANDLE>());
 
+            // TODO: This should be called only when (NTDDI_VERSION >= NTDDI_WIN10_RS1)
             imp_WppRecorderReplay(
-                TraceCb as PVOID,
-                (*TraceCb).Logger,
-                (*TraceContext).EnableFlags,
-                (*TraceContext).Level,
+                WPP_GLOBAL_Control.cast(),
+                (*trace_cb).Logger,
+                (*trace_context).EnableFlags,
+                (*trace_context).Level,
             );
         } else {
-            (*TraceCb).Level = 0;
-            (*TraceCb).Flags[0] = 0;
-            (*TraceCb).Logger = 0;
+            (*trace_cb).Level = 0;
+            (*trace_cb).Flags[0] = 0;
+            (*trace_cb).Logger = 0;
         }
     }
 }
 
 // Trace options used by WPP tracing - exposed for macro use
-#[doc(hidden)]
-pub const WPP_TRACE_OPTIONS: ULONG = 1 | 2 | 32 | 8;
+// These are defined in evntrace.h as follows:
+// //
+// // Flags used by WMI Trace Message
+// // Note that the order or value of these flags should NOT be changed as they are processed
+// // in this order.
+// // #define TRACE_MESSAGE_SEQUENCE              1  // Message should include a sequence number
+// // #define TRACE_MESSAGE_GUID                  2  // Message includes a GUID
+// // #define TRACE_MESSAGE_COMPONENTID           4  // Message has no GUID, Component ID instead
+// // #define TRACE_MESSAGE_TIMESTAMP             8  // Message includes a timestamp
+// // #define TRACE_MESSAGE_PERFORMANCE_TIMESTAMP 16 // *Obsolete* Clock type is controlled by the logger
+// // #define TRACE_MESSAGE_SYSTEMINFO            32 // Message includes system information TID,PID
+const TRACE_MESSAGE_SEQUENCE: ULONG = 1;
+const TRACE_MESSAGE_GUID: ULONG = 2;
+const TRACE_MESSAGE_SYSTEMINFO: ULONG = 32;
+const TRACE_MESSAGE_TIMESTAMP: ULONG = 8;
+const TRACE_MESSAGE_COMPONENTID: ULONG = 4;
+const TRACE_MESSAGE_PERFORMANCE_TIMESTAMP: ULONG = 16;
 
-/// Trace GUID used by WPP tracing - exposed for macro use
 #[doc(hidden)]
-pub const TRACE_GUID: GUID = GUID {
-    Data1: 0xE7602A7B,
-    Data2: 0x5034,
-    Data3: 0x321B,
-    Data4: [0xD4, 0x50, 0xA9, 0x86, 0x11, 0x3F, 0xC2, 0xE1],
-};
+pub const WPP_TRACE_OPTIONS: ULONG = TRACE_MESSAGE_SEQUENCE 
+                                    | TRACE_MESSAGE_GUID 
+                                    | TRACE_MESSAGE_SYSTEMINFO 
+                                    | TRACE_MESSAGE_TIMESTAMP;
