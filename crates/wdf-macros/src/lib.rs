@@ -132,34 +132,45 @@ pub fn driver_impl(_args: TokenStream, input: TokenStream) -> TokenStream {
     wrappers
 }
 
-/// Represents a single trace control definition with GUID and optional flags
+/// Represents a single trace control definition with provider name, GUID and optional flags
 #[derive(Debug, Clone)]
 struct TraceControlDef {
+    provider_name: String,
     guid: String,
     flags: Vec<String>,
 }
 
 /// Parser for trace_control argument
 /// Supports two syntaxes:
-/// 1. Just a GUID string: "guid-string"
-/// 2. Tuple with GUID and flags: ("guid-string", [FLAG_ONE, FLAG_TWO]) or ("guid-string", [])
+/// 1. Provider name and GUID (no flags): ("ProviderName", "guid-string")
+/// 2. Provider name, GUID and flags: ("ProviderName", "guid-string", [FLAG_ONE, FLAG_TWO])
 impl Parse for TraceControlDef {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        // Check if it's a parenthesized tuple or just a string literal
-        if input.peek(syn::token::Paren) {
-            // Tuple format: ("guid", [FLAGS...])
-            let content;
-            syn::parenthesized!(content in input);
-            
-            // Parse GUID string
-            let guid_lit: syn::LitStr = content.parse()?;
-            let guid = guid_lit.value();
-            
-            if !is_valid_guid(&guid) {
-                return Err(Error::new_spanned(guid_lit, "Not a valid GUID"));
-            }
-            
-            // Parse comma separator
+        // Tuple format: ("provider_name", "guid") or ("provider_name", "guid", [FLAGS...])
+        let content;
+        syn::parenthesized!(content in input);
+        
+        // Parse provider name string
+        let provider_name_lit: syn::LitStr = content.parse()?;
+        let provider_name = provider_name_lit.value();
+        
+        if provider_name.is_empty() {
+            return Err(Error::new_spanned(provider_name_lit, "Provider name must not be empty"));
+        }
+        
+        // Parse comma separator
+        content.parse::<Token![,]>()?;
+        
+        // Parse GUID string
+        let guid_lit: syn::LitStr = content.parse()?;
+        let guid = guid_lit.value();
+        
+        if !is_valid_guid(&guid) {
+            return Err(Error::new_spanned(guid_lit, "Not a valid GUID"));
+        }
+        
+        // Check if there are flags (optional third element)
+        let flags = if content.peek(Token![,]) {
             content.parse::<Token![,]>()?;
             
             // Parse flag array [FLAG_ONE, FLAG_TWO, ...] or []
@@ -169,22 +180,14 @@ impl Parse for TraceControlDef {
             let flags_punctuated: Punctuated<Ident, Token![,]> = 
                 Punctuated::parse_terminated(&flags_content)?;
             
-            let flags: Vec<String> = flags_punctuated.iter()
+            flags_punctuated.iter()
                 .map(|ident| ident.to_string())
-                .collect();
-            
-            Ok(TraceControlDef { guid, flags })
+                .collect()
         } else {
-            // Simple string format: "guid"
-            let guid_lit: syn::LitStr = input.parse()?;
-            let guid = guid_lit.value();
-            
-            if !is_valid_guid(&guid) {
-                return Err(Error::new_spanned(guid_lit, "Not a valid GUID"));
-            }
-            
-            Ok(TraceControlDef { guid, flags: Vec::new() })
-        }
+            Vec::new()
+        };
+        
+        Ok(TraceControlDef { provider_name, guid, flags })
     }
 }
 
@@ -415,24 +418,24 @@ fn generate_wpp_flags_declaration(trace_controls: &[TraceControlDef]) -> proc_ma
 /// 
 /// # Supported Attributes
 /// 
-/// ## Simple GUID format (no flags):
+/// ## Provider name and GUID (no flags):
 /// ```ignore
-/// #[driver_entry(trace_control = "guid-string")]
+/// #[driver_entry(trace_control = ("MyProvider", "guid-string"))]
 /// ```
 /// 
-/// ## GUID with flags:
+/// ## Provider name, GUID with flags:
 /// ```ignore
-/// #[driver_entry(trace_control = ("guid-string", [FLAG_ONE, FLAG_TWO]))]
+/// #[driver_entry(trace_control = ("MyProvider", "guid-string", [FLAG_ONE, FLAG_TWO]))]
 /// ```
 /// 
-/// ## GUID with empty flags:
+/// ## Provider name, GUID with empty flags:
 /// ```ignore
-/// #[driver_entry(trace_control = ("guid-string", []))]
+/// #[driver_entry(trace_control = ("MyProvider", "guid-string", []))]
 /// ```
 /// 
 /// ## Multiple trace controls:
 /// ```ignore
-/// #[driver_entry(trace_control = ("guid1", [FLAG_A, FLAG_B]), ("guid2", [FLAG_C, FLAG_D]))]
+/// #[driver_entry(trace_control = ("Prov1", "guid1", [FLAG_A, FLAG_B]), ("Prov2", "guid2", [FLAG_C, FLAG_D]))]
 /// ```
 /// 
 /// Note: Flag names must be unique across all trace control definitions.
@@ -487,9 +490,10 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
     // Generate codeview annotations for all trace controls
     let codeview_annotations: Vec<proc_macro2::TokenStream> = trace_controls.iter().map(|tc| {
         let guid = &tc.guid;
+        let provider_name = &tc.provider_name;
         let flags = &tc.flags;
         quote! {
-            core::hint::codeview_annotation!("TMC:", #guid, "CtlGuid", #(#flags),*);
+            core::hint::codeview_annotation!("TMC:", #guid, #provider_name, #(#flags),*);
         }
     }).collect();
 

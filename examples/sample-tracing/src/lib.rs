@@ -39,7 +39,7 @@ impl fmt::Display for DeviceInfo {
 /// specifier supported by defaultwpp.ini. Each trace statement uses a
 /// variable argument (not a bare literal) to exercise compile-time type
 /// assertion.
-#[driver_entry(trace_control = ("cb94defb-592a-4509-8f2e-54f204929669", [FLAG_ONE, FLAG_TWO]))]
+#[driver_entry(trace_control = ("SampleTracing", "cb94defb-592a-4509-8f2e-54f204929669", [FLAG_ONE, FLAG_TWO]))]
 fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     println!("Sample tracing driver entry");
 
