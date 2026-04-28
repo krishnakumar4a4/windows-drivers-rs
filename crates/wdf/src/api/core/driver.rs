@@ -30,7 +30,7 @@ use super::{
     object::Handle,
     result::{NtResult, status_codes},
     string::{WString, to_rust_str},
-    tracing::{TraceWriter, WppTraceMessage},
+    tracing::{TraceWriter, WPP_PROJECT_CONTROL_BLOCK, WppTraceMessage},
 };
 use crate::println;
 
@@ -200,6 +200,7 @@ pub fn call_safe_driver_entry(
     reg_path: PCUNICODE_STRING,
     safe_entry: fn(&mut Driver, &str) -> NtResult<()>,
     tracing_control_guid: Option<Guid>,
+    control_block: *mut WPP_PROJECT_CONTROL_BLOCK,
 ) -> NTSTATUS {
     let mut driver_config = init_wdf_struct!(WDF_DRIVER_CONFIG);
     driver_config.EvtDriverDeviceAdd = Some(evt_driver_device_add);
@@ -223,7 +224,7 @@ pub fn call_safe_driver_entry(
     }
 
     if let Some(control_guid) = tracing_control_guid {
-        let trace_writer = unsafe { TraceWriter::init(control_guid, wdm_driver, reg_path) };
+        let trace_writer = unsafe { TraceWriter::init(control_guid, control_block, wdm_driver, reg_path) };
 
         trace_writer.start();
 

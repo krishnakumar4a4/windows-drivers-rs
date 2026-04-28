@@ -500,15 +500,65 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
     // Generate the WPP flags declaration
     let wpp_flags_declaration = generate_wpp_flags_declaration(&trace_controls);
 
+    // Compute WPP_FLAG_LEN: max of ceil(flag_count / 32) across all trace controls, minimum 1.
+    // This determines how many ULONGs are needed for the Flags array in WPP_TRACE_CONTROL_BLOCK.
+    let wpp_flag_len: usize = trace_controls.iter()
+        .map(|tc| (tc.flags.len() + 31) / 32)
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    let wpp_flag_len_lit = proc_macro2::Literal::usize_unsuffixed(wpp_flag_len);
+
+    // Generate the WPP_PROJECT_CONTROL_BLOCK union and WPP_MAIN_CB static.
+    // The union reserves enough space for the Flags array based on WPP_FLAG_LEN.
+    // This mirrors the C TMH pattern:
+    //   typedef union {
+    //       WPP_TRACE_CONTROL_BLOCK Control;
+    //       UCHAR ReserveSpace[ sizeof(WPP_TRACE_CONTROL_BLOCK) + sizeof(ULONG) * (WPP_FLAG_LEN - 1) ];
+    //   } WPP_CB_TYPE;
+    let generate_control_block = if !trace_controls.is_empty() {
+        quote! {
+            const WPP_FLAG_LEN: usize = #wpp_flag_len_lit;
+
+            #[repr(C)]
+            union WPP_PROJECT_CONTROL_BLOCK {
+                Control: core::mem::ManuallyDrop<::wdf::tracing::WPP_TRACE_CONTROL_BLOCK>,
+                ReserveSpace: [u8;
+                    core::mem::size_of::<::wdf::tracing::WPP_TRACE_CONTROL_BLOCK>()
+                        + core::mem::size_of::<u32>() * (WPP_FLAG_LEN - 1)],
+            }
+
+            static mut WPP_MAIN_CB: WPP_PROJECT_CONTROL_BLOCK = WPP_PROJECT_CONTROL_BLOCK {
+                Control: core::mem::ManuallyDrop::new(
+                    ::wdf::tracing::WPP_TRACE_CONTROL_BLOCK::new(WPP_FLAG_LEN as u8)
+                ),
+            };
+        }
+    } else {
+        quote! {}
+    };
+
+    // Generate the control block pointer expression.
+    // The macro-local union has the same layout starting with Control at offset 0,
+    // matching WPP_PROJECT_CONTROL_BLOCK. Cast the pointer to the wdf crate's type.
+    let control_block_ptr = if !trace_controls.is_empty() {
+        quote! { unsafe { (&raw mut WPP_MAIN_CB).cast::<::wdf::tracing::WPP_PROJECT_CONTROL_BLOCK>() } }
+    } else {
+        quote! { core::ptr::null_mut() }
+    };
+
     let mut wrappers: TokenStream = quote! {
         #wpp_flags_declaration
+
+        #generate_control_block
 
         #[unsafe(link_section = "INIT")]
         #[unsafe(export_name = "DriverEntry")] // WDF expects a symbol with the name DriverEntry
         extern "system" fn __driver_entry(driver: &mut ::wdf::DRIVER_OBJECT, registry_path: ::wdf::PCUNICODE_STRING,) -> ::wdf::NTSTATUS {
             #(#codeview_annotations)*
             let tracing_control_guid = #parse_tracing_control_guid;
-            ::wdf::call_safe_driver_entry(driver, registry_path, #safe_driver_entry, tracing_control_guid)
+            let control_block = #control_block_ptr;
+            ::wdf::call_safe_driver_entry(driver, registry_path, #safe_driver_entry, tracing_control_guid, control_block)
         }
     }
     .into();
@@ -780,7 +830,7 @@ fn guid_to_tokens(b: &[u8; 16]) -> proc_macro2::TokenStream {
     let d4_7 = b[15];
 
     quote! {
-        ::wdk_sys::GUID {
+        ::wdf::__internal::GUID {
             Data1: #data1,
             Data2: #data2,
             Data3: #data3,
