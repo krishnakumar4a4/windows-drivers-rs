@@ -1,446 +1,232 @@
-//! A sample driver written in 100% safe Rust.
-//! Demonstrates request processing and cancellation.
+//! A sample driver written in safe Rust.
+//! Demonstrates request processing, cancellation, and multi-module tracing.
 //!
-//! When a write request arrives it stores the request
-//! in context object and starts a timer. When the timer
-//! fires it completes the request. This simulates I/O
-//! processing on real hardware. At any time before its
-//! completion the request can be cancelled. Cancellation is
-//! supported through the request cancellation callback.
-//!
-//! This driver uses safe Rust abstractions provided by the
-//! `wdf` crate located at the path `../../crates/wdf` relative
-//! to this directory.
-//!
-//! The design of everything over here and in the `wdf` crate is
-//! at a very early stage. Some parts may appear subotimal or even
-//! wrong. That is likely to change and improve over time.
+//! Module structure (2 levels of nesting):
+//!   - `lib.rs` — driver entry, format-spec coverage, version check
+//!   - `device/mod.rs` — device creation, PnP callbacks
+//!   - `device/queue.rs` — queue init, I/O read/write, timer, cancellation
 
 #![no_std]
 #![feature(codeview_annotation)]
 #![feature(core_intrinsics)]
 
-use core::time::Duration;
-
-use core::intrinsics::codeview_annotation;
+mod device;
 
 use wdf::{
     driver_entry,
-    object_context,
     println,
-    status_codes,
     trace,
-    Arc,
-    CancellableRequest,
-    Device,
-    DeviceInit,
     Driver,
-    Guid,
-    IoQueue,
-    IoQueueConfig,
-    IoQueueDispatchType,
+    HResult,
     NtResult,
-    PnpPowerEventCallbacks,
-    Request,
-    RequestCancellationToken,
-    SpinLock,
-    Timer,
-    TimerConfig,
-    tracing::TraceWriter,
-    get_trace_writer,
+    NtStatus,
 };
 
 extern crate alloc;
-use alloc::{vec, vec::Vec};
 
-const MAX_WRITE_LENGTH: usize = 1024 * 40;
-
-/// Context object to be attached to a queue
-#[object_context(IoQueue)]
-struct QueueContext {
-    // Field that stores the in-flight request.
-    // The spin lock prevents concurrency issues
-    // between request completion and cancellation.
-    // The lock is enforced at compile time (i.e. the
-    // code will fail to compile if you do not use
-    // the lock).
-    request: SpinLock<Option<CancellableRequest>>,
-
-    // Buffer where data from incoming write request is stored
-    buffer: SpinLock<Option<Vec<u8>>>,
-
-    // The timer that is used to complete the request
-    timer: Arc<Timer>,
-}
-
-/// Context object to be attached to a timer
-#[object_context(Timer)]
-struct TimerContext {
-    queue: Arc<IoQueue>,
-}
-
-/// The entry point for the driver. It initializes the driver and is the first
-/// routine called by the system after the driver is loaded. `driver_entry`
-/// specifies the other entry points in the function driver such as
-/// `evt_device_add`.
-///
-/// The #[driver_entry] attribute is used to mark the entry point.
-/// It is a proc macro that generates the shim code which enables WDF
-/// to call this driver
-///
-/// # Arguments
-///
-/// * `driver` - Represents the instance of the function driver that is loaded
-/// into memory. `driver` object is allocated by the system before the
-/// driver is loaded, and it is released by the system after the system unloads
-/// the function driver from memory.
-///
-/// * `registry_path` - Represents the driver specific path in the Registry.
-/// The function driver can use the path to store driver related data between
-/// reboots. The path does not store hardware instance specific data.
+/// Two trace providers:
+///   - SampleKmdfSafe  (FLAG_ONE, FLAG_TWO): general driver lifecycle
+///   - SampleKmdfDiag  (FLAG_PERF, FLAG_IO, FLAG_STATE): diagnostics
 #[driver_entry(trace_control = ("SampleKmdfSafe", "cb94defb-592a-4509-8f2e-54f204929669", [FLAG_ONE, FLAG_TWO]), ("SampleKmdfDiag", "a1b2c3d4-e5f6-7890-abcd-ef1234567890", [FLAG_PERF, FLAG_IO, FLAG_STATE]))]
 fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     if cfg!(debug_assertions) {
         print_driver_version(driver)?;
     }
 
-    // Set up the device add callback
-    driver.set_evt_device_add(evt_device_add);
+    driver.set_evt_device_add(device::evt_device_add);
 
-    // core::hint::codeview_annotation!("TMF:", "e7602a7b-5034-321b-d450-a986113fc2e1 sample_kmdf_safe_driver // SRC=lib.rs MJ= MN=", 
-    // "#typev sample_kmdf_safe_driver_109 10 \"%0Trace: Safe Rust driver entry complete %10!d!\"", "{", "test, ItemLong -- 10", "}");
+    // =====================================================================
+    // Comprehensive format-spec coverage (easy to observe on driver load)
+    // =====================================================================
 
-    for i in 0..1000_i32 {
-        trace!("Trace: Safe Rust driver entry trace, int - %d, int - %d, int - %d, int - %d, int - %d, int - %d", i, i, i, i, i, i);
-    }
+    // --- No-argument trace -----------------------------------------------
+    trace!("sample-kmdf-safe: driver entry started");
 
-    trace!(FLAG_ONE, "1 Trace: Safe Rust driver entry complete, int - %d", 1001i32);
+    // --- Signed integers (short-form) ------------------------------------
+    let val_i32: i32 = -100_000;
+    trace!(FLAG_ONE, "i32 %d", val_i32);
+    trace!(FLAG_ONE, "i32 %i", val_i32);
 
-    trace!(FLAG_TWO, "2 Trace: Safe Rust driver entry complete, int - %d", 1002i32);
+    let val_i16: i16 = -256;
+    trace!(FLAG_ONE, "i16 %hd", val_i16);
+    trace!(FLAG_ONE, "i16 %hi", val_i16);
 
-    // Trace with level only (no flag)
-    trace!(Information, "3 Trace: Safe Rust driver entry complete, int - %d", 1003i32);
+    let val_i64: i64 = -9_999_999_999;
+    trace!(FLAG_ONE, "i64 %I64d", val_i64);
+    trace!(FLAG_ONE, "i64 %lld", val_i64);
 
-    // Trace with level only (no flag)
-    trace!(Verbose, "4 Trace: Safe Rust driver entry complete, int - %d", 1004i32);
+    trace!(FLAG_ONE, "i32 long %ld", val_i32);
+    trace!(FLAG_ONE, "i32 long %li", val_i32);
 
-    trace!(FLAG_TWO, Information, "5 Trace: Safe Rust driver entry complete, int - %d", 1005i32);
+    // --- Unsigned integers (short-form) ----------------------------------
+    let val_u32: u32 = 4_000_000_000;
+    trace!(FLAG_ONE, "u32 %u", val_u32);
 
-    trace!("Trace: Safe Rust driver entry with basic data, int - %d, str - %s", 9999i32, "hello");
+    let val_u16: u16 = 65535;
+    trace!(FLAG_ONE, "u16 %hu", val_u16);
 
-    trace!(FLAG_TWO, Information, "Trace: Safe Rust driver entry complete, int - %d, str - %s", 1006i32, "examplestring!@#$%^&*()_+-=1234567890`~[]|;:'\"<>,./?  E");
+    let val_u64: u64 = 18_446_744_073_709_551_615;
+    trace!(FLAG_ONE, "u64 %I64u", val_u64);
+    trace!(FLAG_ONE, "u64 %llu", val_u64);
 
-    // Traces using second trace control (SampleKmdfDiag) flags
-    trace!(FLAG_PERF, "Perf: driver init took %d ms", 42i32);
+    trace!(FLAG_ONE, "u32 %lu", val_u32);
 
-    trace!(FLAG_IO, Information, "IO: queued %d requests during init", 7i32);
+    // --- Char / byte -----------------------------------------------------
+    let val_u8: u8 = 65;
+    trace!(FLAG_ONE, "u8 char %c", val_u8);
+    trace!(FLAG_ONE, "u8 hc %hc", val_u8);
 
-    trace!(FLAG_STATE, Verbose, "State: driver state transitioned to ready, code - %d", 1i32);
+    // --- Hex / octal (short-form) ----------------------------------------
+    let hex_val: u32 = 0xDEAD_BEEF;
+    trace!(FLAG_ONE, "u32 hex %x", hex_val);
+    trace!(FLAG_ONE, "u32 HEX %X", hex_val);
+    trace!(FLAG_ONE, "u32 oct %o", hex_val);
+    trace!(FLAG_ONE, "u16 hex %hx", val_u16);
+    trace!(FLAG_ONE, "u16 HEX %hX", val_u16);
+    trace!(FLAG_ONE, "u16 oct %ho", val_u16);
+    trace!(FLAG_ONE, "u32 lx %lx", hex_val);
+    trace!(FLAG_ONE, "u32 lX %lX", hex_val);
+    trace!(FLAG_ONE, "u32 lo %lo", hex_val);
+    trace!(FLAG_ONE, "i64 I64x %I64x", val_i64);
+    trace!(FLAG_ONE, "i64 I64X %I64X", val_i64);
+    trace!(FLAG_ONE, "i64 I64o %I64o", val_i64);
+    trace!(FLAG_ONE, "i64 llx %llx", val_i64);
+    trace!(FLAG_ONE, "i64 llX %llX", val_i64);
+    trace!(FLAG_ONE, "i64 llo %llo", val_i64);
 
+    // --- Pointer-sized integers ------------------------------------------
+    let val_isize: isize = -42;
+    let val_usize: usize = 0xFFFF_8000_0000_0000;
+    trace!(FLAG_TWO, "isize %Id", val_isize);
+    trace!(FLAG_TWO, "usize %Iu", val_usize);
+    trace!(FLAG_TWO, "usize hex %Ix", val_usize);
+    trace!(FLAG_TWO, "usize HEX %IX", val_usize);
+    trace!(FLAG_TWO, "usize oct %Io", val_usize);
+    trace!(FLAG_TWO, "pointer %p", val_usize);
+
+    // --- Floating point --------------------------------------------------
+    let temperature: f64 = 98.6;
+    trace!(FLAG_TWO, "f64 %f", temperature);
+    trace!(FLAG_TWO, "f64 %e", temperature);
+    trace!(FLAG_TWO, "f64 %E", temperature);
+    trace!(FLAG_TWO, "f64 %g", temperature);
+    trace!(FLAG_TWO, "f64 %G", temperature);
+
+    // --- Strings ---------------------------------------------------------
+    let msg: &str = "hello from driver_entry";
+    trace!(FLAG_TWO, "string %s", msg);
+    trace!(FLAG_TWO, "string %hs", msg);
+
+    // --- Long-form integer types (%!NAME!) -------------------------------
+    let val_i8: i8 = -1;
+    trace!(FLAG_ONE, "SBYTE %!SBYTE!", val_i8);
+    trace!(FLAG_ONE, "UBYTE %!UBYTE!", val_u8);
+    trace!(FLAG_ONE, "SSHORT %!SSHORT!", val_i16);
+    trace!(FLAG_ONE, "USHORT %!USHORT!", val_u16);
+    trace!(FLAG_ONE, "SINT %!SINT!", val_i32);
+    trace!(FLAG_ONE, "UINT %!UINT!", val_u32);
+    trace!(FLAG_ONE, "SLONG %!SLONG!", val_i32);
+    trace!(FLAG_ONE, "ULONG %!ULONG!", val_u32);
+    trace!(FLAG_ONE, "SINT64 %!SINT64!", val_i64);
+    trace!(FLAG_ONE, "UINT64 %!UINT64!", val_u64);
+    trace!(FLAG_ONE, "DOUBLE %!DOUBLE!", temperature);
+
+    // --- Long-form hex display -------------------------------------------
+    let xval: i32 = 0x0ABC;
+    let xshort: i16 = 0x00FF;
+    trace!(FLAG_ONE, "XINT %!XINT!", xval);
+    trace!(FLAG_ONE, "OINT %!OINT!", xval);
+    trace!(FLAG_ONE, "XLONG %!XLONG!", xval);
+    trace!(FLAG_ONE, "OLONG %!OLONG!", xval);
+    trace!(FLAG_ONE, "XSHORT %!XSHORT!", xshort);
+    trace!(FLAG_ONE, "OSHORT %!OSHORT!", xshort);
+    trace!(FLAG_ONE, "XBYTE %!XBYTE!", val_i8);
+    trace!(FLAG_ONE, "OBYTE %!OBYTE!", val_i8);
+    trace!(FLAG_ONE, "XINT64 %!XINT64!", val_i64);
+    trace!(FLAG_ONE, "XXINT64 %!XXINT64!", val_i64);
+    trace!(FLAG_ONE, "OINT64 %!OINT64!", val_i64);
+
+    // --- Long-form pointer types -----------------------------------------
+    trace!(FLAG_TWO, "PTR %!PTR!", val_usize);
+    trace!(FLAG_TWO, "HANDLE %!HANDLE!", val_usize);
+    trace!(FLAG_TWO, "SLONGPTR %!SLONGPTR!", val_isize);
+    trace!(FLAG_TWO, "ULONGPTR %!ULONGPTR!", val_usize);
+    trace!(FLAG_TWO, "XLONGPTR %!XLONGPTR!", val_isize);
+    trace!(FLAG_TWO, "OLONGPTR %!OLONGPTR!", val_isize);
+
+    // --- Special decoded types -------------------------------------------
+    let status = NtStatus::from(0);
+    let hr = HResult::from(0);
+    trace!(FLAG_ONE, "STATUS %!STATUS!", status);
+    trace!(FLAG_ONE, "status %!status!", status);
+    trace!(FLAG_ONE, "HRESULT %!HRESULT!", hr);
+    trace!(FLAG_ONE, "hresult %!hresult!", hr);
+
+    let winerr: u32 = 5;
+    trace!(FLAG_ONE, "WINERROR %!WINERROR!", winerr);
+    trace!(FLAG_ONE, "winerr %!winerr!", winerr);
+
+    let ndis: i32 = 0;
+    trace!(FLAG_ONE, "NDIS_STATUS %!NDIS_STATUS!", ndis);
+
+    // --- Boolean types ---------------------------------------------------
+    let flag_on: bool = true;
+    let flag_off: bool = false;
+    trace!(FLAG_TWO, "bool true %!bool!", flag_on);
+    trace!(FLAG_TWO, "bool false %!bool!", flag_off);
+    trace!(FLAG_TWO, "BOOLEAN %!BOOLEAN!", flag_on);
+
+    // --- Network types ---------------------------------------------------
+    let ip: u32 = 0x0A000001;
+    let port: u16 = 8080;
+    trace!(FLAG_ONE, "IPADDR %!IPADDR!", ip);
+    trace!(FLAG_ONE, "ipaddr %!ipaddr!", ip);
+    trace!(FLAG_ONE, "PORT %!PORT!", port);
+    trace!(FLAG_ONE, "port %!port!", port);
+
+    // --- Time types ------------------------------------------------------
+    let ts: i64 = 133_500_000_000_000_000;
+    trace!(FLAG_ONE, "TIMESTAMP %!TIMESTAMP!", ts);
+    trace!(FLAG_ONE, "TIME %!TIME!", ts);
+    trace!(FLAG_ONE, "DATE %!DATE!", ts);
+    trace!(FLAG_ONE, "WAITTIME %!WAITTIME!", ts);
+
+    // --- String long-form ------------------------------------------------
+    let astr: &str = "ansi string test";
+    trace!(FLAG_TWO, "ASTR %!ASTR!", astr);
+
+    // --- Flag + Level combinations ---------------------------------------
+    trace!(FLAG_ONE, Information, "info level %d", val_i32);
+    trace!(FLAG_TWO, Verbose, "verbose level %!bool!", flag_on);
+    trace!(Warning, "warning (no flag) %d", val_i32);
+    trace!(Error, "error (no flag) %d", val_i32);
+    trace!(Critical, "critical (no flag) %d", val_i32);
+
+    // --- Mixed types in single trace -------------------------------------
+    trace!(FLAG_ONE, "mixed: i32=%d u64=%I64u bool=%!bool! str=%s",
+        val_i32, val_u64, flag_on, msg);
+    trace!(FLAG_TWO, Information, "mixed: status=%!STATUS! u32=%u i16=%hd ptr=%p",
+        status, val_u32, val_i16, val_usize);
+
+    // --- Second trace provider (SampleKmdfDiag) --------------------------
+    trace!(FLAG_PERF, "perf: init latency = %d us", 200i32);
+    trace!(FLAG_PERF, Information, "perf: throughput = %I64u bytes/sec", 500_000_000u64);
+    trace!(FLAG_IO, "io: max write length = %Iu bytes", MAX_WRITE_LENGTH);
+    trace!(FLAG_IO, Verbose, "io: queue config = sequential, default = %!bool!", flag_on);
+    trace!(FLAG_STATE, "state: driver initialized, code = %d", 0i32);
+    trace!(FLAG_STATE, Warning, "state: debug build = %!BOOLEAN!", flag_on);
+
+    trace!("sample-kmdf-safe: driver entry complete");
     Ok(())
 }
 
-/// `evt_device_add` is called by the framework in response to AddDevice
-/// call from the PNP manager. We create and initialize a device object to
-/// represent a new instance of the device.
-///
-/// # Arguments
-///
-/// * `device_init` - Reference to a framework-allocated `DeviceInit` structure.
-fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {
-    println!("Enter evt_device_add");
+const MAX_WRITE_LENGTH: usize = 1024 * 40;
 
-    device_create(device_init)
-}
-
-/// Worker routine called to create a device and its software resources.
-///
-/// # Arguments
-///
-/// * `device_init` - Pointer to an opaque init structure. Memory for
-/// this structure will be freed by the framework when the
-/// WdfDeviceCreate succeeds. So don't access the structure after
-/// that point.
-fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
-    // Register pnp/power callbacks so that we can start and stop the
-    // timer as the device gets started and stopped.
-    let mut pnp_power_callbacks = PnpPowerEventCallbacks::default();
-    pnp_power_callbacks.evt_device_self_managed_io_init = Some(evt_device_self_managed_io_start);
-    pnp_power_callbacks.evt_device_self_managed_io_suspend =
-        Some(evt_device_self_managed_io_suspend);
-    pnp_power_callbacks.evt_device_self_managed_io_restart = Some(evt_device_self_managed_io_start);
-
-    let device = Device::create(device_init, Some(pnp_power_callbacks))?;
-
-    // Create a device interface so that applications can find us and talk
-    // to us.
-    let _ = device.create_device_interface(
-        &Guid::parse("2aa02ab1-c26e-431b-8efe-85ee8de102e4").expect("GUID is valid"),
-        None,
-    )?;
-
-    queue_initialize(&device)
-}
-
-/// The I/O dispatch callbacks for the frameworks device object
-/// are configured in this function.
-///
-/// A single default I/O Queue is configured for serial request
-/// processing, and queue context is set up. The lifetime of the
-/// context is tied to the lifetime of the I/O Queue object.
-///
-/// # Arguments
-///
-/// * `device`` - Handle to a framework device object.
-fn queue_initialize(device: &Device) -> NtResult<()> {
-    // Create queue
-    let mut queue_config = IoQueueConfig::new_default(IoQueueDispatchType::Sequential);
-    queue_config.default_queue = true;
-    queue_config.evt_io_read = Some(evt_io_read);
-    queue_config.evt_io_write = Some(evt_io_write);
-
-    let queue = IoQueue::create(&device, &queue_config)?; // The `?` operator is used to propagate errors to the caller
-
-    // Create timer
-    let timer_config = TimerConfig::new_periodic(&queue, evt_timer, 9_000, 0, false);
-
-    let timer = Timer::create(&timer_config)?;
-
-    // Attach context to the timer
-    let timer_context = TimerContext {
-        queue: queue.clone(),
-    };
-
-    TimerContext::attach(&timer, timer_context)?;
-
-    // Attach context to the queue
-    let queue_context = QueueContext {
-        request: SpinLock::create(None)?,
-        buffer: SpinLock::create(None)?,
-        timer,
-    };
-
-    QueueContext::attach(&queue, queue_context)?;
-
-    Ok(())
-}
-
-/// This callback is called by the Framework when the device is started
-/// or restarted after a suspend operation.
-/// # Arguments
-///
-/// * `device` - Handle to the device
-fn evt_device_self_managed_io_start(device: &Device) -> NtResult<()> {
-    println!("Self-managed I/O start called: {:?}", device);
-
-    let queue = device
-        .get_default_queue()
-        .expect("Failed to get default queue");
-
-    queue.start();
-
-    let context = QueueContext::get(&queue);
-
-    let _ = context.timer.start(&Duration::from_millis(100));
-
-    Ok(())
-}
-
-/// This callback is called by the Framework when the device is stopped
-/// for resource rebalance or suspended when the system is entering
-/// Sx state.
-///
-/// # Arguments
-///
-/// * `device` - Handle to the device
-fn evt_device_self_managed_io_suspend(device: &Device) -> NtResult<()> {
-    println!("Self-managed I/O suspend called: {:?}", device);
-
-    let queue = device
-        .get_default_queue()
-        .expect("Failed to get default queue");
-
-    queue.stop_synchronously();
-
-    let context = QueueContext::get(&queue);
-
-    context.timer.stop(false);
-
-    Ok(())
-}
-
-/// This callback is invoked when the framework receives IRP_MJ_READ request.
-/// It copies the data from the queue context buffer to the request buffer.
-/// If the driver hasn't received any write request earlier, it returns 0.
-/// The actual completion of the request is deferred to the periodic timer.
-///
-/// # Arguments
-///
-/// * `queue` - Handle to the framework queue object that is associated with the
-///   I/O request.
-/// * `Request` - Handle to a framework request object.
-///
-/// * `Length`  - number of bytes to be read. The default property of the queue
-///   is to not dispatch zero length read & write requests to the driver and
-///   complete is with status success. So we will never get a zero length
-///   request.
-fn evt_io_read(queue: &IoQueue, mut request: Request, length: usize) {
-    println!("evt_io_read called. Queue {queue:?}, Request {request:?} Length {length}");
-
-    let context = QueueContext::get(&queue);
-    let memory = match request.retrieve_output_memory() {
-        Ok(memory) => memory,
-        Err(e) => {
-            println!("evt_io_read could not get request memory buffer {e:?}");
-            request.complete(e.into());
-            return;
-        }
-    };
-
-    // Nested scope to limit the lifetime of the lock
-    let length = {
-        // TODO: this lock is problematic because we call out into
-        // the framework while holding it. Doing so is generally
-        // considered a recipe for deadlocks although copy_from_buffer
-        // specifically won't cause any. Still this is a bad pattern
-        // in general and we have to find a way to avoid it.
-        let buffer = context.buffer.lock();
-        let Some(buffer) = buffer.as_ref() else {
-            println!("evt_io_read called but no request buffer is set");
-            request.complete_with_information(status_codes::STATUS_SUCCESS.into(), 0);
-            return;
-        };
-
-        let mut length = length;
-        if buffer.len() < length {
-            length = buffer.len();
-        }
-
-        if let Err(e) = memory.copy_from_buffer(0, buffer) {
-            println!("evt_io_read failed to copy buffer: {e:?}");
-            request.complete(e.into());
-            return;
-        }
-
-        length
-    };
-
-    request.set_information(length);
-
-    if let Err((e, request)) = request.mark_cancellable(evt_request_cancel, &context.request) {
-        println!("evt_io_write failed to mark request cancellable: {e:?}");
-        request.complete(status_codes::STATUS_UNSUCCESSFUL.into()); // TODO: decide on the status code here
-    }
-}
-
-/// This callback is invoked when the framework receives IRP_MJ_WRITE request.
-/// It copies the data from the request into a buffer stored in the queue
-/// context. The actual completion of the request is deferred to the periodic
-/// timer.
-///
-/// # Arguments
-///
-/// * `queue` - Handle to the framework queue object that is associated with the
-///   I/O request.
-/// * `Request` - Handle to a framework request object.
-///
-/// * `Length`  - number of bytes to be read. The default property of the queue
-///   is to not dispatch zero length read & write requests to the driver and
-///   complete is with status success. So we will never get a zero length
-///   request.
-fn evt_io_write(queue: &IoQueue, request: Request, length: usize) {
-    println!("evt_io_write called. Queue {queue:?}, Request {request:?} Length {length}");
-
-    if length > MAX_WRITE_LENGTH {
-        println!("evt_io_write buffer length too big {length}. Max is {MAX_WRITE_LENGTH}");
-        request.complete_with_information(status_codes::STATUS_BUFFER_OVERFLOW.into(), 0);
-        return;
-    }
-
-    let memory = match request.retrieve_input_memory() {
-        Ok(memory) => memory,
-        Err(e) => {
-            println!("evt_io_write could not get request memory buffer {e:?}");
-            request.complete(e.into());
-            return;
-        }
-    };
-
-    let mut buffer = vec![0_u8; length];
-
-    if let Err(e) = memory.copy_to_buffer(0, &mut buffer) {
-        println!("evt_io_write failed to copy buffer: {e:?}");
-        request.complete(e.into());
-        return;
-    }
-
-    let context = QueueContext::get(&queue);
-
-    *context.buffer.lock() = Some(buffer);
-
-    request.set_information(length);
-
-    if let Err((e, request)) = request.mark_cancellable(evt_request_cancel, &context.request) {
-        println!("evt_io_write failed to mark request cancellable: {e:?}");
-        request.complete(status_codes::STATUS_UNSUCCESSFUL.into());
-    }
-}
-
-/// Callback that is called when the request is cancelled.
-/// It cancels the request identified by the `token` parameter
-/// if it is found in the context.
-///
-/// # Arguments
-///
-/// `token` - The cancellation token that identifies the request to be cancelled
-fn evt_request_cancel(token: &RequestCancellationToken) {
-    println!("evt_request_cancel called");
-
-    let queue = token.get_io_queue();
-
-    let context = QueueContext::get(&queue);
-
-    let mut req = context.request.lock();
-    if let Some(req) = req.take() {
-        req.complete(status_codes::STATUS_CANCELLED.into());
-        println!("Request cancelled");
-    } else {
-        println!("Request already completed");
-    }
-}
-
-/// Callback that is called when the timer fires.
-/// It fetches the request stored in the context
-/// and completes it
-///
-/// # Arguments
-///
-/// * `timer` - Handle of the timer that fired
-fn evt_timer(timer: &Timer) {
-    println!("evt_timer called");
-
-    let queue = &TimerContext::get(timer).queue;
-
-    let req = QueueContext::get(queue).request.lock().take();
-
-    if let Some(req) = req {
-        req.complete(status_codes::STATUS_SUCCESS.into());
-        println!("Request completed");
-    } else {
-        println!("No request pending");
-    }
-}
-
-/// This routine shows how to retrieve framework version string and
-/// also how to find out to which version of framework library the
-/// client driver is bound to.
-///
-/// # Arguments
-///
-/// * `driver` - The driver handle
 fn print_driver_version(driver: &Driver) -> NtResult<()> {
     let driver_version = driver.retrieve_version_string()?;
     println!("Echo Sample {driver_version}");
+
+    trace!(FLAG_ONE, "version: %s", "1.0");
 
     if driver.is_version_available(1, 0) {
         println!("Yes, framework version is 1.0");

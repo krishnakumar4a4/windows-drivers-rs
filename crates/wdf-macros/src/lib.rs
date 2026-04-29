@@ -1735,16 +1735,16 @@ fn generate_trace_method_call(
     let message_id_lit = proc_macro2::Literal::u16_unsuffixed(message_id);
 
     let level_value = if let Some(level_ident) = level {
-        quote! { TraceLevel::#level_ident as u8 }
+        quote! { crate::TraceLevel::#level_ident as u8 }
     } else {
-        quote! { TraceLevel::None as u8 }
+        quote! { crate::TraceLevel::None as u8 }
     };
 
     let (flags_value, control_index) = if let Some(flag_ident) = flag {
         let flag_name = flag_ident.to_string();
         (
-            quote! { { let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag"); (__flag.flag_index() + 1) as u32 } },
-            quote! { { let __flag = WppFlag::by_name(#flag_name).expect("Unknown WppFlag"); __flag.control_index() } }
+            quote! { { let __flag = crate::WppFlag::by_name(#flag_name).expect("Unknown WppFlag"); (__flag.flag_index() + 1) as u32 } },
+            quote! { { let __flag = crate::WppFlag::by_name(#flag_name).expect("Unknown WppFlag"); __flag.control_index() } }
         )
     } else {
         (quote! { 0u32 }, quote! { 0usize })
@@ -1768,7 +1768,7 @@ fn generate_trace_method_call(
                                             && __trace_writer.is_level_enabled(__control_index, __trace_level);
                 // AutoLog always captures messages above Verbose; Verbose is
                 // gated by the per-control-block AutoLogVerboseEnabled flag.
-                let __should_auto_log = __trace_level < TraceLevel::Verbose as u8 || __trace_writer.is_auto_log_verbose_enabled(__control_index);
+                let __should_auto_log = __trace_level < crate::TraceLevel::Verbose as u8 || __trace_writer.is_auto_log_verbose_enabled(__control_index);
 
                 __trace_writer.#method_ident(
                     __trace_level,
