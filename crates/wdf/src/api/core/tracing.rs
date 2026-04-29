@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use core::{mem, ptr};
 
 use wdk_sys::{
@@ -23,7 +22,7 @@ use wdk_sys::{
     USHORT,
 };
 
-use crate::api::{guid::Guid, string::UnicodeString};
+use crate::api::string::UnicodeString;
 
 use crate::println;
 
@@ -78,150 +77,172 @@ macro_rules! get_routine_addr {
 /// never modifies them.
 /// In this way `TraceWriter` implements interior mutability.
 pub struct TraceWriter {
-    _control_guid: Box<Guid>, /* This field exists only ensure it stays alive because its
-                               * address is used in trace_config */
     pub(crate) trace_config: TraceConfig,
     wdm_driver: *mut DRIVER_OBJECT,
     reg_path: PCUNICODE_STRING,
 }
 
 impl TraceWriter {
-    /// Creates a new TraceWriter instance and initializes WPP tracing.
+    /// Creates a new `TraceWriter` and registers all trace providers with ETW.
+    ///
+    /// This mirrors the C WPP `WppInitKm` function. The macro-generated code
+    /// has already populated the `WPP_MAIN_CB` array (control GUIDs, `Next`
+    /// linked-list pointers, `FlagsLen`). This function walks the linked list
+    /// starting at `&WPP_CB[0].Control` and calls `EtwRegisterClassicProvider`
+    /// for each control block, exactly as `WppInitKm` does in the TMH.
     ///
     /// # Safety
     ///
-    /// The pointers `wdm_driver` and `reg_path` must be valid
+    /// * `control_blocks_ptr` must point to a valid array of
+    ///   `WPP_PROJECT_CONTROL_BLOCK` with `num_controls` elements, whose
+    ///   `Control.Next` pointers form a null-terminated linked list.
+    /// * The array must have `'static` lifetime (i.e. be a module-level static).
+    /// * `wdm_driver` and `reg_path` must be valid for the lifetime of tracing.
     pub unsafe fn init(
-        control_guid: Guid,
-        control_block: *mut WPP_PROJECT_CONTROL_BLOCK,
+        control_blocks_ptr: *mut WPP_PROJECT_CONTROL_BLOCK,
+        num_controls: usize,
         wdm_driver: *mut DRIVER_OBJECT,
         reg_path: PCUNICODE_STRING,
     ) -> Self {
-        // Boxing control_guid to ensure it has a stable address
-        // which we can use in WPP_PROJECT_CONTROL_BLOCK::Control below
-        let control_guid = Box::new(control_guid);
-
-        unsafe {
-            (*(*control_block).Control).ControlGuid = control_guid.as_lpcguid();
-        }
-
-        // TODO: check if any of these functions can fail and handle errors accordingly
+        // Create a safe slice view of the control block array for Rust-side
+        // indexed access. The array lives in a module-level static so it
+        // outlives the TraceWriter.
+        //
+        // SAFETY: The caller guarantees the pointer is valid, properly aligned,
+        // and points to `num_controls` contiguous elements with 'static lifetime.
+        let control_blocks: &'static [WPP_PROJECT_CONTROL_BLOCK] = unsafe {
+            core::slice::from_raw_parts(control_blocks_ptr, num_controls)
+        };
 
         let etw_register_classic_provider =
             get_routine_addr!("EtwRegisterClassicProvider", EtwRegisterClassicProvider);
 
         let mut etw_unregister = None;
+
+        // Walk the linked list of control blocks and register each provider,
+        // mirroring the WppInitKm loop:
+        //   WppReg = &WPP_CB[0].Control;
+        //   while (WppReg) { EtwRegisterClassicProvider(...); WppReg = WppReg->Next; }
+        //
+        // Raw pointers are required here because the C EtwRegisterClassicProvider
+        // API takes PVOID context and PREGHANDLE output parameters.
         if let Some(etw_register_provider) = etw_register_classic_provider {
             etw_unregister = get_routine_addr!("EtwUnregister", EtwUnregister);
 
-            let status = etw_register_provider(
-                unsafe { (&(*control_block).Control).ControlGuid },
-                0,
-                WppClassicProviderCallback,
-                unsafe { mem::transmute::<&mut WPP_TRACE_CONTROL_BLOCK, PVOID>(&mut *(*control_block).Control) },
-                unsafe { &mut (*(*control_block).Control).RegHandle },
-            );
-            println!("EtwRegisterClassicProvider status: {status:?}");
+            // Start at &WPP_CB[0].Control — since Control is at offset 0 and
+            // ManuallyDrop is repr(transparent), the union pointer equals the
+            // WPP_TRACE_CONTROL_BLOCK pointer.
+            let mut wpp_reg: *mut WPP_TRACE_CONTROL_BLOCK =
+                control_blocks_ptr.cast::<WPP_TRACE_CONTROL_BLOCK>();
+
+            while !wpp_reg.is_null() {
+                unsafe {
+                    (*wpp_reg).RegHandle = 0;
+                    let status = etw_register_provider(
+                        (*wpp_reg).ControlGuid,
+                        0,
+                        WppClassicProviderCallback,
+                        wpp_reg.cast::<core::ffi::c_void>(),
+                        &raw mut (*wpp_reg).RegHandle,
+                    );
+                    println!("EtwRegisterClassicProvider status: {status:?}");
+                    wpp_reg = (*wpp_reg).Next.cast_mut();
+                }
+            }
         }
 
         let wpp_trace_message = get_routine_addr!("WmiTraceMessage", WppTraceMessage);
 
         let trace_config = TraceConfig {
-            control_block,
+            control_blocks_ptr,
+            control_blocks,
             wpp_trace_message,
             etw_unregister,
         };
 
         TraceWriter {
-            _control_guid: control_guid,
             trace_config,
             wdm_driver,
             reg_path,
         }
     }
 
-    /// Starts WPP tracing
+    /// Starts WPP tracing.
+    ///
+    /// Sets `WPP_GLOBAL_Control` to point to the control block array, calls
+    /// `WppAutoLogStart` with `&WPP_CB[0]`, and marks the recorder as
+    /// initialised. This matches the tail of the C `WPP_INIT_TRACING` macro.
     pub fn start(&self) {
-        let control_block_ptr = self.trace_config.control_block;
+        let cb = self.trace_config.control_blocks_ptr;
         unsafe {
-            WPP_GLOBAL_Control = control_block_ptr;
-            WppAutoLogStart(control_block_ptr, self.wdm_driver, self.reg_path);
+            WPP_GLOBAL_Control = cb;
+            WppAutoLogStart(cb, self.wdm_driver, self.reg_path);
             WPP_RECORDER_INITIALIZED = WPP_GLOBAL_Control;
         }
     }
 
-    /// Stops WPP tracing
+    /// Stops WPP tracing.
+    ///
+    /// Walks the linked list of control blocks and calls `EtwUnregister` for
+    /// each, then calls `WppAutoLogStop`. This mirrors C `WppCleanupKm`.
     pub fn stop(&self) {
-        let control_block_ptr = self.trace_config.control_block;
+        let cb = self.trace_config.control_blocks_ptr;
         unsafe {
+            // Walk the linked list and unregister each provider.
+            // Raw pointers required for the C EtwUnregister FFI call.
             if let Some(etw_unregister) = self.trace_config.etw_unregister {
-                let status = etw_unregister((&(*control_block_ptr).Control).RegHandle);
-                (*(*control_block_ptr).Control).RegHandle = 0;
-                println!("EtwRegisterClassicProvider status: {status:?}");
+                let mut wpp_reg: *mut WPP_TRACE_CONTROL_BLOCK =
+                    cb.cast::<WPP_TRACE_CONTROL_BLOCK>();
+
+                while !wpp_reg.is_null() {
+                    if (*wpp_reg).RegHandle != 0 {
+                        let status = etw_unregister((*wpp_reg).RegHandle);
+                        println!("EtwUnregister status: {status:?}");
+                        (*wpp_reg).RegHandle = 0;
+                    }
+                    wpp_reg = (*wpp_reg).Next.cast_mut();
+                }
             }
 
-            WppAutoLogStop(control_block_ptr, self.wdm_driver);
+            WppAutoLogStop(cb, self.wdm_driver);
 
             WPP_RECORDER_INITIALIZED = ptr::null_mut();
             WPP_GLOBAL_Control = ptr::null_mut();
         }
     }
 
-    /// Checks if the specified flag is enabled in the control block.
-    /// 
-    /// # Arguments
-    /// * `control_index` - The index of the control block (0 for the default control block)
-    /// * `flags` - The flag bits to check
-    /// 
-    /// # Returns
-    /// `true` if the flag is enabled, `false` otherwise
+    /// Checks if the specified flag is enabled in the control block at `control_index`.
+    ///
+    /// Each trace control definition occupies one entry in the `WPP_MAIN_CB` array.
+    /// The `control_index` selects which entry to check, mirroring the C macro
+    /// `WPP_CONTROL(CTL)` which indexes into `WPP_CB[WPP_CTRL_NO(CTL)]`.
+    ///
+    /// Uses safe slice indexing on the Rust side — no raw pointer arithmetic.
     #[inline]
-    pub fn is_flag_enabled(&self, _control_index: usize, flags: u32) -> bool {
-        let control_block_ptr = self.trace_config.control_block;
-        unsafe {
-            let control = &(*control_block_ptr).Control;
-            // Check if the logger is active and the flags match
-            control.Logger != 0 && (control.Flags[( (0xFFFF & (flags-1) ) / 32) as usize] & (1 << ((flags-1) & 31))) != 0
-        }
+    pub fn is_flag_enabled(&self, control_index: usize, flags: u32) -> bool {
+        // SAFETY: Union field access requires unsafe. Reading `.Control` is
+        // sound because the array was initialised with valid ManuallyDrop
+        // values and the C WPP runtime updates these fields thread-safely.
+        let control = unsafe { &self.trace_config.control_blocks[control_index].Control };
+        control.Logger != 0 && (control.Flags[( (0xFFFF & (flags-1) ) / 32) as usize] & (1 << ((flags-1) & 31))) != 0
     }
 
-    /// Checks if AutoLogVerboseEnabled is set for the control block.
-    /// 
-    /// # Arguments
-    /// * `control_index` - The index of the control block (0 for the default control block)
-    /// 
-    /// # Returns
-    /// `true` if AutoLogVerboseEnabled is set, `false` otherwise
+    /// Checks if `AutoLogVerboseEnabled` is set for the control block at `control_index`.
     #[inline]
-    pub fn is_auto_log_verbose_enabled(&self, _control_index: usize) -> bool {
-        let control_block_ptr = self.trace_config.control_block;
-        unsafe {
-            let control = &(*control_block_ptr).Control;
-            control.AutoLogVerboseEnabled != 0
-        }
+    pub fn is_auto_log_verbose_enabled(&self, control_index: usize) -> bool {
+        let control = unsafe { &self.trace_config.control_blocks[control_index].Control };
+        control.AutoLogVerboseEnabled != 0
     }
 
-    /// Checks if the passed level is enabled (at or below the control block's level).
-    /// 
-    /// In WPP tracing, a trace message should be emitted if its level is less than
-    /// or equal to the level configured in the control block. Lower numeric values
-    /// are more severe (Critical=1, Error=2, etc.), so we trace if passed_level <= control_level.
-    /// 
-    /// # Arguments
-    /// * `control_index` - The index of the control block (0 for the default control block)
-    /// * `level` - The level to check
-    /// 
-    /// # Returns
-    /// `true` if the level should be traced (passed level <= control block level), `false` otherwise
+    /// Checks if the passed level is enabled (at or below the control block's level)
+    /// for the control block at `control_index`.
+    ///
+    /// A trace message fires when `level <= control.Level`. Lower numeric values
+    /// are more severe (Critical=1, Error=2, …).
     #[inline]
-    pub fn is_level_enabled(&self, _control_index: usize, level: u8) -> bool {
-        let control_block_ptr = self.trace_config.control_block;
-        unsafe {
-            let control = &(*control_block_ptr).Control;
-            // Check if the logger is active and the level is enabled
-            // A level is enabled if it's less than or equal to the control block's level
-            control.Logger != 0 && level <= control.Level
-        }
+    pub fn is_level_enabled(&self, control_index: usize, level: u8) -> bool {
+        let control = unsafe { &self.trace_config.control_blocks[control_index].Control };
+        control.Logger != 0 && level <= control.Level
     }
 
     // Pre-generated `trace_0`..`trace_8` inherent methods. Each method is
@@ -261,7 +282,7 @@ unsafe impl Sync for TraceWriter {}
 /// layout is identical regardless of the outer union's reserve size.
 #[repr(C)]
 pub union WPP_PROJECT_CONTROL_BLOCK {
-    pub(crate) Control: mem::ManuallyDrop<WPP_TRACE_CONTROL_BLOCK>,
+    pub Control: mem::ManuallyDrop<WPP_TRACE_CONTROL_BLOCK>,
     ReserveSpace: [UCHAR;
         mem::size_of::<WPP_TRACE_CONTROL_BLOCK>()],
 }
@@ -269,18 +290,18 @@ pub union WPP_PROJECT_CONTROL_BLOCK {
 #[repr(C)]
 pub struct WPP_TRACE_CONTROL_BLOCK {
     Callback: Option<WMIENTRY_NEW>,
-    ControlGuid: LPCGUID,
-    Next: *const WPP_TRACE_CONTROL_BLOCK,
-    pub(crate) Logger: TRACEHANDLE,
+    pub ControlGuid: LPCGUID,
+    pub Next: *const WPP_TRACE_CONTROL_BLOCK,
+    pub Logger: TRACEHANDLE,
     RegistryPath: PUNICODE_STRING,
-    FlagsLen: UCHAR,
-    Level: UCHAR,
+    pub FlagsLen: UCHAR,
+    pub Level: UCHAR,
     Reserved: USHORT,
-    Flags: [ULONG; 1],
+    pub Flags: [ULONG; 1],
     ReservedFlags: ULONG,
-    RegHandle: REGHANDLE,
-    pub(crate) AutoLogContext: PVOID,
-    AutoLogVerboseEnabled: USHORT,
+    pub RegHandle: REGHANDLE,
+    pub AutoLogContext: PVOID,
+    pub AutoLogVerboseEnabled: USHORT,
     AutoLogAttachToMiniDump: USHORT,
 }
 
@@ -316,7 +337,14 @@ struct WPP_TRACE_ENABLE_CONTEXT {
 }
 
 pub(crate) struct TraceConfig {
-    pub(crate) control_block: *mut WPP_PROJECT_CONTROL_BLOCK,
+    /// Raw pointer to the first element of the `WPP_MAIN_CB` array.
+    /// Used when calling C WPP APIs (`WppAutoLogStart`, `WppAutoLogStop`,
+    /// `EtwRegisterClassicProvider`, etc.) which expect `*mut WPP_PROJECT_CONTROL_BLOCK`.
+    pub(crate) control_blocks_ptr: *mut WPP_PROJECT_CONTROL_BLOCK,
+    /// Safe slice view of the control block array for Rust-side indexed access
+    /// (e.g. `is_flag_enabled`, `is_level_enabled`). The slice has the same
+    /// lifetime as the static `WPP_MAIN_CB` array.
+    pub(crate) control_blocks: &'static [WPP_PROJECT_CONTROL_BLOCK],
     pub(crate) wpp_trace_message: Option<WppTraceMessage>,
     pub(crate) etw_unregister: Option<EtwUnregister>,
 }

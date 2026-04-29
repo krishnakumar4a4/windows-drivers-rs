@@ -477,16 +477,6 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         return err.to_compile_error().into();
     }
 
-    // Generate the tracing control GUID for the first control
-    let parse_tracing_control_guid = if let Some(first_control) = trace_controls.first() {
-        let guid = &first_control.guid;
-        quote! {
-            Some(wdf::Guid::parse(#guid).expect("Not a valid GUID"))
-        }
-    } else {
-        quote! { None }
-    };
-
     // Generate codeview annotations for all trace controls
     let codeview_annotations: Vec<proc_macro2::TokenStream> = trace_controls.iter().map(|tc| {
         let guid = &tc.guid;
@@ -509,42 +499,161 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         .max(1);
     let wpp_flag_len_lit = proc_macro2::Literal::usize_unsuffixed(wpp_flag_len);
 
-    // Generate the WPP_PROJECT_CONTROL_BLOCK union and WPP_MAIN_CB static.
-    // The union reserves enough space for the Flags array based on WPP_FLAG_LEN.
-    // This mirrors the C TMH pattern:
-    //   typedef union {
-    //       WPP_TRACE_CONTROL_BLOCK Control;
-    //       UCHAR ReserveSpace[ sizeof(WPP_TRACE_CONTROL_BLOCK) + sizeof(ULONG) * (WPP_FLAG_LEN - 1) ];
-    //   } WPP_CB_TYPE;
-    let generate_control_block = if !trace_controls.is_empty() {
+    let num_controls = trace_controls.len();
+    let num_controls_lit = proc_macro2::Literal::usize_unsuffixed(num_controls);
+
+    // Generate the WPP_MAIN_CB array and its initialisation function.
+    //
+    // This mirrors the C TMH pattern where:
+    //   - WPP_CB_TYPE is a union that reserves enough space for the Flags array
+    //   - WPP_MAIN_CB is declared as `WPP_CB_TYPE WPP_MAIN_CB[WPP_LAST_CTL]`
+    //   - WPP_INIT_CONTROL_ARRAY populates ControlGuid, Next, FlagsLen for each entry
+    //   - Next pointers form a linked list: each entry's Next points to the next
+    //     entry's Control, and the last entry's Next is null
+    //
+    // The Rust version uses `UnsafeCell` instead of `static mut` to provide
+    // interior mutability while keeping the static non-`mut`. The init function
+    // works with a `&mut` slice reference obtained once during single-threaded
+    // DriverEntry, before any concurrent access is possible.
+    let generate_control_block = if num_controls > 0 {
+        // Generate static GUIDs for each trace control.
+        // These need stable addresses since WPP_TRACE_CONTROL_BLOCK::ControlGuid
+        // stores a pointer (LPCGUID) to them.
+        // This mirrors the C TMH `WPP_<Dir>_CTLGUID_<Name>` constants.
+        let guid_statics: Vec<proc_macro2::TokenStream> = trace_controls.iter().enumerate().map(|(idx, tc)| {
+            let static_name = Ident::new(&format!("__WPP_CTLGUID_{}", idx), proc_macro2::Span::call_site());
+            let guid_literal = guid_str_to_tokens(&tc.guid);
+            quote! {
+                static #static_name: ::wdf::__internal::GUID = #guid_literal;
+            }
+        }).collect();
+
+        // Generate the body of `wpp_init_control_array` that populates each entry.
+        // Works with a `&mut` slice and raw pointers derived from it for the
+        // Next linked-list wiring, since Next must point into the same array.
+        let init_statements: Vec<proc_macro2::TokenStream> = (0..num_controls).map(|idx| {
+            let idx_lit = proc_macro2::Literal::usize_unsuffixed(idx);
+            let guid_static_name = Ident::new(&format!("__WPP_CTLGUID_{}", idx), proc_macro2::Span::call_site());
+
+            let next_expr = if idx + 1 < num_controls {
+                let next_idx = proc_macro2::Literal::usize_unsuffixed(idx + 1);
+                // Next points to the WPP_TRACE_CONTROL_BLOCK inside the next
+                // array element. Since ManuallyDrop<T> is repr(transparent) and
+                // Control is at offset 0, the element pointer IS the control
+                // block pointer.
+                quote! {
+                    base.add(#next_idx).cast::<::wdf::tracing::WPP_TRACE_CONTROL_BLOCK>()
+                        as *const ::wdf::tracing::WPP_TRACE_CONTROL_BLOCK
+                }
+            } else {
+                quote! { core::ptr::null() }
+            };
+
+            quote! {
+                {
+                    // SAFETY: Accessing union field `Control`. We hold &mut to
+                    // the whole array so exclusive access is guaranteed.
+                    // ManuallyDrop<T> is repr(transparent), so deref is sound.
+                    let control = unsafe { &mut *arr[#idx_lit].Control };
+                    control.ControlGuid = &#guid_static_name as *const ::wdf::__internal::GUID;
+                    // Next requires a raw pointer derived from the array base so
+                    // it can point to a sibling element.
+                    control.Next = unsafe { #next_expr };
+                }
+            }
+        }).collect();
+
         quote! {
             const WPP_FLAG_LEN: usize = #wpp_flag_len_lit;
+            const WPP_LAST_CTL: usize = #num_controls_lit;
 
+            #(#guid_statics)*
+
+            /// Locally-sized control block union. `ReserveSpace` accounts for
+            /// `WPP_FLAG_LEN` extra `ULONG` flag slots beyond the base struct.
+            /// This mirrors the C TMH `WPP_CB_TYPE`.
             #[repr(C)]
-            union WPP_PROJECT_CONTROL_BLOCK {
+            union WppCbType {
                 Control: core::mem::ManuallyDrop<::wdf::tracing::WPP_TRACE_CONTROL_BLOCK>,
                 ReserveSpace: [u8;
                     core::mem::size_of::<::wdf::tracing::WPP_TRACE_CONTROL_BLOCK>()
                         + core::mem::size_of::<u32>() * (WPP_FLAG_LEN - 1)],
             }
 
-            static mut WPP_MAIN_CB: WPP_PROJECT_CONTROL_BLOCK = WPP_PROJECT_CONTROL_BLOCK {
-                Control: core::mem::ManuallyDrop::new(
-                    ::wdf::tracing::WPP_TRACE_CONTROL_BLOCK::new(WPP_FLAG_LEN as u8)
-                ),
-            };
+            /// Sync wrapper around `UnsafeCell<[WppCbType; N]>`.
+            ///
+            /// `UnsafeCell` is `!Sync` by default, but the WPP C runtime
+            /// manages thread safety for the control block fields it writes
+            /// (Logger, Level, Flags, RegHandle) through ETW's own callback
+            /// serialization. This newtype opts the array into `Sync` so it
+            /// can live in a `static`.
+            #[repr(transparent)]
+            struct WppControlBlockArray(core::cell::UnsafeCell<[WppCbType; WPP_LAST_CTL]>);
+
+            // SAFETY: The C WPP runtime (EtwRegisterClassicProvider /
+            // WppClassicProviderCallback) synchronises concurrent writes.
+            // Rust-side init runs single-threaded in DriverEntry. After init,
+            // Rust only reads through the TraceWriter's slice reference.
+            unsafe impl Sync for WppControlBlockArray {}
+
+            impl WppControlBlockArray {
+                const fn new() -> Self {
+                    const INIT: WppCbType = WppCbType {
+                        Control: core::mem::ManuallyDrop::new(
+                            ::wdf::tracing::WPP_TRACE_CONTROL_BLOCK::new(WPP_FLAG_LEN as u8)
+                        ),
+                    };
+                    Self(core::cell::UnsafeCell::new([INIT; WPP_LAST_CTL]))
+                }
+
+                /// Returns a raw pointer to the inner array.
+                fn as_mut_ptr(&self) -> *mut [WppCbType; WPP_LAST_CTL] {
+                    self.0.get()
+                }
+            }
+
+            /// The array of WPP control blocks, one per trace control GUID.
+            ///
+            /// Uses `UnsafeCell` (via `WppControlBlockArray`) for interior
+            /// mutability without `static mut`. The C WPP runtime may write to
+            /// these control blocks from ETW callback threads.
+            ///
+            /// This mirrors `WPP_CB_TYPE WPP_MAIN_CB[WPP_LAST_CTL]` from
+            /// the C TMH.
+            static WPP_MAIN_CB: WppControlBlockArray = WppControlBlockArray::new();
+
+            /// Populates the `WPP_MAIN_CB` array with control GUIDs and
+            /// `Next` linked-list pointers.
+            ///
+            /// This mirrors `WPP_INIT_CONTROL_ARRAY` from the C TMH.
+            /// Called once during single-threaded `DriverEntry`.
+            fn wpp_init_control_array() {
+                // SAFETY: DriverEntry is single-threaded; no other code has
+                // accessed WPP_MAIN_CB yet, so obtaining &mut is sound.
+                let arr: &mut [WppCbType; WPP_LAST_CTL] = unsafe { &mut *WPP_MAIN_CB.as_mut_ptr() };
+                // Raw base pointer for computing Next linked-list addresses.
+                let base: *mut WppCbType = arr.as_mut_ptr();
+                #(#init_statements)*
+            }
         }
     } else {
         quote! {}
     };
 
-    // Generate the control block pointer expression.
-    // The macro-local union has the same layout starting with Control at offset 0,
-    // matching WPP_PROJECT_CONTROL_BLOCK. Cast the pointer to the wdf crate's type.
-    let control_block_ptr = if !trace_controls.is_empty() {
-        quote! { unsafe { (&raw mut WPP_MAIN_CB).cast::<::wdf::tracing::WPP_PROJECT_CONTROL_BLOCK>() } }
+    // Generate the control block pointer expression for C FFI.
+    // Cast the UnsafeCell's inner array pointer to WPP_PROJECT_CONTROL_BLOCK,
+    // which is the type expected by the C WPP APIs.
+    let control_block_ptr = if num_controls > 0 {
+        quote! { unsafe { (*WPP_MAIN_CB.as_mut_ptr()).as_mut_ptr().cast::<::wdf::tracing::WPP_PROJECT_CONTROL_BLOCK>() } }
     } else {
         quote! { core::ptr::null_mut() }
+    };
+
+    // Generate the init call (only when there are trace controls)
+    let init_call = if num_controls > 0 {
+        quote! { wpp_init_control_array(); }
+    } else {
+        quote! {}
     };
 
     let mut wrappers: TokenStream = quote! {
@@ -556,9 +665,9 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         #[unsafe(export_name = "DriverEntry")] // WDF expects a symbol with the name DriverEntry
         extern "system" fn __driver_entry(driver: &mut ::wdf::DRIVER_OBJECT, registry_path: ::wdf::PCUNICODE_STRING,) -> ::wdf::NTSTATUS {
             #(#codeview_annotations)*
-            let tracing_control_guid = #parse_tracing_control_guid;
-            let control_block = #control_block_ptr;
-            ::wdf::call_safe_driver_entry(driver, registry_path, #safe_driver_entry, tracing_control_guid, control_block)
+            #init_call
+            let control_blocks = #control_block_ptr;
+            ::wdf::call_safe_driver_entry(driver, registry_path, #safe_driver_entry, control_blocks, #num_controls_lit)
         }
     }
     .into();
@@ -778,6 +887,31 @@ fn is_valid_guid(guid_str: &str) -> bool {
     }
 
     true
+}
+
+/// Generates a `proc_macro2::TokenStream` constructing a `::wdf::__internal::GUID`
+/// struct literal from a GUID string (e.g. "cb94defb-592a-4509-8f2e-54f204929669").
+///
+/// The GUID string must have been validated by [`is_valid_guid`] beforehand.
+fn guid_str_to_tokens(guid_str: &str) -> proc_macro2::TokenStream {
+    let hex = guid_str.replace('-', "");
+    let data1 = u32::from_str_radix(&hex[0..8], 16).unwrap();
+    let data2 = u16::from_str_radix(&hex[8..12], 16).unwrap();
+    let data3 = u16::from_str_radix(&hex[12..16], 16).unwrap();
+    let mut data4 = [0u8; 8];
+    for i in 0..8 {
+        data4[i] = u8::from_str_radix(&hex[16 + i * 2..18 + i * 2], 16).unwrap();
+    }
+    let d4_0 = data4[0]; let d4_1 = data4[1]; let d4_2 = data4[2]; let d4_3 = data4[3];
+    let d4_4 = data4[4]; let d4_5 = data4[5]; let d4_6 = data4[6]; let d4_7 = data4[7];
+    quote! {
+        ::wdf::__internal::GUID {
+            Data1: #data1,
+            Data2: #data2,
+            Data3: #data3,
+            Data4: [#d4_0, #d4_1, #d4_2, #d4_3, #d4_4, #d4_5, #d4_6, #d4_7],
+        }
+    }
 }
 
 /// A static counter for generating unique message IDs across trace invocations.

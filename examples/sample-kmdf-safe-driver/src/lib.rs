@@ -98,7 +98,7 @@ struct TimerContext {
 /// * `registry_path` - Represents the driver specific path in the Registry.
 /// The function driver can use the path to store driver related data between
 /// reboots. The path does not store hardware instance specific data.
-#[driver_entry(trace_control = ("SampleKmdfSafe", "cb94defb-592a-4509-8f2e-54f204929669", [FLAG_ONE, FLAG_TWO]))]
+#[driver_entry(trace_control = ("SampleKmdfSafe", "cb94defb-592a-4509-8f2e-54f204929669", [FLAG_ONE, FLAG_TWO]), ("SampleKmdfDiag", "a1b2c3d4-e5f6-7890-abcd-ef1234567890", [FLAG_PERF, FLAG_IO, FLAG_STATE]))]
 fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     if cfg!(debug_assertions) {
         print_driver_version(driver)?;
@@ -129,6 +129,13 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     trace!("Trace: Safe Rust driver entry with basic data, int - %d, str - %s", 9999i32, "hello");
 
     trace!(FLAG_TWO, Information, "Trace: Safe Rust driver entry complete, int - %d, str - %s", 1006i32, "examplestring!@#$%^&*()_+-=1234567890`~[]|;:'\"<>,./?  E");
+
+    // Traces using second trace control (SampleKmdfDiag) flags
+    trace!(FLAG_PERF, "Perf: driver init took %d ms", 42i32);
+
+    trace!(FLAG_IO, Information, "IO: queued %d requests during init", 7i32);
+
+    trace!(FLAG_STATE, Verbose, "State: driver state transitioned to ready, code - %d", 1i32);
 
     Ok(())
 }
