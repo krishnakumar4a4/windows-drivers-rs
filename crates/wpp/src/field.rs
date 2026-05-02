@@ -9,8 +9,8 @@ pub trait WppField {
     /// The Rust type name as a string, e.g. `"u32"`, `"i64"`, `"bool"`.
     const TYPE_NAME: &'static str;
 
-    /// Fixed serialization size in bytes.
-    const FIXED_SIZE: usize;
+    /// Returns the raw event data as a byte slice for ETW serialization.
+    fn as_trace_bytes(&self) -> &[u8];
 }
 
 macro_rules! impl_wpp_field {
@@ -18,7 +18,16 @@ macro_rules! impl_wpp_field {
         $(
             impl WppField for $ty {
                 const TYPE_NAME: &'static str = $name;
-                const FIXED_SIZE: usize = core::mem::size_of::<$ty>();
+
+                #[inline]
+                fn as_trace_bytes(&self) -> &[u8] {
+                    unsafe {
+                        core::slice::from_raw_parts(
+                            self as *const Self as *const u8,
+                            core::mem::size_of::<Self>(),
+                        )
+                    }
+                }
             }
         )*
     };
@@ -38,4 +47,13 @@ impl_wpp_field! {
     bool  => "bool",
     usize => "usize",
     isize => "isize",
+}
+
+impl WppField for &str {
+    const TYPE_NAME: &'static str = "&str";
+
+    #[inline]
+    fn as_trace_bytes(&self) -> &[u8] {
+        self.as_bytes()
+    }
 }
