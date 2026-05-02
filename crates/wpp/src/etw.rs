@@ -49,6 +49,7 @@ unsafe extern "system" {
     fn EtwWrite(
         RegHandle: u64,
         EventDescriptor: *const EVENT_DESCRIPTOR,
+        ActivityId: *const core::ffi::c_void,
         UserDataCount: u32,
         UserData: *const EVENT_DATA_DESCRIPTOR,
     ) -> i32;
@@ -91,7 +92,7 @@ pub unsafe fn write(
     count: u32,
     data: *const EVENT_DATA_DESCRIPTOR,
 ) -> i32 {
-    unsafe { EtwWrite(handle, event_descriptor, count, data) }
+    unsafe { EtwWrite(handle, event_descriptor, core::ptr::null(), count, data) }
 }
 
 /// Unregister an ETW provider.
