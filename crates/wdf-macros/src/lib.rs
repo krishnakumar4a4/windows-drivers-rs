@@ -75,7 +75,7 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
         let cleanup_calls: Vec<proc_macro2::TokenStream> = trace_provider_paths
             .iter()
             .rev()
-            .map(|p| quote! { unsafe { #p::cleanup(); } })
+            .map(|p| quote! { #p::clean_up(); })
             .collect();
 
         let init_block = quote! { #(#init_calls)* };

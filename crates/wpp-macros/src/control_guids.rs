@@ -207,23 +207,49 @@ fn generate_provider_module(p: &ProviderDecl) -> TokenStream {
             #(#kw_consts)*
             pub static STATE: ::wpp::ProviderState = ::wpp::ProviderState::new();
 
+            /// # Safety
+            ///
+            /// The caller must ensure `clean_up()` is called before the
+            /// module containing this provider is unloaded.
             pub unsafe fn init() {
                 core::hint::codeview_annotation!(
                     "WPP_PROVIDER", #provider_name_str, #guid_str,
                     #(#kw_annotation_strings),*
                 );
-                let (_, handle) = ::wpp::etw::register(
+                if STATE.init_state.compare_exchange(
+                    ::wpp::provider::UNINITIALIZED,
+                    ::wpp::provider::INITIALIZING,
+                    core::sync::atomic::Ordering::Acquire,
+                    core::sync::atomic::Ordering::Relaxed,
+                ).is_err() {
+                    return;
+                }
+                let (_, handle) = unsafe { ::wpp::etw::register(
                     &CONTROL_GUID,
                     Some(::wpp::provider::enable_callback),
                     &STATE as *const ::wpp::ProviderState as *mut core::ffi::c_void,
-                );
+                ) };
                 STATE.reg_handle.store(handle, core::sync::atomic::Ordering::Relaxed);
-                ::wpp::etw::set_decode_guid(handle, &DECODE_GUID);
+                unsafe { ::wpp::etw::set_decode_guid(handle, &DECODE_GUID) };
+                STATE.init_state.store(
+                    ::wpp::provider::INITIALIZED,
+                    core::sync::atomic::Ordering::Release,
+                );
             }
 
-            pub unsafe fn cleanup() {
+            pub fn clean_up() {
+                if STATE.init_state.compare_exchange(
+                    ::wpp::provider::INITIALIZED,
+                    ::wpp::provider::UNINITIALIZED,
+                    core::sync::atomic::Ordering::Acquire,
+                    core::sync::atomic::Ordering::Relaxed,
+                ).is_err() {
+                    return;
+                }
+                STATE.enabled_level.store(0, core::sync::atomic::Ordering::Relaxed);
+                STATE.enabled_keywords.store(0, core::sync::atomic::Ordering::Relaxed);
                 let handle = STATE.reg_handle.swap(0, core::sync::atomic::Ordering::Relaxed);
-                if handle != 0 { ::wpp::etw::unregister(handle); }
+                if handle != 0 { unsafe { ::wpp::etw::unregister(handle) }; }
             }
         }
     }

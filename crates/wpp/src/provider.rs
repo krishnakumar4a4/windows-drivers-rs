@@ -5,14 +5,24 @@
 
 use core::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
+pub const UNINITIALIZED: u8 = 0;
+pub const INITIALIZING: u8 = 1;
+pub const INITIALIZED: u8 = 2;
+
 /// Runtime state for a single ETW provider.
 ///
 /// Holds the registration handle and the currently-enabled level/keywords,
 /// updated atomically by the ETW enable callback.
+///
+/// The `init_state` field tracks the lifecycle:
+/// UNINITIALIZED → INITIALIZING → INITIALIZED.
+/// This prevents double-registration and ensures safe concurrent access
+/// between `init()`, `clean_up()`, and `trace!` calls.
 pub struct ProviderState {
     pub reg_handle: AtomicU64,
     pub enabled_level: AtomicU8,
     pub enabled_keywords: AtomicU64,
+    pub init_state: AtomicU8,
 }
 
 // SAFETY: All fields are atomic — concurrent access is safe.
@@ -24,6 +34,7 @@ impl ProviderState {
             reg_handle: AtomicU64::new(0),
             enabled_level: AtomicU8::new(0),
             enabled_keywords: AtomicU64::new(0),
+            init_state: AtomicU8::new(UNINITIALIZED),
         }
     }
 
