@@ -151,7 +151,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
         .map(|p| {
             quote! {
                 {
-                    let __bytes = ::wpp::WppField::as_trace_bytes(#p);
+                    let __bytes = ::wpp::WppField::as_bytes(#p);
                     ::wpp::etw::EVENT_DATA_DESCRIPTOR {
                         Ptr: __bytes.as_ptr() as u64,
                         Size: __bytes.len() as u32,

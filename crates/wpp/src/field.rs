@@ -10,7 +10,7 @@ pub trait WppField {
     const TYPE_NAME: &'static str;
 
     /// Returns the raw event data as a byte slice for ETW serialization.
-    fn as_trace_bytes(&self) -> &[u8];
+    fn as_bytes(&self) -> &[u8];
 }
 
 macro_rules! impl_wpp_field {
@@ -20,7 +20,7 @@ macro_rules! impl_wpp_field {
                 const TYPE_NAME: &'static str = $name;
 
                 #[inline]
-                fn as_trace_bytes(&self) -> &[u8] {
+                fn as_bytes(&self) -> &[u8] {
                     unsafe {
                         core::slice::from_raw_parts(
                             self as *const Self as *const u8,
@@ -53,7 +53,7 @@ impl WppField for &str {
     const TYPE_NAME: &'static str = "&str";
 
     #[inline]
-    fn as_trace_bytes(&self) -> &[u8] {
-        self.as_bytes()
+    fn as_bytes(&self) -> &[u8] {
+        str::as_bytes(self)
     }
 }
