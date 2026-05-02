@@ -1,0 +1,11 @@
+[package]
+edition.workspace = true
+name = "wpp"
+version = "0.1.0"
+description = "WPP software tracing runtime for Rust drivers"
+repository.workspace = true
+readme.workspace = true
+license.workspace = true
+
+[dependencies]
+wpp-macros = { path = "../wpp-macros", version = "0.1.0" }

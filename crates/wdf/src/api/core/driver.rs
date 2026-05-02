@@ -2,7 +2,6 @@
 use alloc::boxed::Box;
 use alloc::string::String;
 use core::ptr;
-#[cfg(driver_model__driver_type = "KMDF")]
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 use wdf_macros::object_context;
@@ -46,6 +45,10 @@ pub type DRIVER_OBJECT = wdk_sys::_DRIVER_OBJECT;
 /// read from `trace()` and `clean_up_tracing()` afterwards.
 #[cfg(driver_model__driver_type = "KMDF")]
 static TRACE_WRITER: AtomicPtr<TraceWriter> = AtomicPtr::new(ptr::null_mut());
+
+/// Global pointer to the WPP provider cleanup function.
+/// Set during driver entry, called during driver unload.
+static WPP_CLEANUP_FN: AtomicPtr<()> = AtomicPtr::new(ptr::null_mut());
 
 /// A safe wrapper around `DRIVER_OBJECT`
 #[repr(transparent)]
@@ -173,6 +176,15 @@ fn clean_up_tracing() {
 #[cfg(not(driver_model__driver_type = "KMDF"))]
 fn clean_up_tracing() {}
 
+fn clean_up_wpp() {
+    let ptr = WPP_CLEANUP_FN.swap(ptr::null_mut(), Ordering::Relaxed);
+    if !ptr.is_null() {
+        // SAFETY: The pointer was stored from a valid `fn()` during driver entry.
+        let cleanup: fn() = unsafe { core::mem::transmute(ptr) };
+        cleanup();
+    }
+}
+
 /// Calls the safe driver entry function
 ///
 /// It is meant to be called by the driver entry function generated
@@ -184,6 +196,7 @@ pub fn call_safe_driver_entry(
     reg_path: PCUNICODE_STRING,
     safe_entry: fn(&mut DriverObject, &UnicodeString) -> NtResult<()>,
     tracing_control_guid: Option<Guid>,
+    wpp_cleanup: Option<fn()>,
 ) -> NTSTATUS {
     // SAFETY: `DriverObject` is `#[repr(transparent)]` over `DRIVER_OBJECT`,
     // so this cast is sound.
@@ -208,9 +221,15 @@ pub fn call_safe_driver_entry(
     #[cfg(not(driver_model__driver_type = "KMDF"))]
     let _ = tracing_control_guid;
 
+    // Store WPP cleanup function for driver_unload to call
+    if let Some(cleanup) = wpp_cleanup {
+        WPP_CLEANUP_FN.store(cleanup as *mut (), Ordering::Relaxed);
+    }
+
     match safe_entry(driver_object, registry_path) {
         Ok(()) => 0,
         Err(e) => {
+            clean_up_wpp();
             clean_up_tracing();
             e.code()
         }
@@ -237,6 +256,7 @@ extern "C" fn evt_driver_device_add(
 unsafe extern "C" fn driver_unload(_driver: WDFDRIVER) {
     println!("Driver unload");
 
+    clean_up_wpp();
     clean_up_tracing();
 
     println!("Driver unload done");

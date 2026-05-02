@@ -34,6 +34,8 @@ wdk-build = { path = "crates/wdk-build", version = "0.4.0" }
 wdk-macros = { path = "crates/wdk-macros", version = "0.4.0" }
 wdk-panic = { path = "crates/wdk-panic", version = "0.3.1" }
 wdk-sys = { path = "crates/wdk-sys", version = "0.4.0" }
+wpp = { path = "crates/wpp", version = "0.1.0" }
+wpp-macros = { path = "crates/wpp-macros", version = "0.1.0" }
 
 # External Crates
 anyhow = "1.0.97"
