@@ -1138,6 +1138,7 @@ dependencies = [
  "wdk-build",
  "wdk-panic",
  "wdk-sys",
+ "wpp",
 ]
 
 [[package]]
@@ -1146,7 +1147,6 @@ version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "sha2",
  "syn",
 ]
 
@@ -1394,6 +1394,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3268f3d866458b787f390cf61f4bbb563b922d091359f9608842999eaee3943c"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "wpp"
+version = "0.1.0"
+dependencies = [
+ "wdk",
+ "wdk-build",
+ "wdk-sys",
+ "wpp-macros",
+]
+
+[[package]]
+name = "wpp-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "sha2",
+ "syn",
 ]
 
 [[package]]

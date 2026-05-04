@@ -12,8 +12,14 @@ pub mod result;
 pub mod string;
 pub mod sync;
 pub mod timer;
-pub mod trace_data;
-pub mod tracing;
+// trace_data is kept as a module for the NtStatus/HResult/Guid WppArgData impls
+// (no public items to re-export — the trait impls are the side effect)
+mod trace_data;
+
+/// Re-export wpp::writer as wdf::tracing for backward compatibility.
+pub mod tracing {
+    pub use wpp::writer::*;
+}
 
 use core::time::Duration;
 
@@ -31,8 +37,10 @@ pub use result::*;
 pub use string::*;
 pub use sync::*;
 pub use timer::*;
-pub use trace_data::*;
+pub use wpp::wpp_arg::*;
 pub use wdf_macros::*;
+pub use wpp::wpp_init;
+pub use wpp::trace;
 pub use wdk::println;
 use wdk_sys::WDF_TRI_STATE;
 

@@ -18,10 +18,10 @@ pub use api::*;
 #[doc(hidden)]
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 pub mod __internal {
-    pub use crate::tracing::{strlen, WppAutoLogTrace, WPP_TRACE_OPTIONS};
+    pub use wpp::writer::{strlen, WppAutoLogTrace, WPP_TRACE_OPTIONS};
     pub use crate::driver::{get_auto_log_context, get_wpp_logger, get_wpp_trace_message};
-    pub use crate::trace_data::TraceArgData;
-    pub use crate::trace_data::TraceFmtBuf;
+    pub use wpp::wpp_arg::WppArgData;
+    pub use wpp::wpp_arg::TraceFmtBuf;
     pub use wdk_sys::{GUID, LPCGUID, LPCSTR, LPGUID, UCHAR, ULONG, USHORT, TRACEHANDLE, PVOID};
     pub use alloc::ffi::CString;
 }

@@ -17,6 +17,7 @@ wdk-build.workspace = true
 
 [dependencies]
 wdf-macros.workspace = true
+wpp.workspace = true
 wdk-alloc.workspace = true
 wdk-sys = { workspace = true, features = ["usb"] }
 wdk.workspace = true

@@ -70,7 +70,7 @@ impl NtStatus {
     }
 
     /// Returns a reference to the inner i32 status code.
-    /// Used by TraceArgData to get a pointer to the code for WPP tracing.
+    /// Used by WppArgData to get a pointer to the code for WPP tracing.
     pub fn code_ref(&self) -> &i32 {
         match self {
             Self::NonError(c) => c.code_ref(),
@@ -235,7 +235,7 @@ impl HResult {
     }
 
     /// Returns a reference to the inner i32 code.
-    /// Used by TraceArgData for WPP tracing.
+    /// Used by WppArgData for WPP tracing.
     pub fn code_ref(&self) -> &i32 {
         &self.0
     }

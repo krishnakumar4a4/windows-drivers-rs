@@ -1,0 +1,21 @@
+[package]
+edition.workspace = true
+name = "wpp"
+version = "0.1.0"
+description = "WPP tracing runtime for Windows drivers"
+repository.workspace = true
+readme.workspace = true
+license.workspace = true
+keywords = ["windows", "wpp", "tracing"]
+categories = [
+  "os::windows-apis",
+  "os",
+]
+
+[build-dependencies]
+wdk-build.workspace = true
+
+[dependencies]
+wpp-macros.workspace = true
+wdk-sys.workspace = true
+wdk.workspace = true
