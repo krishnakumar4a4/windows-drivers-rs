@@ -4,7 +4,6 @@
 //! A collection of macros used for writing WDF-based drivers in safe Rust
 
 use std::collections::HashSet;
-use std::sync::Mutex;
 
 use proc_macro::TokenStream;
 use quote::quote;

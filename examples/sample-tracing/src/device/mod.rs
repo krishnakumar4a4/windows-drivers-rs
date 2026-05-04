@@ -4,7 +4,7 @@
 
 pub mod diagnostics;
 
-use wdf::{println, trace, Device, DeviceInit, NtResult};
+use wdf::{println, trace, DeviceInit, NtResult};
 
 /// Called by the framework in response to AddDevice from the PNP manager.
 pub fn evt_device_add(_device_init: &mut DeviceInit) -> NtResult<()> {

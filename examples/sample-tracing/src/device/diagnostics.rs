@@ -1,7 +1,7 @@
 //! Deep-nested diagnostics module (2 levels: device::diagnostics).
 //! Demonstrates that `trace!` works from any module depth.
 
-use wdf::{println, trace, NtResult, NtStatus, HResult};
+use wdf::{println, trace, NtStatus, HResult};
 
 /// Runs a comprehensive set of trace statements covering all supported
 /// C-style format specifiers. Called from `device::run_device_diagnostics`.

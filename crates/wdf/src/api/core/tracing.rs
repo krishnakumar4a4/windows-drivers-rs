@@ -2,9 +2,7 @@ use core::{mem, ptr};
 
 use wdk_sys::{
     DRIVER_OBJECT,
-    GUID,
     LPCGUID,
-    LPCSTR,
     LPGUID,
     NTSTATUS,
     PCUNICODE_STRING,

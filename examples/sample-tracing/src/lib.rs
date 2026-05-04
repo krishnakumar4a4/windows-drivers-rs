@@ -1,7 +1,5 @@
 #![no_std]
 #![feature(codeview_annotation)]
-#![feature(core_intrinsics)]
-#![allow(incomplete_features)]
 
 mod device;
 

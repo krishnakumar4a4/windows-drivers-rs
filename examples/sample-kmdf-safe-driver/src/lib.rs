@@ -8,7 +8,6 @@
 
 #![no_std]
 #![feature(codeview_annotation)]
-#![feature(core_intrinsics)]
 
 mod device;
 
