@@ -1,7 +1,11 @@
 // Copyright (c) Microsoft Corporation
 // License: MIT OR Apache-2.0
 
-//! Thin wrappers around kernel-mode ETW APIs.
+//! Thin wrappers around ETW APIs.
+//!
+//! When the `kernel_mode` feature is enabled, binds to the kernel-mode
+//! `Etw*` functions. Otherwise, binds to the user-mode `Event*` functions
+//! from `onecore_apiset`.
 
 use crate::GUID;
 
@@ -38,33 +42,86 @@ type EnableCallback = Option<
     ),
 >;
 
+// ── FFI declarations ────────────────────────────────────────────────────────
+
+#[cfg(feature = "kernel_mode")]
 unsafe extern "system" {
     fn EtwRegister(
         ProviderId: *const GUID,
         EnableCallback: EnableCallback,
         CallbackContext: *mut core::ffi::c_void,
         RegHandle: *mut u64,
-    ) -> i32;
+    ) -> u32;
 
-    fn EtwWrite(
+    fn EtwWriteTransfer(
         RegHandle: u64,
         EventDescriptor: *const EVENT_DESCRIPTOR,
-        ActivityId: *const core::ffi::c_void,
+        ActivityId: Option<&[u8; 16]>,
+        RelatedActivityId: Option<&[u8; 16]>,
         UserDataCount: u32,
         UserData: *const EVENT_DATA_DESCRIPTOR,
-    ) -> i32;
+    ) -> u32;
 
-    fn EtwUnregister(RegHandle: u64) -> i32;
+    fn EtwUnregister(RegHandle: u64) -> u32;
 
     fn EtwSetInformation(
         RegHandle: u64,
         InformationClass: u32,
         EventInformation: *const core::ffi::c_void,
         InformationLength: u32,
-    ) -> i32;
+    ) -> u32;
 }
 
-/// Register an ETW provider with the kernel.
+#[cfg(not(feature = "kernel_mode"))]
+#[link(name = "onecore_apiset")]
+unsafe extern "system" {
+    fn EventRegister(
+        ProviderId: *const GUID,
+        EnableCallback: EnableCallback,
+        CallbackContext: *mut core::ffi::c_void,
+        RegHandle: *mut u64,
+    ) -> u32;
+
+    fn EventWriteTransfer(
+        RegHandle: u64,
+        EventDescriptor: *const EVENT_DESCRIPTOR,
+        ActivityId: Option<&[u8; 16]>,
+        RelatedActivityId: Option<&[u8; 16]>,
+        UserDataCount: u32,
+        UserData: *const EVENT_DATA_DESCRIPTOR,
+    ) -> u32;
+
+    fn EventUnregister(RegHandle: u64) -> u32;
+
+    fn EventSetInformation(
+        RegHandle: u64,
+        InformationClass: u32,
+        EventInformation: *const core::ffi::c_void,
+        InformationLength: u32,
+    ) -> u32;
+}
+
+// ── Unified aliases ─────────────────────────────────────────────────────────
+
+#[cfg(feature = "kernel_mode")]
+use self::{
+    EtwRegister as event_register,
+    EtwWriteTransfer as event_write,
+    EtwUnregister as event_unregister,
+    EtwSetInformation as event_set_information,
+};
+
+#[cfg(not(feature = "kernel_mode"))]
+use self::{
+    EventRegister as event_register,
+    EventWriteTransfer as event_write,
+    EventUnregister as event_unregister,
+    EventSetInformation as event_set_information,
+};
+
+// ── Public wrappers ─────────────────────────────────────────────────────────
+
+/// Register an ETW provider.
 ///
 /// # Safety
 ///
@@ -74,9 +131,9 @@ pub unsafe fn register(
     provider_id: &GUID,
     callback: EnableCallback,
     callback_context: *mut core::ffi::c_void,
-) -> (i32, u64) {
+) -> (u32, u64) {
     let mut handle: u64 = 0;
-    let status = unsafe { EtwRegister(provider_id, callback, callback_context, &mut handle) };
+    let status = unsafe { event_register(provider_id, callback, callback_context, &mut handle) };
     (status, handle)
 }
 
@@ -91,8 +148,8 @@ pub unsafe fn write(
     event_descriptor: *const EVENT_DESCRIPTOR,
     count: u32,
     data: *const EVENT_DATA_DESCRIPTOR,
-) -> i32 {
-    unsafe { EtwWrite(handle, event_descriptor, core::ptr::null(), count, data) }
+) -> u32 {
+    unsafe { event_write(handle, event_descriptor, None, None, count, data) }
 }
 
 /// Unregister an ETW provider.
@@ -101,8 +158,8 @@ pub unsafe fn write(
 ///
 /// `handle` must be a valid registration handle that has not already
 /// been unregistered.
-pub unsafe fn unregister(handle: u64) -> i32 {
-    unsafe { EtwUnregister(handle) }
+pub unsafe fn unregister(handle: u64) -> u32 {
+    unsafe { event_unregister(handle) }
 }
 
 /// Set the decode GUID trait on a registered provider.
@@ -111,7 +168,7 @@ pub unsafe fn unregister(handle: u64) -> i32 {
 ///
 /// `handle` must be a valid registration handle. `decode_guid` must
 /// point to a valid GUID.
-pub unsafe fn set_decode_guid(handle: u64, decode_guid: &GUID) -> i32 {
+pub unsafe fn set_decode_guid(handle: u64, decode_guid: &GUID) -> u32 {
     let mut traits = [0u8; 22];
     let blob_size: u16 = 22;
     traits[0..2].copy_from_slice(&blob_size.to_le_bytes());
@@ -126,7 +183,7 @@ pub unsafe fn set_decode_guid(handle: u64, decode_guid: &GUID) -> i32 {
 
     const EVENT_INFO_CLASS_SET_TRAITS: u32 = 2;
     unsafe {
-        EtwSetInformation(
+        event_set_information(
             handle,
             EVENT_INFO_CLASS_SET_TRAITS,
             traits.as_ptr() as *const core::ffi::c_void,

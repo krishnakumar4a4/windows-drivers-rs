@@ -21,7 +21,7 @@ wdk-alloc.workspace = true
 wdk-sys = { workspace = true, features = ["usb"] }
 wdk.workspace = true
 wdk-panic.workspace = true
-wpp = { path = "../wpp", version = "0.1.0" }
+wpp = { path = "../wpp", version = "0.1.0", features = ["kernel_mode"] }
 paste.workspace = true
 bitflags.workspace = true
 
