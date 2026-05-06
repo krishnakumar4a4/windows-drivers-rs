@@ -25,7 +25,7 @@ wdk-build = { path = "../../crates/wdk-build", version = "0.4.0" }
 
 [dependencies]
 wdf = { path = "../../crates/wdf", version = "0.3.0" }
-wpp = { path = "../../crates/wpp", version = "0.1.0" }
+wpp = { path = "../../crates/wpp", version = "0.1.0", features = ["kernel_mode"] }
 
 [features]
 default = []

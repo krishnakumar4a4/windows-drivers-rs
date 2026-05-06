@@ -18,8 +18,6 @@
 
 #![no_std]
 #![feature(codeview_annotation)]
-#![feature(core_intrinsics)]
-#![allow(internal_features)]
 
 use core::time::Duration;
 
@@ -110,7 +108,8 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
         print_driver_version(driver)?;
     }
 
-    trace!(INFO, GENERAL, "Safe Rust driver entry complete");
+    let msg = "rust for drivers";
+    trace!(INFO, GENERAL, "Safe Rust driver entry complete. Int: {}, Str: {}", 42, msg);
 
     Ok(())
 }
