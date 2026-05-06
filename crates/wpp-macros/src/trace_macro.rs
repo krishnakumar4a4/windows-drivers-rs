@@ -85,7 +85,7 @@ pub(crate) fn trace_impl(item: TokenStream) -> TokenStream {
 }
 
 /// Generates the call site that invokes one of the pre-generated
-/// `WppWriter::trace_N` inherent methods.
+/// `WppProvider::trace_N` inherent methods.
 fn generate_trace_method_call(
     method_ident: &syn::Ident,
     trace_guid_bytes: &[u8; 16],
@@ -153,12 +153,12 @@ fn generate_trace_method_call(
             let __trace_flags: u32 = #flags_value;
             let __control_index: usize = #control_index;
 
-            if let Some(__trace_writer) = ::wdf::get_trace_writer() {
-                let __should_trace_wpp = (__trace_flags == 0 || __trace_writer.is_flag_enabled(__control_index, __trace_flags))
-                                            && __trace_writer.is_level_enabled(__control_index, __trace_level);
-                let __should_auto_log = __trace_level < crate::TraceLevel::Verbose as u8 || __trace_writer.is_auto_log_verbose_enabled(__control_index);
+            if let Some(__provider) = ::wdf::get_provider(__control_index) {
+                let __should_trace_wpp = (__trace_flags == 0 || __provider.is_flag_enabled(__trace_flags))
+                                            && __provider.is_level_enabled(__trace_level);
+                let __should_auto_log = __trace_level < crate::TraceLevel::Verbose as u8 || __provider.is_auto_log_verbose_enabled();
 
-                __trace_writer.#method_ident(
+                __provider.#method_ident(
                     __trace_level,
                     __trace_flags,
                     #message_id_lit,

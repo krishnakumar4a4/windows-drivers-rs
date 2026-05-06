@@ -7,8 +7,6 @@ pub use wdk_sys::{
     NT_SUCCESS,
     NTSTATUS,
     PCUNICODE_STRING,
-    PVOID,
-    TRACEHANDLE,
     WDF_OBJECT_ATTRIBUTES,
     WDF_OBJECT_CONTEXT_TYPE_INFO,
     WDFOBJECT,
@@ -285,39 +283,6 @@ unsafe extern "C" fn wdf_driver_unload(_driver: WDFDRIVER) {
     println!("WDF Driver unload done");
 }
 
-pub fn get_trace_writer() -> Option<&'static wpp::writer::WppWriter> {
-    wpp::writer::get_wpp_writer()
-}
-
-/// Returns the AutoLogContext pointer for WppAutoLogTrace calls.
-/// This is exposed for macro-generated code.
-///
-/// # Safety
-///
-/// The returned pointer is only valid after tracing has been initialized.
-#[doc(hidden)]
-pub unsafe fn get_auto_log_context() -> Option<PVOID> {
-    unsafe { wpp::writer::get_auto_log_context() }
-}
-
-/// Returns the TRACEHANDLE logger for WPP tracing.
-/// This is exposed for macro-generated code.
-/// 
-/// # Safety
-/// 
-/// The returned TRACEHANDLE is only valid after tracing has been initialized.
-#[doc(hidden)]
-pub unsafe fn get_wpp_logger() -> Option<TRACEHANDLE> {
-    unsafe { wpp::writer::get_wpp_logger() }
-}
-
-/// Returns the WppTraceMessage function pointer for WPP tracing.
-/// This is exposed for macro-generated code.
-/// 
-/// # Safety
-/// 
-/// The returned function pointer is only valid after tracing has been initialized.
-#[doc(hidden)]
-pub unsafe fn get_wpp_trace_message() -> Option<wpp::writer::WppTraceMessage> {
-    unsafe { wpp::writer::get_wpp_trace_message() }
+pub fn get_provider(index: usize) -> Option<&'static wpp::writer::WppProvider> {
+    wpp::writer::get_provider(index)
 }

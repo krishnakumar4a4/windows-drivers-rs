@@ -1,12 +1,15 @@
 // Copyright (c) Microsoft Corporation
 // License: MIT OR Apache-2.0
 
-//! WPP trace writer implementation.
+//! WPP tracing provider implementation.
 //!
-//! Contains `WppWriter` (the safe wrapper around WPP tracing), control block
-//! types, FFI externs, globals, and accessor functions for macro-generated code.
+//! Contains `WppProvider` — one instance per trace control block declaration —
+//! with its own state for level, flags, logger handle, and auto-log context.
+//! The provider instances are stored in a global array initialised during
+//! `DriverEntry` and live for the entire lifetime of the driver.
 
 use core::{cell::UnsafeCell, mem, ptr};
+use core::sync::atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicU64, AtomicPtr, Ordering};
 
 use wdk_sys::{
     DRIVER_OBJECT,
@@ -31,7 +34,7 @@ use wdk_sys::{
 use wdk::println;
 
 // ---------------------------------------------------------------------------
-// UnsafeOnceCell — duplicated from wdf for use in this crate
+// UnsafeOnceCell
 // ---------------------------------------------------------------------------
 
 /// A container like [`core::cell::OnceCell`] that is
@@ -116,6 +119,11 @@ pub static mut WPP_RECORDER_INITIALIZED: *mut WPP_PROJECT_CONTROL_BLOCK = ptr::n
 // Trace control codes
 // ---------------------------------------------------------------------------
 
+// Trace control codes used by WPP classic provider callback
+// These were originally defined in evntrace.h as below
+// #define EVENT_CONTROL_CODE_DISABLE_PROVIDER 0
+// #define EVENT_CONTROL_CODE_ENABLE_PROVIDER  1
+// #define EVENT_CONTROL_CODE_CAPTURE_STATE    2
 enum TraceControlCode {
     Enable = 1,
     Disable = 0,
@@ -144,173 +152,6 @@ macro_rules! get_routine_addr {
 }
 
 // ---------------------------------------------------------------------------
-// WppWriter
-// ---------------------------------------------------------------------------
-
-/// A writer for WPP tracing (renamed from TraceWriter).
-///
-/// It is a safe wrapper around the WPP tracing system.
-/// It maintains data necessary to call WPP functions such
-/// as the control block. This data is passed to WPP functions
-/// as `*mut T` sometimes (e.g. in the [`start`] function)
-/// even though the wrapper function itself (i.e. [`start`])
-/// takes `&self` instead of `&mut self`.
-/// This is safe because the WPP functions are supposed to modify
-/// the passed data in a thread-safe manner and `WppWriter` itself
-/// never modifies them.
-/// In this way `WppWriter` implements interior mutability.
-pub struct WppWriter {
-    pub(crate) trace_config: TraceConfig,
-    wdm_driver: *mut DRIVER_OBJECT,
-    reg_path: PCUNICODE_STRING,
-}
-
-impl WppWriter {
-    /// Creates a new `WppWriter` and registers all trace providers with ETW.
-    ///
-    /// This mirrors the C WPP `WppInitKm` function. The macro-generated code
-    /// has already populated the `WPP_MAIN_CB` array (control GUIDs, `Next`
-    /// linked-list pointers, `FlagsLen`). This function walks the linked list
-    /// starting at `&WPP_CB[0].Control` and calls `EtwRegisterClassicProvider`
-    /// for each control block, exactly as `WppInitKm` does in the TMH.
-    ///
-    /// # Safety
-    ///
-    /// * `control_blocks_ptr` must point to a valid array of
-    ///   `WPP_PROJECT_CONTROL_BLOCK` with `num_controls` elements, whose
-    ///   `Control.Next` pointers form a null-terminated linked list.
-    /// * The array must have `'static` lifetime (i.e. be a module-level static).
-    /// * `wdm_driver` and `reg_path` must be valid for the lifetime of tracing.
-    pub unsafe fn init(
-        control_blocks_ptr: *mut WPP_PROJECT_CONTROL_BLOCK,
-        num_controls: usize,
-        wdm_driver: *mut DRIVER_OBJECT,
-        reg_path: PCUNICODE_STRING,
-    ) -> Self {
-        // Create a safe slice view of the control block array for Rust-side
-        // indexed access.
-        //
-        // SAFETY: The caller guarantees the pointer is valid, properly aligned,
-        // and points to `num_controls` contiguous elements with 'static lifetime.
-        let control_blocks: &'static [WPP_PROJECT_CONTROL_BLOCK] = unsafe {
-            core::slice::from_raw_parts(control_blocks_ptr, num_controls)
-        };
-
-        let etw_register_classic_provider =
-            get_routine_addr!("EtwRegisterClassicProvider", EtwRegisterClassicProvider);
-
-        let mut etw_unregister = None;
-
-        if let Some(etw_register_provider) = etw_register_classic_provider {
-            etw_unregister = get_routine_addr!("EtwUnregister", EtwUnregister);
-
-            let mut wpp_reg: *mut WPP_TRACE_CONTROL_BLOCK =
-                control_blocks_ptr.cast::<WPP_TRACE_CONTROL_BLOCK>();
-
-            while !wpp_reg.is_null() {
-                unsafe {
-                    (*wpp_reg).RegHandle = 0;
-                    let status = etw_register_provider(
-                        (*wpp_reg).ControlGuid,
-                        0,
-                        WppClassicProviderCallback,
-                        wpp_reg.cast::<core::ffi::c_void>(),
-                        &raw mut (*wpp_reg).RegHandle,
-                    );
-                    println!("EtwRegisterClassicProvider status: {status:?}");
-                    wpp_reg = (*wpp_reg).Next.cast_mut();
-                }
-            }
-        }
-
-        let wpp_trace_message = get_routine_addr!("WmiTraceMessage", WppTraceMessage);
-
-        let trace_config = TraceConfig {
-            control_blocks_ptr,
-            control_blocks,
-            wpp_trace_message,
-            etw_unregister,
-        };
-
-        WppWriter {
-            trace_config,
-            wdm_driver,
-            reg_path,
-        }
-    }
-
-    /// Starts WPP tracing.
-    pub fn start(&self) {
-        let cb = self.trace_config.control_blocks_ptr;
-        unsafe {
-            WPP_GLOBAL_Control = cb;
-            WppAutoLogStart(cb, self.wdm_driver, self.reg_path);
-            WPP_RECORDER_INITIALIZED = WPP_GLOBAL_Control;
-        }
-    }
-
-    /// Stops WPP tracing.
-    pub fn stop(&self) {
-        let cb = self.trace_config.control_blocks_ptr;
-        unsafe {
-            if let Some(etw_unregister) = self.trace_config.etw_unregister {
-                let mut wpp_reg: *mut WPP_TRACE_CONTROL_BLOCK =
-                    cb.cast::<WPP_TRACE_CONTROL_BLOCK>();
-
-                while !wpp_reg.is_null() {
-                    if (*wpp_reg).RegHandle != 0 {
-                        let status = etw_unregister((*wpp_reg).RegHandle);
-                        println!("EtwUnregister status: {status:?}");
-                        (*wpp_reg).RegHandle = 0;
-                    }
-                    wpp_reg = (*wpp_reg).Next.cast_mut();
-                }
-            }
-
-            WppAutoLogStop(cb, self.wdm_driver);
-
-            WPP_RECORDER_INITIALIZED = ptr::null_mut();
-            WPP_GLOBAL_Control = ptr::null_mut();
-        }
-    }
-
-    /// Checks if the specified flag is enabled in the control block at `control_index`.
-    #[inline]
-    pub fn is_flag_enabled(&self, control_index: usize, flags: u32) -> bool {
-        let control = unsafe { &self.trace_config.control_blocks[control_index].Control };
-        control.Logger != 0 && (control.Flags[( (0xFFFF & (flags-1) ) / 32) as usize] & (1 << ((flags-1) & 31))) != 0
-    }
-
-    /// Checks if `AutoLogVerboseEnabled` is set for the control block at `control_index`.
-    #[inline]
-    pub fn is_auto_log_verbose_enabled(&self, control_index: usize) -> bool {
-        let control = unsafe { &self.trace_config.control_blocks[control_index].Control };
-        control.AutoLogVerboseEnabled != 0
-    }
-
-    /// Checks if the passed level is enabled for the control block at `control_index`.
-    #[inline]
-    pub fn is_level_enabled(&self, control_index: usize, level: u8) -> bool {
-        let control = unsafe { &self.trace_config.control_blocks[control_index].Control };
-        control.Logger != 0 && level <= control.Level
-    }
-
-    // Pre-generated `trace_0`..`trace_8` inherent methods.
-    wpp_macros::define_trace_writer_methods!();
-}
-
-impl Drop for WppWriter {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-
-/// Safety: whatever state `WppWriter` stores
-/// in itself is never modified and is only
-/// passed to WPP functions which are thread safe
-unsafe impl Sync for WppWriter {}
-
-// ---------------------------------------------------------------------------
 // WPP control block types
 // ---------------------------------------------------------------------------
 
@@ -318,8 +159,7 @@ unsafe impl Sync for WppWriter {}
 #[repr(C)]
 pub union WPP_PROJECT_CONTROL_BLOCK {
     pub Control: mem::ManuallyDrop<WPP_TRACE_CONTROL_BLOCK>,
-    ReserveSpace: [UCHAR;
-        mem::size_of::<WPP_TRACE_CONTROL_BLOCK>()],
+    ReserveSpace: [UCHAR; mem::size_of::<WPP_TRACE_CONTROL_BLOCK>()],
 }
 
 #[repr(C)]
@@ -369,13 +209,6 @@ struct WPP_TRACE_ENABLE_CONTEXT {
     Level: UCHAR,
     InternalFlag: UCHAR,
     EnableFlags: ULONG,
-}
-
-pub(crate) struct TraceConfig {
-    pub(crate) control_blocks_ptr: *mut WPP_PROJECT_CONTROL_BLOCK,
-    pub(crate) control_blocks: &'static [WPP_PROJECT_CONTROL_BLOCK],
-    pub(crate) wpp_trace_message: Option<WppTraceMessage>,
-    pub(crate) etw_unregister: Option<EtwUnregister>,
 }
 
 type WMIENTRY_NEW = extern "C" fn(
@@ -433,67 +266,195 @@ unsafe extern "C" {
     );
 }
 
-extern "C" fn WppClassicProviderCallback(
-    _Guid: LPCGUID,
-    ControlCode: UCHAR,
-    EnableContext: PVOID,
-    CallbackContext: PVOID,
-) {
-    let trace_cb = CallbackContext.cast::<WPP_TRACE_CONTROL_BLOCK>();
-    let trace_context = EnableContext.cast::<WPP_TRACE_ENABLE_CONTEXT>();
-
-    if ControlCode != TraceControlCode::Enable as u8 && ControlCode != TraceControlCode::Disable as u8 {
-        return;
-    }
-
-    unsafe {
-        if ControlCode != TraceControlCode::Disable as u8 {
-            (*trace_cb).Flags[0] = (*trace_context).EnableFlags;
-            (*trace_cb).Level = (*trace_context).Level as UCHAR;
-            (*trace_cb).Logger = *(trace_context.cast::<TRACEHANDLE>());
-
-            imp_WppRecorderReplay(
-                WPP_GLOBAL_Control.cast(),
-                (*trace_cb).Logger,
-                (*trace_context).EnableFlags,
-                (*trace_context).Level,
-            );
-        } else {
-            (*trace_cb).Level = 0;
-            (*trace_cb).Flags[0] = 0;
-            (*trace_cb).Logger = 0;
-        }
-    }
-}
+// ---------------------------------------------------------------------------
+// WPP_TRACE_OPTIONS
+// ---------------------------------------------------------------------------
 
 // Trace options used by WPP tracing - exposed for macro use
+// These are defined in evntrace.h as follows:
+// #define TRACE_MESSAGE_SEQUENCE              1
+// #define TRACE_MESSAGE_GUID                  2
+// #define TRACE_MESSAGE_COMPONENTID           4
+// #define TRACE_MESSAGE_TIMESTAMP             8
+// #define TRACE_MESSAGE_PERFORMANCE_TIMESTAMP 16
+// #define TRACE_MESSAGE_SYSTEMINFO            32
 const TRACE_MESSAGE_SEQUENCE: ULONG = 1;
 const TRACE_MESSAGE_GUID: ULONG = 2;
 const TRACE_MESSAGE_SYSTEMINFO: ULONG = 32;
 const TRACE_MESSAGE_TIMESTAMP: ULONG = 8;
 
 #[doc(hidden)]
-pub const WPP_TRACE_OPTIONS: ULONG = TRACE_MESSAGE_SEQUENCE 
-                                    | TRACE_MESSAGE_GUID 
-                                    | TRACE_MESSAGE_SYSTEMINFO 
-                                    | TRACE_MESSAGE_TIMESTAMP;
+pub const WPP_TRACE_OPTIONS: ULONG = TRACE_MESSAGE_SEQUENCE
+    | TRACE_MESSAGE_GUID
+    | TRACE_MESSAGE_SYSTEMINFO
+    | TRACE_MESSAGE_TIMESTAMP;
 
 // ---------------------------------------------------------------------------
-// WPP_WRITER static + accessor functions
+// WppProvider — one instance per control block
 // ---------------------------------------------------------------------------
 
-static WPP_WRITER: UnsafeOnceCell<WppWriter> = UnsafeOnceCell::new();
+/// A WPP trace provider instance.
+///
+/// Each control block declaration produces one `WppProvider` with its own
+/// state for level, flags, logger handle, and auto-log context.  These
+/// fields are updated atomically by the ETW callback and read lock-free
+/// by the generated `trace_N` methods.
+pub struct WppProvider {
+    logger: AtomicU64,
+    level: AtomicU8,
+    flags: AtomicU32,
+    auto_log_context: AtomicPtr<core::ffi::c_void>,
+    auto_log_verbose_enabled: AtomicU16,
+    wpp_trace_message: Option<WppTraceMessage>,
+    etw_unregister: Option<EtwUnregister>,
+    control_block: *mut WPP_TRACE_CONTROL_BLOCK,
+}
 
-/// Initializes WPP tracing. Called from `call_safe_driver_entry` in `wdf`.
-///
-/// Creates a `WppWriter`, registers providers, starts tracing, and stores
-/// the writer in a global static.
-///
-/// # Safety
-///
-/// * `control_blocks` must point to a valid `WPP_MAIN_CB` array.
-/// * `num_controls` must match the array length.
-/// * Must be called from single-threaded DriverEntry context.
+impl WppProvider {
+    fn new(
+        control_block: *mut WPP_TRACE_CONTROL_BLOCK,
+        wpp_trace_message: Option<WppTraceMessage>,
+        etw_unregister: Option<EtwUnregister>,
+    ) -> Self {
+        Self {
+            logger: AtomicU64::new(0),
+            level: AtomicU8::new(0),
+            flags: AtomicU32::new(0),
+            auto_log_context: AtomicPtr::new(ptr::null_mut()),
+            auto_log_verbose_enabled: AtomicU16::new(0),
+            wpp_trace_message,
+            etw_unregister,
+            control_block,
+        }
+    }
+
+    /// Returns `true` if the given flag bit is enabled.
+    #[inline]
+    pub fn is_flag_enabled(&self, flags: u32) -> bool {
+        self.logger.load(Ordering::Relaxed) != 0
+            && (self.flags.load(Ordering::Relaxed) & (1 << ((flags - 1) & 31))) != 0
+    }
+
+    /// Returns `true` if the given level is at or below the enabled level.
+    #[inline]
+    pub fn is_level_enabled(&self, level: u8) -> bool {
+        self.logger.load(Ordering::Relaxed) != 0
+            && level <= self.level.load(Ordering::Relaxed)
+    }
+
+    /// Returns `true` if auto-log verbose mode is enabled.
+    #[inline]
+    pub fn is_auto_log_verbose_enabled(&self) -> bool {
+        self.auto_log_verbose_enabled.load(Ordering::Relaxed) != 0
+    }
+
+    /// Returns the auto-log context pointer for WppAutoLogTrace calls.
+    #[doc(hidden)]
+    #[inline]
+    pub fn get_auto_log_context(&self) -> PVOID {
+        self.auto_log_context.load(Ordering::Relaxed)
+    }
+
+    /// Returns the TRACEHANDLE logger.
+    #[doc(hidden)]
+    #[inline]
+    pub fn get_wpp_logger(&self) -> TRACEHANDLE {
+        self.logger.load(Ordering::Relaxed)
+    }
+
+    /// Returns the WppTraceMessage function pointer, if resolved.
+    #[doc(hidden)]
+    #[inline]
+    pub fn get_wpp_trace_message(&self) -> Option<WppTraceMessage> {
+        self.wpp_trace_message
+    }
+
+    // Pre-generated `trace_0`..`trace_8` inherent methods.
+    wpp_macros::define_trace_writer_methods!();
+}
+
+// SAFETY: All mutable state in WppProvider uses atomics.  The raw pointer
+// `control_block` points to a static that outlives the driver.
+unsafe impl Sync for WppProvider {}
+
+// ---------------------------------------------------------------------------
+// WppClassicProviderCallback — updates BOTH provider + control block
+// ---------------------------------------------------------------------------
+
+extern "C" fn WppClassicProviderCallback(
+    _Guid: LPCGUID,
+    ControlCode: UCHAR,
+    EnableContext: PVOID,
+    CallbackContext: PVOID,
+) {
+    let provider = CallbackContext.cast::<WppProvider>();
+    let trace_context = EnableContext.cast::<WPP_TRACE_ENABLE_CONTEXT>();
+
+    if ControlCode != TraceControlCode::Enable as u8
+        && ControlCode != TraceControlCode::Disable as u8
+    {
+        return;
+    }
+
+    unsafe {
+        let cb = (*provider).control_block;
+
+        if ControlCode != TraceControlCode::Disable as u8 {
+            let enable_flags = (*trace_context).EnableFlags;
+            let enable_level = (*trace_context).Level as UCHAR;
+            let logger = *(trace_context.cast::<TRACEHANDLE>());
+
+            (*provider).flags.store(enable_flags, Ordering::Release);
+            (*provider).level.store(enable_level, Ordering::Release);
+            (*provider).logger.store(logger, Ordering::Release);
+
+            (*cb).Flags[0] = enable_flags;
+            (*cb).Level = enable_level;
+            (*cb).Logger = logger;
+
+            // TODO: This should be called only when (NTDDI_VERSION >= NTDDI_WIN10_RS1)
+            imp_WppRecorderReplay(
+                WPP_GLOBAL_Control.cast(),
+                logger,
+                enable_flags,
+                enable_level,
+            );
+        } else {
+            (*provider).flags.store(0, Ordering::Release);
+            (*provider).level.store(0, Ordering::Release);
+            (*provider).logger.store(0, Ordering::Release);
+
+            (*cb).Flags[0] = 0;
+            (*cb).Level = 0;
+            (*cb).Logger = 0;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Global tracing state
+// ---------------------------------------------------------------------------
+
+struct WppTracingState {
+    providers: alloc::boxed::Box<[WppProvider]>,
+    control_blocks_ptr: *mut WPP_PROJECT_CONTROL_BLOCK,
+    wdm_driver: *mut DRIVER_OBJECT,
+    #[allow(dead_code)]
+    reg_path: PCUNICODE_STRING,
+}
+
+// SAFETY: The raw pointers inside WppTracingState point to statics / kernel
+// objects that outlive the driver and are only mutated under WPP's own
+// serialization guarantees.
+unsafe impl Sync for WppTracingState {}
+
+static WPP_STATE: UnsafeOnceCell<WppTracingState> = UnsafeOnceCell::new();
+
+// ---------------------------------------------------------------------------
+// Public API — init / cleanup / get_provider
+// ---------------------------------------------------------------------------
+
+/// Initialises WPP tracing.  Called from `call_safe_driver_entry` in `wdf`.
 #[doc(hidden)]
 pub unsafe fn init_tracing(
     control_blocks: *mut WPP_PROJECT_CONTROL_BLOCK,
@@ -501,47 +462,107 @@ pub unsafe fn init_tracing(
     wdm_driver: *mut DRIVER_OBJECT,
     reg_path: PCUNICODE_STRING,
 ) {
-    let writer = unsafe { WppWriter::init(control_blocks, num_controls, wdm_driver, reg_path) };
-    writer.start();
-    // SAFETY: Single-threaded DriverEntry context.
-    unsafe { WPP_WRITER.set(writer); }
-}
+    let etw_register = get_routine_addr!("EtwRegisterClassicProvider", EtwRegisterClassicProvider);
+    let etw_unregister = if etw_register.is_some() {
+        get_routine_addr!("EtwUnregister", EtwUnregister)
+    } else {
+        None
+    };
+    let wpp_trace_message = get_routine_addr!("WmiTraceMessage", WppTraceMessage);
 
-/// Stops WPP tracing. Called from `wdf_driver_unload` in `wdf`.
-#[doc(hidden)]
-pub fn cleanup_tracing() {
-    if let Some(writer) =
-        // SAFETY: Not concurrent with set — called during driver unload.
-        unsafe { WPP_WRITER.get() }
-    {
-        writer.stop();
+    let mut providers_vec = alloc::vec::Vec::with_capacity(num_controls);
+    let mut wpp_reg: *mut WPP_TRACE_CONTROL_BLOCK =
+        control_blocks.cast::<WPP_TRACE_CONTROL_BLOCK>();
+
+    while !wpp_reg.is_null() {
+        unsafe {
+            providers_vec.push(WppProvider::new(wpp_reg, wpp_trace_message, etw_unregister));
+            wpp_reg = (*wpp_reg).Next.cast_mut();
+        }
+    }
+
+    let providers: alloc::boxed::Box<[WppProvider]> = providers_vec.into_boxed_slice();
+
+    if let Some(etw_register_provider) = etw_register {
+        for provider in providers.iter() {
+            unsafe {
+                let cb = provider.control_block;
+                (*cb).RegHandle = 0;
+                let status = etw_register_provider(
+                    (*cb).ControlGuid,
+                    0,
+                    WppClassicProviderCallback,
+                    (provider as *const WppProvider).cast_mut().cast(),
+                    &raw mut (*cb).RegHandle,
+                );
+                println!("EtwRegisterClassicProvider status: {status:?}");
+            }
+        }
+    }
+
+    unsafe {
+        WPP_GLOBAL_Control = control_blocks;
+        WppAutoLogStart(control_blocks, wdm_driver, reg_path);
+        WPP_RECORDER_INITIALIZED = WPP_GLOBAL_Control;
+    }
+
+    let primary_ctx = if !providers.is_empty() {
+        unsafe { &*providers[0].control_block }.AutoLogContext
+    } else {
+        ptr::null_mut()
+    };
+
+    for provider in providers.iter() {
+        let cb = unsafe { &*provider.control_block };
+        let ctx = if cb.AutoLogContext.is_null() {
+            primary_ctx
+        } else {
+            cb.AutoLogContext
+        };
+        provider.auto_log_context.store(ctx, Ordering::Release);
+        provider
+            .auto_log_verbose_enabled
+            .store(cb.AutoLogVerboseEnabled, Ordering::Release);
+    }
+
+    let state = WppTracingState {
+        providers,
+        control_blocks_ptr: control_blocks,
+        wdm_driver,
+        reg_path,
+    };
+    unsafe {
+        WPP_STATE.set(state);
     }
 }
 
-/// Returns a reference to the WPP writer, if initialized.
-pub fn get_wpp_writer() -> Option<&'static WppWriter> {
+/// Stops WPP tracing.  Called from `wdf_driver_unload`.
+#[doc(hidden)]
+pub fn cleanup_tracing() {
+    if let Some(state) = unsafe { WPP_STATE.get() } {
+        for provider in state.providers.iter() {
+            if let Some(etw_unregister) = provider.etw_unregister {
+                let reg_handle = unsafe { (*provider.control_block).RegHandle };
+                if reg_handle != 0 {
+                    let status = etw_unregister(reg_handle);
+                    println!("EtwUnregister status: {status:?}");
+                    unsafe {
+                        (*provider.control_block).RegHandle = 0;
+                    }
+                }
+            }
+        }
+
+        unsafe {
+            WppAutoLogStop(state.control_blocks_ptr, state.wdm_driver);
+            WPP_RECORDER_INITIALIZED = ptr::null_mut();
+            WPP_GLOBAL_Control = ptr::null_mut();
+        }
+    }
+}
+
+/// Returns a reference to the provider at `index`, if tracing is initialised.
+pub fn get_provider(index: usize) -> Option<&'static WppProvider> {
     // SAFETY: Not concurrent with set — set runs once in DriverEntry.
-    unsafe { WPP_WRITER.get() }
-}
-
-/// Returns the AutoLogContext pointer for WppAutoLogTrace calls.
-#[doc(hidden)]
-pub unsafe fn get_auto_log_context() -> Option<PVOID> {
-    get_wpp_writer().map(|tw| {
-        unsafe { &tw.trace_config.control_blocks[0].Control }.AutoLogContext
-    })
-}
-
-/// Returns the TRACEHANDLE logger for WPP tracing.
-#[doc(hidden)]
-pub unsafe fn get_wpp_logger() -> Option<TRACEHANDLE> {
-    get_wpp_writer().map(|tw| {
-        unsafe { &tw.trace_config.control_blocks[0].Control }.Logger
-    })
-}
-
-/// Returns the WppTraceMessage function pointer for WPP tracing.
-#[doc(hidden)]
-pub unsafe fn get_wpp_trace_message() -> Option<WppTraceMessage> {
-    get_wpp_writer().and_then(|tw| tw.trace_config.wpp_trace_message)
+    unsafe { WPP_STATE.get() }.and_then(|state| state.providers.get(index))
 }

@@ -7,7 +7,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 
 /// Core implementation: emits inherent `trace_0`..`trace_8` methods on
-/// `wpp::writer::WppWriter`.
+/// `wpp::writer::WppProvider`.
 pub(crate) fn define_trace_writer_methods_impl() -> TokenStream {
     const MAX_ARITY: usize = 8;
     let mut methods: Vec<proc_macro2::TokenStream> = Vec::with_capacity(MAX_ARITY + 1);
@@ -59,19 +59,21 @@ pub(crate) fn define_trace_writer_methods_impl() -> TokenStream {
                 #(#byte_bindings)*
                 unsafe {
                     if should_trace_wpp {
-                        let logger = crate::writer::get_wpp_logger().unwrap();
-                        let _ = crate::writer::get_wpp_trace_message().unwrap()(
-                            logger,
-                            crate::writer::WPP_TRACE_OPTIONS,
-                            trace_guid,
-                            id,
-                            #(#arg_pairs)*
-                            core::ptr::null::<core::ffi::c_void>(),
-                        );
+                        let logger = self.get_wpp_logger();
+                        if let Some(trace_message) = self.get_wpp_trace_message() {
+                            let _ = trace_message(
+                                logger,
+                                crate::writer::WPP_TRACE_OPTIONS,
+                                trace_guid,
+                                id,
+                                #(#arg_pairs)*
+                                core::ptr::null::<core::ffi::c_void>(),
+                            );
+                        }
                     }
 
                     if should_auto_log {
-                        let auto_log_context = crate::writer::get_auto_log_context().unwrap();
+                        let auto_log_context = self.get_auto_log_context();
                         let _ = crate::writer::WppAutoLogTrace(
                             auto_log_context,
                             level,
