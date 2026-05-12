@@ -21,12 +21,33 @@ use wdf::{
     NtStatus,
 };
 
+use core::fmt;
+
 extern crate alloc;
+
+/// Example custom struct with a manual `Display` implementation.
+/// The `trace!` macro serializes it via `%!DISPLAY!` using `TraceFmtBuf`.
+struct DeviceInfo {
+    vendor_id: u16,
+    device_id: u16,
+    revision: u8,
+}
+
+impl fmt::Display for DeviceInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{{vendor_id=0x{:04X}, device_id=0x{:04X}, revision={}}}",
+            self.vendor_id, self.device_id, self.revision
+        )
+    }
+}
 
 /// Two trace providers:
 ///   - SampleKmdfSafe  (FLAG_ONE, FLAG_TWO): general driver lifecycle
 ///   - SampleKmdfDiag  (FLAG_PERF, FLAG_IO, FLAG_STATE): diagnostics
-#[driver_entry(trace_control = ("SampleKmdfSafe", "cb94defb-592a-4509-8f2e-54f204929669", [FLAG_ONE, FLAG_TWO]), ("SampleKmdfDiag", "a1b2c3d4-e5f6-7890-abcd-ef1234567890", [FLAG_PERF, FLAG_IO, FLAG_STATE]))]
+#[driver_entry(trace_control = ("SampleKmdfSafe", "cb94defb-592a-4509-8f2e-54f204929669", [FLAG_ONE, FLAG_TWO]), 
+("SampleKmdfDiag", "a1b2c3d4-e5f6-7890-abcd-ef1234567890", [FLAG_PERF, FLAG_IO, FLAG_STATE]))]
 fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
     if cfg!(debug_assertions) {
         print_driver_version(driver)?;
@@ -206,6 +227,11 @@ fn driver_entry(driver: &mut Driver, _registry_path: &str) -> NtResult<()> {
         val_i32, val_u64, flag_on, msg);
     trace!(FLAG_TWO, Information, "mixed: status=%!STATUS! u32=%u i16=%hd ptr=%p",
         status, val_u32, val_i16, val_usize);
+
+    // --- Custom Display type (%!DISPLAY!) --------------------------------
+    let dev = DeviceInfo { vendor_id: 0x8086, device_id: 0x1234, revision: 3 };
+    trace!(FLAG_ONE, "device: %!DISPLAY!", dev);
+    trace!(FLAG_ONE, "status=%!STATUS!, device=%!DISPLAY!", status, dev);
 
     // --- Second trace provider (SampleKmdfDiag) --------------------------
     trace!(FLAG_PERF, "perf: init latency = %d us", 200i32);
