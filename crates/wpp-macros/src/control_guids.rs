@@ -149,20 +149,15 @@ fn parse_guid_parts(s: &str) -> core::result::Result<GuidParts, String> {
 
 pub fn generate(input: TokenStream) -> Result<TokenStream> {
     let parsed: ControlGuidsInput = syn::parse2(input)?;
-    let provider_count = parsed.providers.len();
     let mut output = TokenStream::new();
+
+    validate_unique_keywords(&parsed.providers)?;
 
     for (idx, provider) in parsed.providers.iter().enumerate() {
         output.extend(generate_provider_module(provider, idx));
     }
-    for provider in &parsed.providers {
-        let macro_name = if provider_count == 1 {
-            format_ident!("trace")
-        } else {
-            format_ident!("{}_trace", provider.name)
-        };
-        output.extend(generate_trace_macro(&macro_name, provider));
-    }
+    output.extend(generate_wpp_flag_enum(&parsed.providers));
+    output.extend(generate_unified_trace_macro(&parsed.providers));
     output.extend(generate_level_macro());
     output.extend(generate_ifr_init(&parsed.providers));
     Ok(output)
@@ -210,6 +205,8 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
             /// Index of this provider's control block in the IFR CB array.
             pub const CB_INDEX: usize = #cb_index_lit;
             #(#kw_consts)*
+            #[doc(hidden)]
+            pub const __WPP_NO_KEYWORD: u64 = 0;
             pub static STATE: ::wpp::ProviderState = ::wpp::ProviderState::new();
 
             /// Initializes this provider: emits PDB annotation, registers with
@@ -270,38 +267,262 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
     }
 }
 
-fn generate_trace_macro(macro_name: &Ident, provider: &ProviderDecl) -> TokenStream {
-    let mod_name = &provider.name;
-    let provider_name_str = provider.name.to_string();
-    let guid_str = &provider.guid_str;
-    let dollar = proc_macro2::Punct::new('$', proc_macro2::Spacing::Alone);
+fn validate_unique_keywords(providers: &[ProviderDecl]) -> Result<()> {
+    let mut seen = std::collections::HashMap::<String, String>::new();
+    for p in providers {
+        for kw in &p.keywords {
+            let name = kw.name.to_string();
+            if let Some(prev_provider) = seen.insert(name.clone(), p.name.to_string()) {
+                return Err(syn::Error::new(
+                    kw.name.span(),
+                    format!(
+                        "keyword '{}' is defined in both '{}' and '{}'; \
+                         keywords must be unique across all providers",
+                        name, prev_provider, p.name
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Generates the `TraceLevel` and `WppFlag` enums.
+///
+/// `WppFlag` follows the reference implementation: each variant carries
+/// `(control_idx, flag_idx)` and provides `control_index()`, `flag_index()`,
+/// `as_tuple()`, `by_name()`, `all()`, `count()`.
+fn generate_wpp_flag_enum(providers: &[ProviderDecl]) -> TokenStream {
+    let has_flags = providers.iter().any(|p| !p.keywords.is_empty());
+
+    struct VariantInfo {
+        variant_ident: Ident,
+        flag_name: String,
+        control_idx: usize,
+        flag_idx: usize,
+    }
+
+    let variants: Vec<VariantInfo> = providers
+        .iter()
+        .enumerate()
+        .flat_map(|(control_idx, p)| {
+            p.keywords
+                .iter()
+                .enumerate()
+                .map(move |(flag_idx, kw)| VariantInfo {
+                    variant_ident: kw.name.clone(),
+                    flag_name: kw.name.to_string(),
+                    control_idx,
+                    flag_idx,
+                })
+        })
+        .collect();
+
+    let enum_variants: Vec<TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            quote! { #ident(usize, usize) }
+        })
+        .collect();
+
+    let name_match_arms: Vec<TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            let name = &v.flag_name;
+            let ctrl_idx = proc_macro2::Literal::usize_unsuffixed(v.control_idx);
+            let flag_idx = proc_macro2::Literal::usize_unsuffixed(v.flag_idx);
+            quote! { #name => Some(WppFlag::#ident(#ctrl_idx, #flag_idx)) }
+        })
+        .collect();
+
+    let static_entries: Vec<TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            let ctrl_idx = proc_macro2::Literal::usize_unsuffixed(v.control_idx);
+            let flag_idx = proc_macro2::Literal::usize_unsuffixed(v.flag_idx);
+            quote! { WppFlag::#ident(#ctrl_idx, #flag_idx) }
+        })
+        .collect();
+
+    let control_idx_arms: Vec<TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            quote! { WppFlag::#ident(ctrl, _) => *ctrl }
+        })
+        .collect();
+
+    let flag_idx_arms: Vec<TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            quote! { WppFlag::#ident(_, flag) => *flag }
+        })
+        .collect();
+
+    let tuple_arms: Vec<TokenStream> = variants
+        .iter()
+        .map(|v| {
+            let ident = &v.variant_ident;
+            quote! { WppFlag::#ident(ctrl, flag) => (*ctrl, *flag) }
+        })
+        .collect();
+
+    let num_flags = variants.len();
+
+    // TraceLevel is always generated; WppFlag only when flags exist
+    let wpp_flag_block = if has_flags {
+        quote! {
+            #[allow(missing_docs)]
+            #[allow(non_camel_case_types)]
+            #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+            #[repr(C)]
+            pub enum WppFlag {
+                #(#enum_variants),*
+            }
+
+            impl WppFlag {
+                #[inline]
+                pub const fn control_index(&self) -> usize {
+                    match self { #(#control_idx_arms),* }
+                }
+
+                #[inline]
+                pub const fn flag_index(&self) -> usize {
+                    match self { #(#flag_idx_arms),* }
+                }
+
+                #[inline]
+                pub const fn as_tuple(&self) -> (usize, usize) {
+                    match self { #(#tuple_arms),* }
+                }
+
+                #[inline]
+                pub fn by_name(name: &str) -> Option<WppFlag> {
+                    match name {
+                        #(#name_match_arms,)*
+                        _ => None
+                    }
+                }
+
+                #[inline]
+                pub const fn all() -> &'static [WppFlag] {
+                    &[#(#static_entries),*]
+                }
+
+                #[inline]
+                pub const fn count() -> usize { #num_flags }
+            }
+        }
+    } else {
+        quote! {}
+    };
 
     quote! {
-        #[macro_export]
-        macro_rules! #macro_name {
-            (#dollar level:ident, #dollar kw:ident, #dollar fmt:literal #dollar(, #dollar arg:expr)*) => {{
+        #[allow(missing_docs)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[repr(u8)]
+        pub enum TraceLevel {
+            None = 0,
+            Critical = 1,
+            Error = 2,
+            Warning = 3,
+            Information = 4,
+            Verbose = 5,
+            Reserved6 = 6,
+            Reserved7 = 7,
+            Reserved8 = 8,
+            Reserved9 = 9,
+        }
+
+        impl TraceLevel {
+            #[inline]
+            pub const fn value(&self) -> u8 { *self as u8 }
+
+            #[inline]
+            pub const fn is_verbose_or_below(&self) -> bool {
+                (*self as u8) <= (TraceLevel::Verbose as u8)
+            }
+        }
+
+        #wpp_flag_block
+    }
+}
+
+/// Generates a single unified `trace!` macro with one arm per keyword.
+///
+/// Each keyword is matched literally and routes to the correct provider.
+/// A default arm (no keyword) routes to the first provider with keyword=0.
+fn generate_unified_trace_macro(providers: &[ProviderDecl]) -> TokenStream {
+    let dollar = proc_macro2::Punct::new('$', proc_macro2::Spacing::Alone);
+
+    // Build one arm per keyword across all providers
+    let mut arms: Vec<TokenStream> = Vec::new();
+    for provider in providers {
+        let mod_name = &provider.name;
+        let provider_name_str = provider.name.to_string();
+        let guid_str = &provider.guid_str;
+
+        for kw in &provider.keywords {
+            let kw_name = &kw.name;
+            arms.push(quote! {
+                (#dollar level:ident, #kw_name, #dollar fmt:literal #dollar(, #dollar arg:expr)*) => {{
+                    const __WPP_LEVEL: u8 = __wpp_level_to_u8!(#dollar level);
+                    let __wpp_kw_val: u64 = #dollar crate::#mod_name::#kw_name;
+                    if #dollar crate::#mod_name::STATE.is_enabled(__WPP_LEVEL, __wpp_kw_val) {
+                        ::wpp::__wpp_trace_impl!(
+                            @provider_mod #dollar crate::#mod_name,
+                            @provider_name #provider_name_str,
+                            @guid #guid_str,
+                            @level __WPP_LEVEL,
+                            @level_name #dollar level,
+                            @keyword #kw_name,
+                            @fmt #dollar fmt
+                            #dollar(, #dollar arg)*
+                        );
+                    }
+                }};
+            });
+        }
+    }
+
+    // Default arm: no keyword → first provider, keyword = 0
+    if let Some(first) = providers.first() {
+        let mod_name = &first.name;
+        let provider_name_str = first.name.to_string();
+        let guid_str = &first.guid_str;
+
+        arms.push(quote! {
+            (#dollar level:ident, #dollar fmt:literal #dollar(, #dollar arg:expr)*) => {{
                 const __WPP_LEVEL: u8 = __wpp_level_to_u8!(#dollar level);
-                let __wpp_kw_val: u64 = #dollar crate::#mod_name::#dollar kw;
-                if #dollar crate::#mod_name::STATE.is_enabled(__WPP_LEVEL, __wpp_kw_val) {
+                if #dollar crate::#mod_name::STATE.is_enabled(__WPP_LEVEL, 0) {
                     ::wpp::__wpp_trace_impl!(
                         @provider_mod #dollar crate::#mod_name,
                         @provider_name #provider_name_str,
                         @guid #guid_str,
                         @level __WPP_LEVEL,
                         @level_name #dollar level,
-                        @keyword #dollar kw,
+                        @keyword __WPP_NO_KEYWORD,
                         @fmt #dollar fmt
                         #dollar(, #dollar arg)*
                     );
                 }
             }};
+        });
+    }
+
+    quote! {
+        macro_rules! trace {
+            #(#arms)*
         }
     }
 }
 
 fn generate_level_macro() -> TokenStream {
     quote! {
-        #[macro_export]
         macro_rules! __wpp_level_to_u8 {
             (CRITICAL) => { 1u8 };
             (ERROR)    => { 2u8 };
