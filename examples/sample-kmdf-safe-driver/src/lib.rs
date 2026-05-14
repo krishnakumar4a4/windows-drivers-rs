@@ -57,6 +57,11 @@ wpp_control_guids!(
     SampleDriver cb94defb-592a-4509-8f2e-54f204929669 {
         GENERAL,
     }
+    PnpTracer a1b2c3d4-e5f6-7890-abcd-ef1234567890 {
+        PNP,
+        POWER,
+        IO,
+    }
 );
 
 /// Context object to be attached to a queue
@@ -99,7 +104,7 @@ struct TimerContext {
 /// * `registry_path` - Represents the driver specific path in the Registry.
 /// The function driver can use the path to store driver related data between
 /// reboots. The path does not store hardware instance specific data.
-#[driver_entry(trace_providers(SampleDriver))]
+#[driver_entry(trace_providers(SampleDriver, PnpTracer))]
 fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString) -> NtResult<()> {
     let config = DriverConfig::new(evt_device_add);
     let driver = Driver::create(driver_object, registry_path, config)?;
@@ -109,7 +114,10 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
     }
 
     let msg = "rust for drivers";
-    trace!(INFO, GENERAL, "Safe Rust driver entry complete. Int: {}, Str: {}", 42, msg);
+    SampleDriver_trace!(INFO, GENERAL, "Safe Rust driver entry complete. Int: {}, Str: {}", 42, msg);
+
+    PnpTracer_trace!(VERBOSE, PNP, "PnP subsystem initialized");
+    PnpTracer_trace!(WARNING, IO, "IO path ready, max write: {}", MAX_WRITE_LENGTH);
 
     Ok(())
 }

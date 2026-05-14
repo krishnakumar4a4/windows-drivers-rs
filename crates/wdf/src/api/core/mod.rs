@@ -13,13 +13,6 @@ pub mod result;
 pub mod string;
 pub mod sync;
 pub mod timer;
-// TODO: Support tracing for UMDF drivers. Currently gated to KMDF because it
-// depends on KM-only symbols (DRIVER_OBJECT typedef, REGHANDLE, TRACEHANDLE,
-// MmGetSystemRoutineAddress, WmiTraceMessage, etc.) that are not generated in
-// UMDF bindings since windows.h doesn't include the ETW headers (evntprov.h,
-// evntrace.h).
-#[cfg(driver_model__driver_type = "KMDF")]
-pub mod tracing;
 pub mod work_item;
 
 use core::time::Duration;
