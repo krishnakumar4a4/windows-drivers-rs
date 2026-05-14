@@ -5,36 +5,21 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Error, Ident, ItemFn, ItemStruct, Lit, Token, meta::parser, parse::Parse, parse_macro_input};
+use syn::{Error, Ident, ItemFn, ItemStruct, Token, meta::parser, parse::Parse, parse_macro_input};
 
 /// A procedural macro used to mark the entry point of a WDF driver
 #[proc_macro_attribute]
 pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
-    const TRACING_CONTROL_GUID_ATTR_NAME: &str = "tracing_control_guid";
     const TRACE_PROVIDERS_ATTR_NAME: &str = "trace_providers";
 
     let input_clone = input.clone();
     let item_fn = parse_macro_input!(input_clone as ItemFn);
     let safe_driver_entry = item_fn.sig.ident;
 
-    let mut tracing_control_guid_str: Option<String> = None;
     let mut trace_provider_paths: Vec<syn::Path> = Vec::new();
 
     let attr_parser = parser(|meta| {
-        if meta.path.is_ident(TRACING_CONTROL_GUID_ATTR_NAME) {
-            let Lit::Str(guid_str_expr) = meta.value()?.parse()? else {
-                return Err(meta.error("Expected tracing control GUID"));
-            };
-
-            let guid_str = guid_str_expr.value();
-
-            if !is_valid_guid(&guid_str) {
-                return Err(Error::new_spanned(guid_str_expr, "Not a valid GUID"));
-            }
-
-            tracing_control_guid_str = Some(guid_str);
-            Ok(())
-        } else if meta.path.is_ident(TRACE_PROVIDERS_ATTR_NAME) {
+        if meta.path.is_ident(TRACE_PROVIDERS_ATTR_NAME) {
             let content;
             syn::parenthesized!(content in meta.input);
             let paths = content.parse_terminated(syn::Path::parse, Token![,])?;
@@ -42,61 +27,73 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
             Ok(())
         } else {
             Err(meta.error(format!(
-                "Expected `{TRACING_CONTROL_GUID_ATTR_NAME}` or `{TRACE_PROVIDERS_ATTR_NAME}`"
+                "Expected `{TRACE_PROVIDERS_ATTR_NAME}`"
             )))
         }
     });
 
     parse_macro_input!(args with attr_parser);
 
-    let parse_tracing_control_guid = tracing_control_guid_str.map_or_else(
-        || {
-            quote! {
-                None
-            }
-        },
-        |s| {
-            quote! {
-                Some(wdf::Guid::parse(#s).expect("Not a valid GUID"))
-            }
-        },
-    );
-
     // Generate WPP provider init/cleanup if trace_providers specified
-    let (wpp_init_calls, wpp_cleanup_param) = if trace_provider_paths.is_empty() {
-        (quote! {}, quote! { None })
-    } else {
-        let init_calls: Vec<proc_macro2::TokenStream> = trace_provider_paths
-            .iter()
-            .map(|p| quote! { unsafe { #p::init(); } })
-            .collect();
+    let num_providers = trace_provider_paths.len();
 
-        // Generate cleanup calls in reverse order
+    let (wpp_cleanup_param, ifr_block) = if trace_provider_paths.is_empty() {
+        (quote! { None }, quote! {})
+    } else {
+        // Cleanup: IFR stop + provider clean_up in reverse order
         let cleanup_calls: Vec<proc_macro2::TokenStream> = trace_provider_paths
             .iter()
             .rev()
             .map(|p| quote! { #p::clean_up(); })
             .collect();
 
-        let init_block = quote! { #(#init_calls)* };
         let cleanup_fn = quote! {
             fn __wpp_cleanup() {
+                __wpp_ifr_cleanup();
                 #(#cleanup_calls)*
             }
             Some(__wpp_cleanup as fn())
         };
 
-        (init_block, cleanup_fn)
+        // Init block: phase (a) create CBs → provider inits → phase (b) start IFR
+        let init_calls: Vec<proc_macro2::TokenStream> = trace_provider_paths
+            .iter()
+            .map(|p| quote! { unsafe { #p::init(); } })
+            .collect();
+
+        let state_refs: Vec<proc_macro2::TokenStream> = trace_provider_paths
+            .iter()
+            .map(|p| quote! { &#p::STATE })
+            .collect();
+
+        let ifr = quote! {
+            {
+                // Phase (a): create CB array + link Next pointers
+                let (__wpp_cb, __wpp_num) = __wpp_ifr_create_cbs();
+                // Provider inits — each sets ControlGuid on its own CB
+                #(#init_calls)*
+                // Phase (b): start IFR auto-log recorder
+                let __wpp_states: [&::wpp::ProviderState; #num_providers] =
+                    [#(#state_refs),*];
+                __wpp_ifr_start(
+                    __wpp_cb,
+                    driver as *mut ::wdf::DRIVER_OBJECT as *mut core::ffi::c_void,
+                    registry_path as *const _ as *const core::ffi::c_void,
+                    &__wpp_states,
+                );
+            }
+        };
+
+        (cleanup_fn, ifr)
     };
 
     let mut wrappers: TokenStream = quote! {
         #[unsafe(link_section = "INIT")]
-        #[unsafe(export_name = "DriverEntry")] // WDF expects a symbol with the name DriverEntry
+        #[unsafe(export_name = "DriverEntry")]
         extern "system" fn __driver_entry(driver: &mut ::wdf::DRIVER_OBJECT, registry_path: ::wdf::PCUNICODE_STRING,) -> ::wdf::NTSTATUS {
-            #wpp_init_calls
-            let tracing_control_guid = #parse_tracing_control_guid;
+            #ifr_block
             let wpp_cleanup = { #wpp_cleanup_param };
-            ::wdf::call_safe_driver_entry(driver, registry_path, #safe_driver_entry, tracing_control_guid, wpp_cleanup)
+            ::wdf::call_safe_driver_entry(driver, registry_path, #safe_driver_entry, wpp_cleanup)
         }
     }
     .into();
@@ -285,35 +282,4 @@ fn object_context_impl(
     }
 
     expanded.into()
-}
-
-// TODO: this code is repeated in the wdf::Guid.
-// Move it to a common location
-fn is_valid_guid(guid_str: &str) -> bool {
-    // Remove dashes from the input string
-    let guid_str = guid_str.replace('-', "");
-
-    if guid_str.len() != 32 {
-        return false;
-    }
-
-    if u32::from_str_radix(&guid_str[0..8], 16).is_err() {
-        return false;
-    }
-
-    if u16::from_str_radix(&guid_str[8..12], 16).is_err() {
-        return false;
-    }
-
-    if u16::from_str_radix(&guid_str[12..16], 16).is_err() {
-        return false;
-    }
-
-    for i in 0..8 {
-        if u8::from_str_radix(&guid_str[16 + i * 2..18 + i * 2], 16).is_err() {
-            return false;
-        }
-    }
-
-    true
 }

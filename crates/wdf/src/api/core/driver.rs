@@ -1,5 +1,3 @@
-#[cfg(driver_model__driver_type = "KMDF")]
-use alloc::boxed::Box;
 use alloc::string::String;
 use core::ptr;
 use core::sync::atomic::{AtomicPtr, Ordering};
@@ -23,11 +21,8 @@ use wdk_sys::{
     call_unsafe_wdf_function_binding,
 };
 
-#[cfg(driver_model__driver_type = "KMDF")]
-use super::tracing::TraceWriter;
 use super::{
     device::DeviceInit,
-    guid::Guid,
     init_wdf_struct,
     object::{Handle, impl_handle},
     result::{NtResult, StatusCodeExt},
@@ -39,12 +34,6 @@ use crate::println;
 // for UMDF (although it is for KMDF) because relevant headers are not
 // included under UMDF currently. Needs a fix in wdk_sys
 pub type DRIVER_OBJECT = wdk_sys::_DRIVER_OBJECT;
-
-/// Global pointer to the heap-allocated `TraceWriter`.
-/// Written once during driver entry (before any concurrent access),
-/// read from `trace()` and `clean_up_tracing()` afterwards.
-#[cfg(driver_model__driver_type = "KMDF")]
-static TRACE_WRITER: AtomicPtr<TraceWriter> = AtomicPtr::new(ptr::null_mut());
 
 /// Global pointer to the WPP provider cleanup function.
 /// Set during driver entry, called during driver unload.
@@ -161,21 +150,6 @@ impl Driver {
     }
 }
 
-#[cfg(driver_model__driver_type = "KMDF")]
-fn clean_up_tracing() {
-    let ptr = TRACE_WRITER.swap(ptr::null_mut(), Ordering::Relaxed);
-    if !ptr.is_null() {
-        // SAFETY: The pointer was created from `Box::into_raw` and is
-        // only swapped out once here during driver unload.
-        let trace_writer = unsafe { Box::from_raw(ptr) };
-        trace_writer.stop();
-        // `trace_writer` is dropped here, deallocating the Box
-    }
-}
-
-#[cfg(not(driver_model__driver_type = "KMDF"))]
-fn clean_up_tracing() {}
-
 fn clean_up_wpp() {
     let ptr = WPP_CLEANUP_FN.swap(ptr::null_mut(), Ordering::Relaxed);
     if !ptr.is_null() {
@@ -195,7 +169,6 @@ pub fn call_safe_driver_entry(
     driver_object: &mut DRIVER_OBJECT,
     reg_path: PCUNICODE_STRING,
     safe_entry: fn(&mut DriverObject, &UnicodeString) -> NtResult<()>,
-    tracing_control_guid: Option<Guid>,
     wpp_cleanup: Option<fn()>,
 ) -> NTSTATUS {
     // SAFETY: `DriverObject` is `#[repr(transparent)]` over `DRIVER_OBJECT`,
@@ -207,20 +180,6 @@ pub fn call_safe_driver_entry(
     // so casting `PCUNICODE_STRING` to `&UnicodeString` preserves pointer identity.
     let registry_path: &UnicodeString = unsafe { &*(reg_path.cast::<UnicodeString>()) };
 
-    #[cfg(driver_model__driver_type = "KMDF")]
-    if let Some(control_guid) = tracing_control_guid {
-        let trace_writer =
-            unsafe { TraceWriter::init(control_guid, &mut driver_object.0, reg_path) };
-
-        trace_writer.start();
-
-        let ptr = Box::into_raw(Box::new(trace_writer));
-        TRACE_WRITER.store(ptr, Ordering::Relaxed);
-    }
-
-    #[cfg(not(driver_model__driver_type = "KMDF"))]
-    let _ = tracing_control_guid;
-
     // Store WPP cleanup function for driver_unload to call
     if let Some(cleanup) = wpp_cleanup {
         WPP_CLEANUP_FN.store(cleanup as *mut (), Ordering::Relaxed);
@@ -230,7 +189,6 @@ pub fn call_safe_driver_entry(
         Ok(()) => 0,
         Err(e) => {
             clean_up_wpp();
-            clean_up_tracing();
             e.code()
         }
     }
@@ -257,19 +215,6 @@ unsafe extern "C" fn driver_unload(_driver: WDFDRIVER) {
     println!("Driver unload");
 
     clean_up_wpp();
-    clean_up_tracing();
 
     println!("Driver unload done");
 }
-
-// TODO: Support tracing for UMDF drivers
-#[cfg(driver_model__driver_type = "KMDF")]
-pub fn trace(message: &str) {
-    let trace_writer = TRACE_WRITER.load(Ordering::Relaxed);
-    if !trace_writer.is_null() {
-        (unsafe { &*trace_writer }).write(message);
-    };
-}
-
-#[cfg(not(driver_model__driver_type = "KMDF"))]
-pub fn trace(_message: &str) {}

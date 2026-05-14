@@ -11,6 +11,8 @@
 pub mod etw;
 pub mod field;
 pub mod provider;
+#[cfg(feature = "kernel_mode")]
+pub mod ifr;
 
 pub use field::WppField;
 pub use provider::ProviderState;

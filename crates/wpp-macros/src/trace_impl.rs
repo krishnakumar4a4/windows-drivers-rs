@@ -132,6 +132,8 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
         (0..field_count).map(|i| format_ident!("T{}", i)).collect();
     let param_names: Vec<Ident> =
         (0..field_count).map(|i| format_ident!("__f{}", i)).collect();
+    let bytes_names: Vec<Ident> =
+        (0..field_count).map(|i| format_ident!("__b{}", i)).collect();
 
     let fn_params: Vec<TokenStream> = type_params
         .iter()
@@ -146,19 +148,24 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
         type_params.iter().map(|t| quote!(#t::TYPE_NAME)).collect();
     let call_args: Vec<TokenStream> = args.iter().map(|a| quote!(&#a)).collect();
 
-    let data_descriptors: Vec<TokenStream> = param_names
+    let data_descriptors: Vec<TokenStream> = bytes_names
         .iter()
-        .map(|p| {
+        .map(|b| {
             quote! {
-                {
-                    let __bytes = ::wpp::WppField::as_bytes(#p);
-                    ::wpp::etw::EVENT_DATA_DESCRIPTOR {
-                        Ptr: __bytes.as_ptr() as u64,
-                        Size: __bytes.len() as u32,
-                        Reserved: 0,
-                    }
+                ::wpp::etw::EVENT_DATA_DESCRIPTOR {
+                    Ptr: #b.as_ptr() as u64,
+                    Size: #b.len() as u32,
+                    Reserved: 0,
                 }
             }
+        })
+        .collect();
+
+    // IFR: byte pair arguments for WppAutoLogTrace variadic call
+    let ifr_arg_pairs: Vec<TokenStream> = bytes_names
+        .iter()
+        .map(|b| {
+            quote! { #b.as_ptr() as *const core::ffi::c_void, #b.len(), }
         })
         .collect();
 
@@ -180,6 +187,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
             __wpp_schema( #(#call_args),* );
 
             #(let #param_names = &#args;)*
+            #(let #bytes_names = ::wpp::WppField::as_bytes(#param_names);)*
 
             const __WPP_EVT_DESC: ::wpp::etw::EVENT_DESCRIPTOR = ::wpp::etw::EVENT_DESCRIPTOR {
                 Id: #event_id_lit, Version: 0, Channel: 0, Level: #level_expr,
@@ -198,6 +206,26 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                     __wpp_data.as_ptr(),
                 );
             }
+
+            // IFR: write to the In-Flight Recorder circular buffer
+            {
+                let __wpp_auto_ctx = #provider_mod::STATE.auto_log_context();
+                if !__wpp_auto_ctx.is_null() {
+                    let mut __wpp_ifr_guid = #provider_mod::CONTROL_GUID;
+                    unsafe {
+                        ::wpp::ifr::WppAutoLogTrace(
+                            __wpp_auto_ctx,
+                            #level_expr,
+                            (#provider_mod::#keyword_ident & 0xFFFF_FFFF) as u32,
+                            &mut __wpp_ifr_guid as *mut ::wpp::GUID
+                                as *mut core::ffi::c_void,
+                            #event_id_lit,
+                            #(#ifr_arg_pairs)*
+                            core::ptr::null::<core::ffi::c_void>(),
+                        );
+                    }
+                }
+            }
         }}
     } else {
         quote! {{
@@ -215,6 +243,25 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                 ::wpp::etw::write(
                     #provider_mod::STATE.reg_handle(), &__WPP_EVT_DESC, 0, core::ptr::null(),
                 );
+            }
+
+            // IFR: write to the In-Flight Recorder circular buffer
+            {
+                let __wpp_auto_ctx = #provider_mod::STATE.auto_log_context();
+                if !__wpp_auto_ctx.is_null() {
+                    let mut __wpp_ifr_guid = #provider_mod::CONTROL_GUID;
+                    unsafe {
+                        ::wpp::ifr::WppAutoLogTrace(
+                            __wpp_auto_ctx,
+                            #level_expr,
+                            (#provider_mod::#keyword_ident & 0xFFFF_FFFF) as u32,
+                            &mut __wpp_ifr_guid as *mut ::wpp::GUID
+                                as *mut core::ffi::c_void,
+                            #event_id_lit,
+                            core::ptr::null::<core::ffi::c_void>(),
+                        );
+                    }
+                }
             }
         }}
     };
