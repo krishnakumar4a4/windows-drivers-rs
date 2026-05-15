@@ -7,6 +7,9 @@
 //! with its own state for level, flags, logger handle, and auto-log context.
 //! The provider instances are stored in a global array initialised during
 //! `DriverEntry` and live for the entire lifetime of the driver.
+//!
+//! Uses modern ETW APIs (`EtwRegister` / `EtwWriteTransfer`) instead of
+//! legacy WMI classic providers (`EtwRegisterClassicProvider` / `WmiTraceMessage`).
 
 use core::{cell::UnsafeCell, mem, ptr};
 use core::sync::atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicU64, AtomicPtr, Ordering};
@@ -18,16 +21,11 @@ use wdk_sys::{
     NTSTATUS,
     PCUNICODE_STRING,
     PDRIVER_OBJECT,
-    PREGHANDLE,
-    PULONG,
-    PUNICODE_STRING,
     PVOID,
     REGHANDLE,
     TRACEHANDLE,
     UCHAR,
     ULONG,
-    ULONG64,
-    UNICODE_STRING,
     USHORT,
 };
 
@@ -83,27 +81,6 @@ impl<T> UnsafeOnceCell<T> {
 unsafe impl<T> Sync for UnsafeOnceCell<T> where T: Sync {}
 
 // ---------------------------------------------------------------------------
-// Unicode string helper (avoids depending on wdf::string)
-// ---------------------------------------------------------------------------
-
-/// Creates a UNICODE_STRING from a Rust &str. Returns the boxed buffer
-/// (to keep it alive) and the UNICODE_STRING.
-fn create_unicode_string(s: &str) -> (alloc::boxed::Box<[u16]>, UNICODE_STRING) {
-    let buf: alloc::boxed::Box<[u16]> = s
-        .encode_utf16()
-        .chain(core::iter::once(0))
-        .collect::<alloc::vec::Vec<_>>()
-        .into_boxed_slice();
-    let byte_len = (buf.len() * 2) as u16;
-    let unicode_str = UNICODE_STRING {
-        Length: byte_len - 2,
-        MaximumLength: byte_len,
-        Buffer: buf.as_ptr().cast_mut().cast(),
-    };
-    (buf, unicode_str)
-}
-
-// ---------------------------------------------------------------------------
 // Globals (expected by IFR / WinDbg)
 // ---------------------------------------------------------------------------
 
@@ -119,36 +96,17 @@ pub static mut WPP_RECORDER_INITIALIZED: *mut WPP_PROJECT_CONTROL_BLOCK = ptr::n
 // Trace control codes
 // ---------------------------------------------------------------------------
 
-// Trace control codes used by WPP classic provider callback
-// These were originally defined in evntrace.h as below
-// #define EVENT_CONTROL_CODE_DISABLE_PROVIDER 0
-// #define EVENT_CONTROL_CODE_ENABLE_PROVIDER  1
-// #define EVENT_CONTROL_CODE_CAPTURE_STATE    2
-enum TraceControlCode {
-    Enable = 1,
-    Disable = 0,
-    #[allow(dead_code)]
-    CaptureState = 2,
-}
+// Control codes passed to the ETW enable callback.
+const ETW_CONTROL_ENABLE: u32 = 1;
+const ETW_CONTROL_DISABLE: u32 = 0;
 
 // ---------------------------------------------------------------------------
 // FFI
 // ---------------------------------------------------------------------------
 
 unsafe extern "C" {
-    fn MmGetSystemRoutineAddress(SystemRoutineName: PUNICODE_STRING) -> PVOID;
     /// C runtime strlen function - exposed for macro use
     pub fn strlen(str: *const core::ffi::c_char) -> usize;
-}
-
-macro_rules! get_routine_addr {
-    ($name:expr, $callback_type:ty) => {{
-        let (_buf, unicode_str) = create_unicode_string($name);
-        let addr = unsafe {
-            MmGetSystemRoutineAddress((&unicode_str as *const UNICODE_STRING).cast_mut())
-        };
-        unsafe { mem::transmute::<PVOID, Option<$callback_type>>(addr) }
-    }};
 }
 
 // ---------------------------------------------------------------------------
@@ -164,11 +122,11 @@ pub union WPP_PROJECT_CONTROL_BLOCK {
 
 #[repr(C)]
 pub struct WPP_TRACE_CONTROL_BLOCK {
-    Callback: Option<WMIENTRY_NEW>,
+    Callback: PVOID, // Kept for C ABI compatibility; unused by Rust code
     pub ControlGuid: LPCGUID,
     pub Next: *const WPP_TRACE_CONTROL_BLOCK,
     pub Logger: TRACEHANDLE,
-    RegistryPath: PUNICODE_STRING,
+    RegistryPath: PVOID, // PUNICODE_STRING in C; kept as PVOID
     pub FlagsLen: UCHAR,
     pub Level: UCHAR,
     Reserved: USHORT,
@@ -185,7 +143,7 @@ impl WPP_TRACE_CONTROL_BLOCK {
     #[doc(hidden)]
     pub const fn new(flags_len: UCHAR) -> Self {
         Self {
-            Callback: None,
+            Callback: ptr::null_mut(),
             ControlGuid: ptr::null(),
             Next: ptr::null(),
             Logger: 0,
@@ -203,43 +161,7 @@ impl WPP_TRACE_CONTROL_BLOCK {
     }
 }
 
-#[repr(C)]
-struct WPP_TRACE_ENABLE_CONTEXT {
-    LoggerId: USHORT,
-    Level: UCHAR,
-    InternalFlag: UCHAR,
-    EnableFlags: ULONG,
-}
 
-type WMIENTRY_NEW = extern "C" fn(
-    MinorFunction: UCHAR,
-    DataPath: PVOID,
-    BufferLength: ULONG,
-    Buffer: PVOID,
-    Context: PVOID,
-    Size: PULONG,
-) -> u64;
-
-/// WPP Trace Message function - exposed for macro-generated code
-#[doc(hidden)]
-pub type WppTraceMessage = extern "C" fn(
-    LoggerHandle: ULONG64,
-    MessageFlags: ULONG,
-    MessageGuid: LPCGUID,
-    MessageNumber: USHORT,
-    ...
-) -> NTSTATUS;
-
-type EtwClassicCallback =
-    extern "C" fn(Guid: LPCGUID, ControlCode: UCHAR, EnableContext: PVOID, CallbackContext: PVOID);
-type EtwRegisterClassicProvider = extern "C" fn(
-    ProviderGuid: LPCGUID,
-    Type: ULONG,
-    EnableCallback: EtwClassicCallback,
-    CallbackContext: PVOID,
-    RegHandle: PREGHANDLE,
-) -> NTSTATUS;
-type EtwUnregister = extern "C" fn(RegHandle: REGHANDLE) -> NTSTATUS;
 
 unsafe extern "C" {
     fn WppAutoLogStart(
@@ -258,36 +180,7 @@ unsafe extern "C" {
         MessageNumber: USHORT,
         ...
     ) -> NTSTATUS;
-    fn imp_WppRecorderReplay(
-        WppCb: PVOID,
-        WppTraceHandle: TRACEHANDLE,
-        EnableFlags: ULONG,
-        EnableLevel: UCHAR,
-    );
 }
-
-// ---------------------------------------------------------------------------
-// WPP_TRACE_OPTIONS
-// ---------------------------------------------------------------------------
-
-// Trace options used by WPP tracing - exposed for macro use
-// These are defined in evntrace.h as follows:
-// #define TRACE_MESSAGE_SEQUENCE              1
-// #define TRACE_MESSAGE_GUID                  2
-// #define TRACE_MESSAGE_COMPONENTID           4
-// #define TRACE_MESSAGE_TIMESTAMP             8
-// #define TRACE_MESSAGE_PERFORMANCE_TIMESTAMP 16
-// #define TRACE_MESSAGE_SYSTEMINFO            32
-const TRACE_MESSAGE_SEQUENCE: ULONG = 1;
-const TRACE_MESSAGE_GUID: ULONG = 2;
-const TRACE_MESSAGE_SYSTEMINFO: ULONG = 32;
-const TRACE_MESSAGE_TIMESTAMP: ULONG = 8;
-
-#[doc(hidden)]
-pub const WPP_TRACE_OPTIONS: ULONG = TRACE_MESSAGE_SEQUENCE
-    | TRACE_MESSAGE_GUID
-    | TRACE_MESSAGE_SYSTEMINFO
-    | TRACE_MESSAGE_TIMESTAMP;
 
 // ---------------------------------------------------------------------------
 // WppProvider — one instance per control block
@@ -299,31 +192,30 @@ pub const WPP_TRACE_OPTIONS: ULONG = TRACE_MESSAGE_SEQUENCE
 /// state for level, flags, logger handle, and auto-log context.  These
 /// fields are updated atomically by the ETW callback and read lock-free
 /// by the generated `trace_N` methods.
+///
+/// Uses modern `EtwRegister` / `EtwWriteTransfer` APIs instead of legacy
+/// WMI classic providers.
 pub struct WppProvider {
     logger: AtomicU64,
     level: AtomicU8,
     flags: AtomicU32,
     auto_log_context: AtomicPtr<core::ffi::c_void>,
     auto_log_verbose_enabled: AtomicU16,
-    wpp_trace_message: Option<WppTraceMessage>,
-    etw_unregister: Option<EtwUnregister>,
+    reg_handle: AtomicU64,
+    init_state: AtomicU8,
     control_block: *mut WPP_TRACE_CONTROL_BLOCK,
 }
 
 impl WppProvider {
-    fn new(
-        control_block: *mut WPP_TRACE_CONTROL_BLOCK,
-        wpp_trace_message: Option<WppTraceMessage>,
-        etw_unregister: Option<EtwUnregister>,
-    ) -> Self {
+    fn new(control_block: *mut WPP_TRACE_CONTROL_BLOCK) -> Self {
         Self {
             logger: AtomicU64::new(0),
             level: AtomicU8::new(0),
             flags: AtomicU32::new(0),
             auto_log_context: AtomicPtr::new(ptr::null_mut()),
             auto_log_verbose_enabled: AtomicU16::new(0),
-            wpp_trace_message,
-            etw_unregister,
+            reg_handle: AtomicU64::new(0),
+            init_state: AtomicU8::new(crate::provider::UNINITIALIZED),
             control_block,
         }
     }
@@ -355,18 +247,18 @@ impl WppProvider {
         self.auto_log_context.load(Ordering::Relaxed)
     }
 
-    /// Returns the TRACEHANDLE logger.
+    /// Returns the TRACEHANDLE logger (set to reg_handle when enabled).
     #[doc(hidden)]
     #[inline]
     pub fn get_wpp_logger(&self) -> TRACEHANDLE {
         self.logger.load(Ordering::Relaxed)
     }
 
-    /// Returns the WppTraceMessage function pointer, if resolved.
+    /// Returns the ETW registration handle for `EtwWriteTransfer` calls.
     #[doc(hidden)]
     #[inline]
-    pub fn get_wpp_trace_message(&self) -> Option<WppTraceMessage> {
-        self.wpp_trace_message
+    pub fn reg_handle(&self) -> u64 {
+        self.reg_handle.load(Ordering::Relaxed)
     }
 
     // Pre-generated `trace_0`..`trace_8` inherent methods.
@@ -378,55 +270,58 @@ impl WppProvider {
 unsafe impl Sync for WppProvider {}
 
 // ---------------------------------------------------------------------------
-// WppClassicProviderCallback — updates BOTH provider + control block
+// ETW enable callback — updates BOTH provider atomics + control block
 // ---------------------------------------------------------------------------
 
-extern "C" fn WppClassicProviderCallback(
-    _Guid: LPCGUID,
-    ControlCode: UCHAR,
-    EnableContext: PVOID,
-    CallbackContext: PVOID,
+/// ETW enable callback invoked when a trace controller enables/disables
+/// this provider. Uses the modern `EtwRegister` callback signature.
+///
+/// # Safety
+///
+/// `callback_context` must point to a valid `WppProvider`.
+unsafe extern "system" fn etw_enable_callback(
+    _source_id: *const crate::GUID,
+    control_code: u32,
+    level: u8,
+    match_any_keyword: u64,
+    _match_all_keyword: u64,
+    _filter_data: *const core::ffi::c_void,
+    callback_context: *mut core::ffi::c_void,
 ) {
-    let provider = CallbackContext.cast::<WppProvider>();
-    let trace_context = EnableContext.cast::<WPP_TRACE_ENABLE_CONTEXT>();
-
-    if ControlCode != TraceControlCode::Enable as u8
-        && ControlCode != TraceControlCode::Disable as u8
-    {
+    if callback_context.is_null() {
         return;
     }
 
+    let provider = unsafe { &*(callback_context as *const WppProvider) };
+
     unsafe {
-        let cb = (*provider).control_block;
+        let cb = provider.control_block;
 
-        if ControlCode != TraceControlCode::Disable as u8 {
-            let enable_flags = (*trace_context).EnableFlags;
-            let enable_level = (*trace_context).Level as UCHAR;
-            let logger = *(trace_context.cast::<TRACEHANDLE>());
+        match control_code {
+            ETW_CONTROL_ENABLE => {
+                let enable_flags = match_any_keyword as u32;
+                let reg = provider.reg_handle.load(Ordering::Relaxed);
 
-            (*provider).flags.store(enable_flags, Ordering::Release);
-            (*provider).level.store(enable_level, Ordering::Release);
-            (*provider).logger.store(logger, Ordering::Release);
+                provider.flags.store(enable_flags, Ordering::Release);
+                provider.level.store(level, Ordering::Release);
+                // Set logger to reg_handle so is_flag_enabled/is_level_enabled
+                // fast-path checks see a non-zero value.
+                provider.logger.store(reg, Ordering::Release);
 
-            (*cb).Flags[0] = enable_flags;
-            (*cb).Level = enable_level;
-            (*cb).Logger = logger;
+                (*cb).Flags[0] = enable_flags;
+                (*cb).Level = level;
+                (*cb).Logger = reg;
+            }
+            ETW_CONTROL_DISABLE => {
+                provider.flags.store(0, Ordering::Release);
+                provider.level.store(0, Ordering::Release);
+                provider.logger.store(0, Ordering::Release);
 
-            // TODO: This should be called only when (NTDDI_VERSION >= NTDDI_WIN10_RS1)
-            imp_WppRecorderReplay(
-                WPP_GLOBAL_Control.cast(),
-                logger,
-                enable_flags,
-                enable_level,
-            );
-        } else {
-            (*provider).flags.store(0, Ordering::Release);
-            (*provider).level.store(0, Ordering::Release);
-            (*provider).logger.store(0, Ordering::Release);
-
-            (*cb).Flags[0] = 0;
-            (*cb).Level = 0;
-            (*cb).Logger = 0;
+                (*cb).Flags[0] = 0;
+                (*cb).Level = 0;
+                (*cb).Logger = 0;
+            }
+            _ => {}
         }
     }
 }
@@ -455,6 +350,8 @@ static WPP_STATE: UnsafeOnceCell<WppTracingState> = UnsafeOnceCell::new();
 // ---------------------------------------------------------------------------
 
 /// Initialises WPP tracing.  Called from `call_safe_driver_entry` in `wdf`.
+///
+/// Uses modern `EtwRegister` instead of legacy `EtwRegisterClassicProvider`.
 #[doc(hidden)]
 pub unsafe fn init_tracing(
     control_blocks: *mut WPP_PROJECT_CONTROL_BLOCK,
@@ -462,42 +359,53 @@ pub unsafe fn init_tracing(
     wdm_driver: *mut DRIVER_OBJECT,
     reg_path: PCUNICODE_STRING,
 ) {
-    let etw_register = get_routine_addr!("EtwRegisterClassicProvider", EtwRegisterClassicProvider);
-    let etw_unregister = if etw_register.is_some() {
-        get_routine_addr!("EtwUnregister", EtwUnregister)
-    } else {
-        None
-    };
-    let wpp_trace_message = get_routine_addr!("WmiTraceMessage", WppTraceMessage);
-
     let mut providers_vec = alloc::vec::Vec::with_capacity(num_controls);
     let mut wpp_reg: *mut WPP_TRACE_CONTROL_BLOCK =
         control_blocks.cast::<WPP_TRACE_CONTROL_BLOCK>();
 
     while !wpp_reg.is_null() {
         unsafe {
-            providers_vec.push(WppProvider::new(wpp_reg, wpp_trace_message, etw_unregister));
+            providers_vec.push(WppProvider::new(wpp_reg));
             wpp_reg = (*wpp_reg).Next.cast_mut();
         }
     }
 
     let providers: alloc::boxed::Box<[WppProvider]> = providers_vec.into_boxed_slice();
 
-    if let Some(etw_register_provider) = etw_register {
-        for provider in providers.iter() {
-            unsafe {
-                let cb = provider.control_block;
-                (*cb).RegHandle = 0;
-                let status = etw_register_provider(
-                    (*cb).ControlGuid,
-                    0,
-                    WppClassicProviderCallback,
-                    (provider as *const WppProvider).cast_mut().cast(),
-                    &raw mut (*cb).RegHandle,
-                );
-                println!("EtwRegisterClassicProvider status: {status:?}");
-            }
+    // Register each provider using the modern EtwRegister API.
+    for provider in providers.iter() {
+        if provider
+            .init_state
+            .compare_exchange(
+                crate::provider::UNINITIALIZED,
+                crate::provider::INITIALIZING,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            continue;
         }
+
+        unsafe {
+            let cb = provider.control_block;
+            let guid_ptr = (*cb).ControlGuid as *const crate::GUID;
+
+            let (status, handle) = crate::etw::register(
+                &*guid_ptr,
+                Some(etw_enable_callback),
+                (provider as *const WppProvider).cast_mut().cast(),
+            );
+            println!("EtwRegister status: {status:?}");
+
+            provider.reg_handle.store(handle, Ordering::Relaxed);
+            (*cb).RegHandle = handle;
+        }
+
+        provider.init_state.store(
+            crate::provider::INITIALIZED,
+            Ordering::Release,
+        );
     }
 
     unsafe {
@@ -537,18 +445,35 @@ pub unsafe fn init_tracing(
 }
 
 /// Stops WPP tracing.  Called from `wdf_driver_unload`.
+///
+/// Unregisters providers using `EtwUnregister`.
 #[doc(hidden)]
 pub fn cleanup_tracing() {
     if let Some(state) = unsafe { WPP_STATE.get() } {
         for provider in state.providers.iter() {
-            if let Some(etw_unregister) = provider.etw_unregister {
-                let reg_handle = unsafe { (*provider.control_block).RegHandle };
-                if reg_handle != 0 {
-                    let status = etw_unregister(reg_handle);
-                    println!("EtwUnregister status: {status:?}");
-                    unsafe {
-                        (*provider.control_block).RegHandle = 0;
-                    }
+            if provider
+                .init_state
+                .compare_exchange(
+                    crate::provider::INITIALIZED,
+                    crate::provider::UNINITIALIZED,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
+                )
+                .is_err()
+            {
+                continue;
+            }
+
+            provider.level.store(0, Ordering::Relaxed);
+            provider.flags.store(0, Ordering::Relaxed);
+            provider.logger.store(0, Ordering::Relaxed);
+
+            let handle = provider.reg_handle.swap(0, Ordering::Relaxed);
+            if handle != 0 {
+                let status = unsafe { crate::etw::unregister(handle) };
+                println!("EtwUnregister status: {status:?}");
+                unsafe {
+                    (*provider.control_block).RegHandle = 0;
                 }
             }
         }

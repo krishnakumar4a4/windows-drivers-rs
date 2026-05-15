@@ -18,7 +18,7 @@ pub use api::*;
 #[doc(hidden)]
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]
 pub mod __internal {
-    pub use wpp::writer::{strlen, WppAutoLogTrace, WPP_TRACE_OPTIONS};
+    pub use wpp::writer::{strlen, WppAutoLogTrace};
     pub use wpp::wpp_arg::WppArgData;
     pub use wpp::wpp_arg::TraceFmtBuf;
     pub use wdk_sys::{GUID, LPCGUID, LPCSTR, LPGUID, UCHAR, ULONG, USHORT, TRACEHANDLE, PVOID};
