@@ -4,7 +4,7 @@
 //! Implementation of `wpp_control_guids!` proc macro.
 
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{braced, Ident, LitInt, Token, Result};
 
@@ -153,25 +153,50 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
 
     validate_unique_keywords(&parsed.providers)?;
 
+    output.extend(generate_control_guid_array(&parsed.providers));
     for (idx, provider) in parsed.providers.iter().enumerate() {
         output.extend(generate_provider_module(provider, idx));
     }
     output.extend(generate_wpp_flag_enum(&parsed.providers));
     output.extend(generate_unified_trace_macro(&parsed.providers));
     output.extend(generate_level_macro());
-    output.extend(generate_ifr_init(&parsed.providers));
+    output.extend(generate_ifr_module(&parsed.providers));
     Ok(output)
+}
+
+/// Generates a global static array of control GUIDs for all providers.
+///
+/// Each provider module references its GUID via `super::WPP_CONTROL_GUIDS[CB_INDEX]`.
+fn generate_control_guid_array(providers: &[ProviderDecl]) -> TokenStream {
+    let num_providers = providers.len();
+    let num_providers_lit = proc_macro2::Literal::usize_unsuffixed(num_providers);
+
+    let guid_elements: Vec<TokenStream> = providers
+        .iter()
+        .map(|p| {
+            let gp = &p.guid_parts;
+            let (d1, d2, d3) = (gp.d1, gp.d2, gp.d3);
+            let d4_tokens: Vec<TokenStream> = gp.d4.iter().map(|b| {
+                let b = *b;
+                quote!(#b)
+            }).collect();
+            quote! {
+                ::wpp::GUID { data1: #d1, data2: #d2, data3: #d3, data4: [#(#d4_tokens),*] }
+            }
+        })
+        .collect();
+
+    quote! {
+        /// Global static array of control GUIDs for all providers.
+        static WPP_CONTROL_GUIDS: [::wpp::GUID; #num_providers_lit] = [
+            #(#guid_elements),*
+        ];
+    }
 }
 
 fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
     let mod_name = &p.name;
     let guid_str = &p.guid_str;
-    let gp = &p.guid_parts;
-    let (d1, d2, d3) = (gp.d1, gp.d2, gp.d3);
-    let d4_tokens: Vec<TokenStream> = gp.d4.iter().map(|b| {
-        let b = *b;
-        quote!(#b)
-    }).collect();
 
     let dg = compute_decode_guid(&p.name.to_string(), guid_str);
     let (dd1, dd2, dd3) = (dg.d1, dg.d2, dg.d3);
@@ -196,9 +221,11 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
     quote! {
         #[allow(non_snake_case)]
         pub mod #mod_name {
-            pub const CONTROL_GUID: ::wpp::GUID = ::wpp::GUID {
-                data1: #d1, data2: #d2, data3: #d3, data4: [#(#d4_tokens),*],
-            };
+            /// Reference to this provider's control GUID in the global array.
+            #[inline]
+            pub fn control_guid() -> &'static ::wpp::GUID {
+                &super::WPP_CONTROL_GUIDS[CB_INDEX]
+            }
             pub const DECODE_GUID: ::wpp::GUID = ::wpp::GUID {
                 data1: #dd1, data2: #dd2, data3: #dd3, data4: [#(#dd4_tokens),*],
             };
@@ -209,13 +236,13 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
             pub const __WPP_NO_KEYWORD: u64 = 0;
             pub static STATE: ::wpp::ProviderState = ::wpp::ProviderState::new();
 
-            /// Initializes this provider: emits PDB annotation, registers with
-            /// ETW, and sets the control GUID on its IFR control block.
+            /// Initializes this provider: emits PDB annotation and registers
+            /// with ETW.
             ///
             /// # Safety
             ///
-            /// `__wpp_ifr_create_cbs()` must have been called before this so
-            /// that the control block array exists.
+            /// `__wpp_ifr::init()` must have been called before this so
+            /// that IFR is ready.
             /// The caller must ensure `clean_up()` is called before the
             /// module containing this provider is unloaded.
             pub unsafe fn init() {
@@ -232,17 +259,12 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
                     return;
                 }
                 let (_, handle) = unsafe { ::wpp::etw::register(
-                    &CONTROL_GUID,
+                    control_guid(),
                     Some(::wpp::provider::enable_callback),
                     &STATE as *const ::wpp::ProviderState as *mut core::ffi::c_void,
                 ) };
                 STATE.reg_handle.store(handle, core::sync::atomic::Ordering::Relaxed);
                 unsafe { ::wpp::etw::set_decode_guid(handle, &DECODE_GUID) };
-                // Set the control GUID on this provider's IFR control block
-                unsafe {
-                    let __cb = super::__wpp_get_cb(CB_INDEX);
-                    (*__cb).ControlGuid = &CONTROL_GUID as *const ::wpp::GUID;
-                }
                 STATE.init_state.store(
                     ::wpp::provider::INITIALIZED,
                     core::sync::atomic::Ordering::Release,
@@ -471,19 +493,19 @@ fn generate_unified_trace_macro(providers: &[ProviderDecl]) -> TokenStream {
             arms.push(quote! {
                 (#dollar level:ident, #kw_name, #dollar fmt:literal #dollar(, #dollar arg:expr)*) => {{
                     const __WPP_LEVEL: u8 = __wpp_level_to_u8!(#dollar level);
-                    let __wpp_kw_val: u64 = #dollar crate::#mod_name::#kw_name;
-                    if #dollar crate::#mod_name::STATE.is_enabled(__WPP_LEVEL, __wpp_kw_val) {
-                        ::wpp::__wpp_trace_impl!(
-                            @provider_mod #dollar crate::#mod_name,
-                            @provider_name #provider_name_str,
-                            @guid #guid_str,
-                            @level __WPP_LEVEL,
-                            @level_name #dollar level,
-                            @keyword #kw_name,
-                            @fmt #dollar fmt
-                            #dollar(, #dollar arg)*
-                        );
-                    }
+                    // __wpp_trace_impl handles ETW (gated by is_enabled)
+                    // and IFR (gated by IFR state auto_log_context) independently.
+                    ::wpp::__wpp_trace_impl!(
+                        @provider_mod #dollar crate::#mod_name,
+                        @ifr_state #dollar crate::__wpp_ifr::STATE,
+                        @provider_name #provider_name_str,
+                        @guid #guid_str,
+                        @level __WPP_LEVEL,
+                        @level_name #dollar level,
+                        @keyword #kw_name,
+                        @fmt #dollar fmt
+                        #dollar(, #dollar arg)*
+                    );
                 }};
             });
         }
@@ -498,18 +520,17 @@ fn generate_unified_trace_macro(providers: &[ProviderDecl]) -> TokenStream {
         arms.push(quote! {
             (#dollar level:ident, #dollar fmt:literal #dollar(, #dollar arg:expr)*) => {{
                 const __WPP_LEVEL: u8 = __wpp_level_to_u8!(#dollar level);
-                if #dollar crate::#mod_name::STATE.is_enabled(__WPP_LEVEL, 0) {
-                    ::wpp::__wpp_trace_impl!(
-                        @provider_mod #dollar crate::#mod_name,
-                        @provider_name #provider_name_str,
-                        @guid #guid_str,
-                        @level __WPP_LEVEL,
-                        @level_name #dollar level,
-                        @keyword __WPP_NO_KEYWORD,
-                        @fmt #dollar fmt
-                        #dollar(, #dollar arg)*
-                    );
-                }
+                ::wpp::__wpp_trace_impl!(
+                    @provider_mod #dollar crate::#mod_name,
+                    @ifr_state #dollar crate::__wpp_ifr::STATE,
+                    @provider_name #provider_name_str,
+                    @guid #guid_str,
+                    @level __WPP_LEVEL,
+                    @level_name #dollar level,
+                    @keyword __WPP_NO_KEYWORD,
+                    @fmt #dollar fmt
+                    #dollar(, #dollar arg)*
+                );
             }};
         });
     }
@@ -533,15 +554,15 @@ fn generate_level_macro() -> TokenStream {
     }
 }
 
-/// Generates the IFR infrastructure:
+/// Generates the `__wpp_ifr` module containing all IFR infrastructure:
 ///
 /// - `WPP_GLOBAL_Control` / `WPP_RECORDER_INITIALIZED` (`#[no_mangle]` statics)
-/// - `__wpp_ifr_create_cbs()` — phase (a): creates CB array, links Next ptrs,
-///   emits TMC annotations, returns `(ptr, count)`
-/// - `__wpp_get_cb(idx)` — accessor into the CB array
-/// - `__wpp_ifr_start(...)` — phase (b): calls `wpp::ifr::start_ifr()`
-/// - `__wpp_ifr_cleanup()` — calls `wpp::ifr::stop_ifr()`
-fn generate_ifr_init(providers: &[ProviderDecl]) -> TokenStream {
+/// - Control block array and helper types
+/// - `STATE: IFRState` — holds auto-log context for trace calls
+/// - `init(driver_obj, reg_path)` — creates CBs, links them, sets control
+///   GUIDs from the global array, and starts IFR auto-log recording
+/// - `cleanup()` — stops IFR tracing
+fn generate_ifr_module(providers: &[ProviderDecl]) -> TokenStream {
     let num_controls = providers.len();
     let num_controls_lit = proc_macro2::Literal::usize_unsuffixed(num_controls);
 
@@ -567,7 +588,7 @@ fn generate_ifr_init(providers: &[ProviderDecl]) -> TokenStream {
         })
         .collect();
 
-    // Link Next pointers (but NOT ControlGuid — that's per-provider now)
+    // Link Next pointers between control blocks
     let link_statements: Vec<TokenStream> = (0..num_controls)
         .map(|idx| {
             let idx_lit = proc_macro2::Literal::usize_unsuffixed(idx);
@@ -590,123 +611,164 @@ fn generate_ifr_init(providers: &[ProviderDecl]) -> TokenStream {
         })
         .collect();
 
+    // Set ControlGuid on each CB from the global WPP_CONTROL_GUIDS array
+    let set_guid_statements: Vec<TokenStream> = (0..num_controls)
+        .map(|idx| {
+            let idx_lit = proc_macro2::Literal::usize_unsuffixed(idx);
+            quote! {
+                unsafe {
+                    (*get_cb(#idx_lit)).ControlGuid =
+                        &super::WPP_CONTROL_GUIDS[#idx_lit] as *const ::wpp::GUID;
+                }
+            }
+        })
+        .collect();
+
     quote! {
-        // IFR globals — must live in the consuming crate (not in wpp lib crate)
-        // to avoid LTO bitcode errors with #[no_mangle] statics.
-        #[unsafe(no_mangle)]
-        static mut WPP_GLOBAL_Control: *mut ::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK =
-            core::ptr::null_mut();
-        #[unsafe(no_mangle)]
-        static mut WPP_RECORDER_INITIALIZED: *mut ::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK =
-            core::ptr::null_mut();
+        /// IFR (In-Flight Recorder) module — manages control blocks, IFR
+        /// lifecycle, and holds the shared `IFRState`.
+        #[allow(non_snake_case)]
+        pub mod __wpp_ifr {
+            // IFR globals — must live in the consuming crate (not in wpp lib
+            // crate) to avoid LTO bitcode errors with #[no_mangle] statics.
+            #[unsafe(no_mangle)]
+            static mut WPP_GLOBAL_Control: *mut ::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK =
+                core::ptr::null_mut();
+            #[unsafe(no_mangle)]
+            static mut WPP_RECORDER_INITIALIZED: *mut ::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK =
+                core::ptr::null_mut();
 
-        // ── IFR control block array (module-level) ──────────────────────────
+            // ── Control block array types ────────────────────────────────────
 
-        const __WPP_FLAG_LEN: usize = #wpp_flag_len_lit;
-        const __WPP_CONTROLS_COUNT: usize = #num_controls_lit;
+            const WPP_FLAG_LEN: usize = #wpp_flag_len_lit;
+            const CONTROLS_COUNT: usize = #num_controls_lit;
 
-        #[repr(C)]
-        union __WppCbType {
-            Control: core::mem::ManuallyDrop<::wpp::ifr::WPP_TRACE_CONTROL_BLOCK>,
-            ReserveSpace: [u8;
-                core::mem::size_of::<::wpp::ifr::WPP_TRACE_CONTROL_BLOCK>()
-                    + core::mem::size_of::<u32>() * (__WPP_FLAG_LEN - 1)],
-        }
+            #[repr(C)]
+            union CbType {
+                Control: core::mem::ManuallyDrop<::wpp::ifr::WPP_TRACE_CONTROL_BLOCK>,
+                ReserveSpace: [u8;
+                    core::mem::size_of::<::wpp::ifr::WPP_TRACE_CONTROL_BLOCK>()
+                        + core::mem::size_of::<u32>() * (WPP_FLAG_LEN - 1)],
+            }
 
-        #[repr(transparent)]
-        struct __WppControlBlockArray(
-            core::cell::UnsafeCell<[__WppCbType; __WPP_CONTROLS_COUNT]>,
-        );
+            #[repr(transparent)]
+            struct ControlBlockArray(
+                core::cell::UnsafeCell<[CbType; CONTROLS_COUNT]>,
+            );
 
-        unsafe impl Sync for __WppControlBlockArray {}
+            unsafe impl Sync for ControlBlockArray {}
 
-        impl __WppControlBlockArray {
-            const fn new() -> Self {
-                const INIT: __WppCbType = __WppCbType {
-                    Control: core::mem::ManuallyDrop::new(
-                        ::wpp::ifr::WPP_TRACE_CONTROL_BLOCK::new(
-                            #wpp_flag_len_lit as u8,
+            impl ControlBlockArray {
+                const fn new() -> Self {
+                    const INIT: CbType = CbType {
+                        Control: core::mem::ManuallyDrop::new(
+                            ::wpp::ifr::WPP_TRACE_CONTROL_BLOCK::new(
+                                #wpp_flag_len_lit as u8,
+                            ),
                         ),
-                    ),
+                    };
+                    Self(core::cell::UnsafeCell::new([INIT; CONTROLS_COUNT]))
+                }
+                fn as_mut_ptr(&self) -> *mut [CbType; CONTROLS_COUNT] {
+                    self.0.get()
+                }
+            }
+
+            static MAIN_CB: ControlBlockArray = ControlBlockArray::new();
+
+            // ── IFR state ────────────────────────────────────────────────────
+
+            /// Shared IFR state holding the auto-log context for trace calls.
+            pub static STATE: ::wpp::ifr::IFRState = ::wpp::ifr::IFRState::new();
+
+            // ── IFR functions ────────────────────────────────────────────────
+
+            /// Returns a mutable pointer to the control block at `idx`.
+            #[inline]
+            fn get_cb(idx: usize) -> *mut ::wpp::ifr::WPP_TRACE_CONTROL_BLOCK {
+                unsafe {
+                    (*MAIN_CB.as_mut_ptr())
+                        .as_mut_ptr()
+                        .add(idx)
+                        .cast::<::wpp::ifr::WPP_TRACE_CONTROL_BLOCK>()
+                }
+            }
+
+            /// Initializes IFR: creates control blocks, links them, sets
+            /// control GUIDs from the global array, and starts IFR auto-log
+            /// recording. Stores the auto-log context in `STATE`.
+            ///
+            /// # Safety
+            ///
+            /// * `driver_obj` and `reg_path` must be valid pointers from
+            ///   DriverEntry.
+            #[doc(hidden)]
+            pub unsafe fn init(
+                driver_obj: *mut core::ffi::c_void,
+                reg_path: *const core::ffi::c_void,
+            ) {
+                if STATE.init_state.compare_exchange(
+                    ::wpp::ifr::UNINITIALIZED,
+                    ::wpp::ifr::INITIALIZING,
+                    core::sync::atomic::Ordering::Acquire,
+                    core::sync::atomic::Ordering::Relaxed,
+                ).is_err() {
+                    return;
+                }
+
+                // Emit TMC codeview annotations
+                #(#codeview_annotations)*
+
+                // Link control block Next pointers
+                let __wpp_arr: &mut [CbType; CONTROLS_COUNT] =
+                    unsafe { &mut *MAIN_CB.as_mut_ptr() };
+                let __wpp_base: *mut CbType = __wpp_arr.as_mut_ptr();
+                #(#link_statements)*
+
+                // Set ControlGuid on each CB from the global GUID array
+                #(#set_guid_statements)*
+
+                // Start IFR auto-log recording
+                let cb_ptr = unsafe {
+                    (*MAIN_CB.as_mut_ptr())
+                        .as_mut_ptr()
+                        .cast::<::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK>()
                 };
-                Self(core::cell::UnsafeCell::new([INIT; __WPP_CONTROLS_COUNT]))
-            }
-            fn as_mut_ptr(&self) -> *mut [__WppCbType; __WPP_CONTROLS_COUNT] {
-                self.0.get()
-            }
-        }
+                unsafe {
+                    ::wpp::ifr::start_ifr(
+                        cb_ptr,
+                        driver_obj,
+                        reg_path,
+                        &STATE,
+                        &raw mut WPP_GLOBAL_Control,
+                        &raw mut WPP_RECORDER_INITIALIZED,
+                    );
+                }
 
-        static __WPP_MAIN_CB: __WppControlBlockArray =
-            __WppControlBlockArray::new();
-
-        // ── IFR functions ───────────────────────────────────────────────────
-
-        /// Phase (a): link Next pointers in the control block array,
-        /// emit TMC codeview annotations. Returns `(ptr, count)`.
-        ///
-        /// Does NOT set `ControlGuid` — each provider's `init()` does that.
-        #[doc(hidden)]
-        fn __wpp_ifr_create_cbs() -> (
-            *mut ::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK,
-            usize,
-        ) {
-            // Emit TMC codeview annotations
-            #(#codeview_annotations)*
-
-            // Link control block Next pointers
-            let __wpp_arr: &mut [__WppCbType; __WPP_CONTROLS_COUNT] =
-                unsafe { &mut *__WPP_MAIN_CB.as_mut_ptr() };
-            let __wpp_base: *mut __WppCbType = __wpp_arr.as_mut_ptr();
-            #(#link_statements)*
-
-            let ptr = unsafe {
-                (*__WPP_MAIN_CB.as_mut_ptr())
-                    .as_mut_ptr()
-                    .cast::<::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK>()
-            };
-            (ptr, __WPP_CONTROLS_COUNT)
-        }
-
-        /// Returns a mutable pointer to the control block at `idx`.
-        #[doc(hidden)]
-        #[inline]
-        fn __wpp_get_cb(idx: usize) -> *mut ::wpp::ifr::WPP_TRACE_CONTROL_BLOCK {
-            unsafe {
-                (*__WPP_MAIN_CB.as_mut_ptr())
-                    .as_mut_ptr()           // *mut __WppCbType
-                    .add(idx)               // strides by size_of::<__WppCbType>()
-                    .cast::<::wpp::ifr::WPP_TRACE_CONTROL_BLOCK>()
-            }
-        }
-
-        /// Phase (b): start IFR auto-log recording.
-        #[doc(hidden)]
-        fn __wpp_ifr_start(
-            cb_ptr: *mut ::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK,
-            driver_obj: *mut core::ffi::c_void,
-            reg_path: *const core::ffi::c_void,
-            provider_states: &[&::wpp::ProviderState],
-        ) {
-            unsafe {
-                ::wpp::ifr::start_ifr(
-                    cb_ptr,
-                    driver_obj,
-                    reg_path,
-                    provider_states,
-                    &raw mut WPP_GLOBAL_Control,
-                    &raw mut WPP_RECORDER_INITIALIZED,
+                STATE.init_state.store(
+                    ::wpp::ifr::INITIALIZED,
+                    core::sync::atomic::Ordering::Release,
                 );
             }
-        }
 
-        /// Cleans up IFR tracing.
-        #[doc(hidden)]
-        fn __wpp_ifr_cleanup() {
-            unsafe {
-                ::wpp::ifr::stop_ifr(
-                    &raw mut WPP_GLOBAL_Control,
-                    &raw mut WPP_RECORDER_INITIALIZED,
-                );
+            /// Stops IFR tracing and clears the auto-log context.
+            #[doc(hidden)]
+            pub fn cleanup() {
+                if STATE.init_state.compare_exchange(
+                    ::wpp::ifr::INITIALIZED,
+                    ::wpp::ifr::UNINITIALIZED,
+                    core::sync::atomic::Ordering::Acquire,
+                    core::sync::atomic::Ordering::Relaxed,
+                ).is_err() {
+                    return;
+                }
+                unsafe {
+                    ::wpp::ifr::stop_ifr(
+                        &STATE,
+                        &raw mut WPP_GLOBAL_Control,
+                        &raw mut WPP_RECORDER_INITIALIZED,
+                    );
+                }
             }
         }
     }

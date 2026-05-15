@@ -1,9 +1,46 @@
 // Copyright (c) Microsoft Corporation
 // License: MIT OR Apache-2.0
-//! IFR (In-Flight Recorder) support for WPP tracing - types and FFI.
+//! IFR (In-Flight Recorder) support for WPP tracing - types, FFI and state.
 
 use core::mem;
 use core::ptr;
+use core::sync::atomic::{AtomicPtr, AtomicU8, Ordering};
+
+// -- IFR lifecycle states ----------------------------------------------------
+
+pub const UNINITIALIZED: u8 = 0;
+pub const INITIALIZING: u8 = 1;
+pub const INITIALIZED: u8 = 2;
+
+// -- IFR state ---------------------------------------------------------------
+
+/// Runtime state for IFR (In-Flight Recorder).
+///
+/// Holds the auto-log context pointer set by `start_ifr` and used by
+/// `WppAutoLogTrace` to record trace events into the IFR circular buffer.
+pub struct IFRState {
+    pub auto_log_context: AtomicPtr<core::ffi::c_void>,
+    pub init_state: AtomicU8,
+}
+
+// SAFETY: All fields are atomic — concurrent access is safe.
+unsafe impl Sync for IFRState {}
+
+impl IFRState {
+    pub const fn new() -> Self {
+        Self {
+            auto_log_context: AtomicPtr::new(ptr::null_mut()),
+            init_state: AtomicU8::new(UNINITIALIZED),
+        }
+    }
+
+    /// Returns the IFR auto-log context pointer.
+    #[doc(hidden)]
+    #[inline]
+    pub fn auto_log_context(&self) -> *mut core::ffi::c_void {
+        self.auto_log_context.load(Ordering::Relaxed)
+    }
+}
 
 // -- WPP control block types -------------------------------------------------
 
@@ -96,19 +133,17 @@ unsafe extern "C" {
 
 // -- Lifecycle: start / stop --------------------------------------------------
 
-/// Starts IFR auto-log recording and propagates auto-log contexts to provider
-/// states.
+/// Starts IFR auto-log recording and stores the auto-log context in `IFRState`.
 ///
-/// This is "phase 2" of IFR init — called *after* the control block array has
-/// been created and each provider has set its `ControlGuid` on its control
-/// block (inside `Provider::init()`).
+/// Control blocks must already have their `ControlGuid` and `Next` pointers
+/// set before calling this function.
 ///
 /// # Safety
 ///
 /// * `control_blocks` must point to a valid linked list of
-///   `WPP_PROJECT_CONTROL_BLOCK`.
+///   `WPP_PROJECT_CONTROL_BLOCK` with `ControlGuid` set on each block.
 /// * `driver_obj` and `reg_path` must be valid pointers from DriverEntry.
-/// * `provider_states` must match the control blocks in order.
+/// * `ifr_state` must point to the IFR module's static `IFRState`.
 /// * `global_control` and `recorder_initialized` must point to the
 ///   `#[no_mangle]` statics `WPP_GLOBAL_Control` / `WPP_RECORDER_INITIALIZED`.
 #[doc(hidden)]
@@ -116,7 +151,7 @@ pub unsafe fn start_ifr(
     control_blocks: *mut WPP_PROJECT_CONTROL_BLOCK,
     driver_obj: *mut core::ffi::c_void,
     reg_path: *const core::ffi::c_void,
-    provider_states: &[&crate::ProviderState],
+    ifr_state: &IFRState,
     global_control: *mut *mut WPP_PROJECT_CONTROL_BLOCK,
     recorder_initialized: *mut *mut WPP_PROJECT_CONTROL_BLOCK,
 ) {
@@ -127,25 +162,11 @@ pub unsafe fn start_ifr(
         *recorder_initialized = *global_control;
     }
 
-    // Propagate auto-log contexts to ProviderState
-    let primary_ctx = unsafe { (*(*control_blocks).Control).AutoLogContext };
-    let mut cb_ptr = control_blocks.cast::<WPP_TRACE_CONTROL_BLOCK>();
-    for state in provider_states {
-        if cb_ptr.is_null() {
-            break;
-        }
-        unsafe {
-            let ctx = if (*cb_ptr).AutoLogContext.is_null() {
-                primary_ctx
-            } else {
-                (*cb_ptr).AutoLogContext
-            };
-            state
-                .auto_log_context
-                .store(ctx, core::sync::atomic::Ordering::Release);
-            cb_ptr = (*cb_ptr).Next.cast_mut();
-        }
-    }
+    // Store auto-log context from the primary control block into IFRState
+    let ctx = unsafe { (*(*control_blocks).Control).AutoLogContext };
+    ifr_state
+        .auto_log_context
+        .store(ctx, Ordering::Release);
 }
 
 /// Stops IFR tracing. Called during driver unload.
@@ -156,6 +177,7 @@ pub unsafe fn start_ifr(
 /// `#[no_mangle]` statics passed to [`start_ifr`].
 #[doc(hidden)]
 pub unsafe fn stop_ifr(
+    ifr_state: &IFRState,
     global_control: *mut *mut WPP_PROJECT_CONTROL_BLOCK,
     recorder_initialized: *mut *mut WPP_PROJECT_CONTROL_BLOCK,
 ) {
@@ -168,4 +190,7 @@ pub unsafe fn stop_ifr(
             WPP_DRIVER_OBJ = ptr::null_mut();
         }
     }
+    ifr_state
+        .auto_log_context
+        .store(ptr::null_mut(), Ordering::Release);
 }
