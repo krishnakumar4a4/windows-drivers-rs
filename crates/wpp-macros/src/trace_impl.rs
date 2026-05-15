@@ -16,6 +16,7 @@ use syn::{Expr, Ident, LitStr, Token, Result};
 
 struct TraceImplInput {
     provider_mod: TokenStream,
+    ifr_state: TokenStream,
     provider_name: String,
     guid: String,
     level_expr: Expr,
@@ -31,6 +32,10 @@ impl Parse for TraceImplInput {
     fn parse(input: ParseStream) -> Result<Self> {
         parse_at_key(input, "provider_mod")?;
         let provider_mod = parse_path_tokens(input)?;
+
+        input.parse::<Token![,]>()?;
+        parse_at_key(input, "ifr_state")?;
+        let ifr_state = parse_path_tokens(input)?;
 
         input.parse::<Token![,]>()?;
         parse_at_key(input, "provider_name")?;
@@ -64,6 +69,7 @@ impl Parse for TraceImplInput {
 
         Ok(TraceImplInput {
             provider_mod,
+            ifr_state,
             provider_name: provider_name.value(),
             guid: guid.value(),
             level_expr,
@@ -102,6 +108,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     let parsed: TraceImplInput = syn::parse2(input)?;
 
     let provider_mod = &parsed.provider_mod;
+    let ifr_state = &parsed.ifr_state;
     let provider_name = &parsed.provider_name;
     let guid = &parsed.guid;
     let level_expr = &parsed.level_expr;
@@ -189,30 +196,36 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
             #(let #param_names = &#args;)*
             #(let #bytes_names = ::wpp::WppField::as_bytes(#param_names);)*
 
-            const __WPP_EVT_DESC: ::wpp::etw::EVENT_DESCRIPTOR = ::wpp::etw::EVENT_DESCRIPTOR {
-                Id: #event_id_lit, Version: 0, Channel: 0, Level: #level_expr,
-                Opcode: 0, Task: 0, Keyword: #provider_mod::#keyword_ident,
-            };
+            // ETW: gated by is_enabled (real-time trace session active)
+            {
+                let __wpp_kw_val: u64 = #provider_mod::#keyword_ident;
+                if #provider_mod::STATE.is_enabled(#level_expr, __wpp_kw_val) {
+                    const __WPP_EVT_DESC: ::wpp::etw::EVENT_DESCRIPTOR = ::wpp::etw::EVENT_DESCRIPTOR {
+                        Id: #event_id_lit, Version: 0, Channel: 0, Level: #level_expr,
+                        Opcode: 0, Task: 0, Keyword: #provider_mod::#keyword_ident,
+                    };
 
-            let __wpp_data: [::wpp::etw::EVENT_DATA_DESCRIPTOR; #field_count_u32 as usize] = [
-                #(#data_descriptors),*
-            ];
+                    let __wpp_data: [::wpp::etw::EVENT_DATA_DESCRIPTOR; #field_count_u32 as usize] = [
+                        #(#data_descriptors),*
+                    ];
 
-            unsafe {
-                ::wpp::etw::write(
-                    #provider_mod::STATE.reg_handle(),
-                    &__WPP_EVT_DESC,
-                    #field_count_u32,
-                    __wpp_data.as_ptr(),
-                );
+                    unsafe {
+                        ::wpp::etw::write(
+                            #provider_mod::STATE.reg_handle(),
+                            &__WPP_EVT_DESC,
+                            #field_count_u32,
+                            __wpp_data.as_ptr(),
+                        );
+                    }
+                }
             }
 
-            // IFR: write to the In-Flight Recorder circular buffer
+            // IFR: gated by IFR state auto_log_context (always records when IFR is initialized)
             {
-                let __wpp_auto_ctx = #provider_mod::STATE.auto_log_context();
+                let __wpp_auto_ctx = #ifr_state.auto_log_context();
                 if !__wpp_auto_ctx.is_null() {
-                    let mut __wpp_ifr_guid = #provider_mod::CONTROL_GUID;
-                    unsafe {
+                    let mut __wpp_ifr_guid = *#provider_mod::control_guid();
+                    let __wpp_ifr_status = unsafe {
                         ::wpp::ifr::WppAutoLogTrace(
                             __wpp_auto_ctx,
                             #level_expr,
@@ -222,8 +235,11 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                             #event_id_lit,
                             #(#ifr_arg_pairs)*
                             core::ptr::null::<core::ffi::c_void>(),
-                        );
-                    }
+                        )
+                    };
+                    ::wdf::println!("WppAutoLogTrace status: {}, ctx: {:?}", __wpp_ifr_status, __wpp_auto_ctx);
+                } else {
+                    ::wdf::println!("WppAutoLogTrace skipped: auto_log_context is null");
                 }
             }
         }}
@@ -234,23 +250,29 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                 #level_str, #keyword_str, #format_string
             );
 
-            const __WPP_EVT_DESC: ::wpp::etw::EVENT_DESCRIPTOR = ::wpp::etw::EVENT_DESCRIPTOR {
-                Id: #event_id_lit, Version: 0, Channel: 0, Level: #level_expr,
-                Opcode: 0, Task: 0, Keyword: #provider_mod::#keyword_ident,
-            };
+            // ETW: gated by is_enabled (real-time trace session active)
+            {
+                let __wpp_kw_val: u64 = #provider_mod::#keyword_ident;
+                if #provider_mod::STATE.is_enabled(#level_expr, __wpp_kw_val) {
+                    const __WPP_EVT_DESC: ::wpp::etw::EVENT_DESCRIPTOR = ::wpp::etw::EVENT_DESCRIPTOR {
+                        Id: #event_id_lit, Version: 0, Channel: 0, Level: #level_expr,
+                        Opcode: 0, Task: 0, Keyword: #provider_mod::#keyword_ident,
+                    };
 
-            unsafe {
-                ::wpp::etw::write(
-                    #provider_mod::STATE.reg_handle(), &__WPP_EVT_DESC, 0, core::ptr::null(),
-                );
+                    unsafe {
+                        ::wpp::etw::write(
+                            #provider_mod::STATE.reg_handle(), &__WPP_EVT_DESC, 0, core::ptr::null(),
+                        );
+                    }
+                }
             }
 
-            // IFR: write to the In-Flight Recorder circular buffer
+            // IFR: gated by IFR state auto_log_context (always records when IFR is initialized)
             {
-                let __wpp_auto_ctx = #provider_mod::STATE.auto_log_context();
+                let __wpp_auto_ctx = #ifr_state.auto_log_context();
                 if !__wpp_auto_ctx.is_null() {
-                    let mut __wpp_ifr_guid = #provider_mod::CONTROL_GUID;
-                    unsafe {
+                    let mut __wpp_ifr_guid = *#provider_mod::control_guid();
+                    let __wpp_ifr_status = unsafe {
                         ::wpp::ifr::WppAutoLogTrace(
                             __wpp_auto_ctx,
                             #level_expr,
@@ -259,8 +281,11 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                                 as *mut core::ffi::c_void,
                             #event_id_lit,
                             core::ptr::null::<core::ffi::c_void>(),
-                        );
-                    }
+                        )
+                    };
+                    ::wdf::println!("WppAutoLogTrace status: {}, ctx: {:?}", __wpp_ifr_status, __wpp_auto_ctx);
+                } else {
+                    ::wdf::println!("WppAutoLogTrace skipped: auto_log_context is null");
                 }
             }
         }}

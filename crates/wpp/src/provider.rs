@@ -3,7 +3,7 @@
 
 //! Runtime state for ETW providers.
 
-use core::sync::atomic::{AtomicPtr, AtomicU64, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
 pub const UNINITIALIZED: u8 = 0;
 pub const INITIALIZING: u8 = 1;
@@ -23,8 +23,6 @@ pub struct ProviderState {
     pub enabled_level: AtomicU8,
     pub enabled_keywords: AtomicU64,
     pub init_state: AtomicU8,
-    /// IFR auto-log context pointer, set by `writer::init_tracing`.
-    pub auto_log_context: AtomicPtr<core::ffi::c_void>,
 }
 
 // SAFETY: All fields are atomic — concurrent access is safe.
@@ -37,7 +35,6 @@ impl ProviderState {
             enabled_level: AtomicU8::new(0),
             enabled_keywords: AtomicU64::new(0),
             init_state: AtomicU8::new(UNINITIALIZED),
-            auto_log_context: AtomicPtr::new(core::ptr::null_mut()),
         }
     }
 
@@ -56,13 +53,6 @@ impl ProviderState {
     #[inline]
     pub fn reg_handle(&self) -> u64 {
         self.reg_handle.load(Ordering::Relaxed)
-    }
-
-    /// Returns the IFR auto-log context pointer.
-    #[doc(hidden)]
-    #[inline]
-    pub fn auto_log_context(&self) -> *mut core::ffi::c_void {
-        self.auto_log_context.load(Ordering::Relaxed)
     }
 }
 

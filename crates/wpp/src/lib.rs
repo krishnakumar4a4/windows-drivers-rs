@@ -16,6 +16,8 @@ pub mod ifr;
 
 pub use field::WppField;
 pub use provider::ProviderState;
+#[cfg(feature = "kernel_mode")]
+pub use ifr::IFRState;
 pub use wpp_macros::__wpp_trace_impl;
 pub use wpp_macros::wpp_control_guids;
 

@@ -34,13 +34,10 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
 
     parse_macro_input!(args with attr_parser);
 
-    // Generate WPP provider init/cleanup if trace_providers specified
-    let num_providers = trace_provider_paths.len();
-
     let (wpp_cleanup_param, ifr_block) = if trace_provider_paths.is_empty() {
         (quote! { None }, quote! {})
     } else {
-        // Cleanup: IFR stop + provider clean_up in reverse order
+        // Cleanup: provider clean_up in reverse order, then IFR cleanup
         let cleanup_calls: Vec<proc_macro2::TokenStream> = trace_provider_paths
             .iter()
             .rev()
@@ -49,38 +46,30 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
 
         let cleanup_fn = quote! {
             fn __wpp_cleanup() {
-                __wpp_ifr_cleanup();
                 #(#cleanup_calls)*
+                __wpp_ifr::cleanup();
             }
             Some(__wpp_cleanup as fn())
         };
 
-        // Init block: phase (a) create CBs → provider inits → phase (b) start IFR
+        // Init block: IFR init first (creates CBs, links, sets GUIDs, starts),
+        // then individual provider inits (ETW registration)
         let init_calls: Vec<proc_macro2::TokenStream> = trace_provider_paths
             .iter()
             .map(|p| quote! { unsafe { #p::init(); } })
             .collect();
 
-        let state_refs: Vec<proc_macro2::TokenStream> = trace_provider_paths
-            .iter()
-            .map(|p| quote! { &#p::STATE })
-            .collect();
-
         let ifr = quote! {
             {
-                // Phase (a): create CB array + link Next pointers
-                let (__wpp_cb, __wpp_num) = __wpp_ifr_create_cbs();
-                // Provider inits — each sets ControlGuid on its own CB
+                // IFR init: create CB array, link, set GUIDs, start auto-log
+                unsafe {
+                    __wpp_ifr::init(
+                        driver as *mut ::wdf::DRIVER_OBJECT as *mut core::ffi::c_void,
+                        registry_path as *const _ as *const core::ffi::c_void,
+                    );
+                }
+                // Provider inits — ETW registration
                 #(#init_calls)*
-                // Phase (b): start IFR auto-log recorder
-                let __wpp_states: [&::wpp::ProviderState; #num_providers] =
-                    [#(#state_refs),*];
-                __wpp_ifr_start(
-                    __wpp_cb,
-                    driver as *mut ::wdf::DRIVER_OBJECT as *mut core::ffi::c_void,
-                    registry_path as *const _ as *const core::ffi::c_void,
-                    &__wpp_states,
-                );
             }
         };
 
