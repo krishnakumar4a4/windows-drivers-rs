@@ -576,17 +576,17 @@ fn generate_ifr_module(providers: &[ProviderDecl]) -> TokenStream {
     let wpp_flag_len_lit = proc_macro2::Literal::usize_unsuffixed(wpp_flag_len);
 
     // TMC codeview annotations for each provider
-    let codeview_annotations: Vec<TokenStream> = providers
-        .iter()
-        .map(|p| {
-            let guid = &p.guid_str;
-            let provider_name = p.name.to_string();
-            let flags: Vec<String> = p.keywords.iter().map(|kw| kw.name.to_string()).collect();
-            quote! {
-                core::hint::codeview_annotation!("TMC:", #guid, #provider_name, #(#flags),*);
-            }
-        })
-        .collect();
+    // let codeview_annotations: Vec<TokenStream> = providers
+    //     .iter()
+    //     .map(|p| {
+    //         let guid = &p.guid_str;
+    //         let provider_name = p.name.to_string();
+    //         let flags: Vec<String> = p.keywords.iter().map(|kw| kw.name.to_string()).collect();
+    //         quote! {
+    //             core::hint::codeview_annotation!("TMC:", #guid, #provider_name, #(#flags),*);
+    //         }
+    //     })
+    //     .collect();
 
     // Link Next pointers between control blocks
     let link_statements: Vec<TokenStream> = (0..num_controls)
@@ -717,7 +717,7 @@ fn generate_ifr_module(providers: &[ProviderDecl]) -> TokenStream {
                 }
 
                 // Emit TMC codeview annotations
-                #(#codeview_annotations)*
+                // #(#codeview_annotations)*
 
                 // Link control block Next pointers
                 let __wpp_arr: &mut [CbType; CONTROLS_COUNT] =
