@@ -8,6 +8,8 @@
 
 #![no_std]
 
+extern crate alloc;
+
 pub mod etw;
 pub mod field;
 pub mod provider;
@@ -15,6 +17,7 @@ pub mod provider;
 pub mod ifr;
 
 pub use field::WppField;
+pub use field::IntoWppField;
 pub use provider::ProviderState;
 #[cfg(feature = "kernel_mode")]
 pub use ifr::IFRState;

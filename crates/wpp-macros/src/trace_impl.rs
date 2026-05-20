@@ -137,6 +137,8 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
 
     let type_params: Vec<Ident> =
         (0..field_count).map(|i| format_ident!("T{}", i)).collect();
+    let arg_names: Vec<Ident> =
+        (0..field_count).map(|i| format_ident!("__a{}", i)).collect();
     let param_names: Vec<Ident> =
         (0..field_count).map(|i| format_ident!("__f{}", i)).collect();
     let bytes_names: Vec<Ident> =
@@ -149,11 +151,11 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
         .collect();
     let bounds: Vec<TokenStream> = type_params
         .iter()
-        .map(|t| quote!(#t: ::wpp::WppField))
+        .map(|t| quote!(#t: ::wpp::IntoWppField))
         .collect();
     let type_name_exprs: Vec<TokenStream> =
-        type_params.iter().map(|t| quote!(#t::TYPE_NAME)).collect();
-    let call_args: Vec<TokenStream> = args.iter().map(|a| quote!(&#a)).collect();
+        type_params.iter().map(|t| quote!(<<#t as ::wpp::IntoWppField>::Output as ::wpp::WppField>::TYPE_NAME)).collect();
+    let call_args: Vec<TokenStream> = arg_names.iter().map(|a| quote!(&#a)).collect();
 
     let data_descriptors: Vec<TokenStream> = bytes_names
         .iter()
@@ -191,10 +193,11 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                     #(#type_name_exprs),*
                 );
             }
+            #(let #arg_names = #args;)*
             __wpp_schema( #(#call_args),* );
 
-            #(let #param_names = &#args;)*
-            #(let #bytes_names = ::wpp::WppField::as_bytes(#param_names);)*
+            #(let #param_names = ::wpp::IntoWppField::into_wpp_field(#arg_names);)*
+            #(let #bytes_names = ::wpp::WppField::as_bytes(&#param_names);)*
 
             // ETW: gated by is_enabled (real-time trace session active)
             {
