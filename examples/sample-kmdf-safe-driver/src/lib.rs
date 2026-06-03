@@ -11,6 +11,7 @@ use wdf::{
 
 use core::fmt;
 extern crate alloc;
+use alloc::{boxed::Box, rc::Rc, sync::Arc, vec};
 
 const MAX_WRITE_LENGTH: usize = 1024 * 40;
 
@@ -78,6 +79,34 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
 
     let state = DriverState { initialized: true, irql: 2 };
     trace!(INFO, GENERAL, "Driver state: {:?}", state);
+
+    // --- Standard library container types via {:?} Debug ---
+    let items = vec![1, 2, 3];
+    trace!(INFO, GENERAL, "Vec: {:?}", items);
+
+    let boxed = Box::new(42);
+    trace!(INFO, GENERAL, "Box: {:?}", boxed);
+
+    let arc_val = Arc::new(99);
+    trace!(INFO, GENERAL, "Arc: {:?}", arc_val);
+
+    let rc_val = Rc::new(77);
+    trace!(INFO, GENERAL, "Rc: {:?}", rc_val);
+
+    // Note: Mutex and RwLock are std-only, not available in no_std kernel drivers.
+    // Use wdf::SpinLock for kernel synchronization instead.
+
+    // --- Option: both variants ---
+    let some_val: Option<i32> = Some(123);
+    let none_val: Option<i32> = None;
+    trace!(INFO, GENERAL, "Option Some: {:?}", some_val);
+    trace!(INFO, GENERAL, "Option None: {:?}", none_val);
+
+    // --- Result: both variants ---
+    let ok_val: Result<i32, &str> = Ok(200);
+    let err_val: Result<i32, &str> = Err("something failed");
+    trace!(INFO, GENERAL, "Result Ok: {:?}", ok_val);
+    trace!(INFO, GENERAL, "Result Err: {:?}", err_val);
 
     trace!(VERBOSE, PNP, "PnP subsystem initialized");
     trace!(WARNING, IO, "IO path ready, max write: {}", MAX_WRITE_LENGTH);
