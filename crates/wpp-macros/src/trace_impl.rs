@@ -144,18 +144,19 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     let bytes_names: Vec<Ident> =
         (0..field_count).map(|i| format_ident!("__b{}", i)).collect();
 
-    let fn_params: Vec<TokenStream> = type_params
+    // Schema function uses output types (all implement WppField) rather than
+    // input types, so it works with both IntoWppField and Display types.
+    let schema_params: Vec<TokenStream> = type_params
         .iter()
         .zip(param_names.iter())
         .map(|(t, p)| quote!(#p: &#t))
         .collect();
-    let bounds: Vec<TokenStream> = type_params
+    let schema_bounds: Vec<TokenStream> = type_params
         .iter()
-        .map(|t| quote!(#t: ::wpp::IntoWppField))
+        .map(|t| quote!(#t: ::wpp::WppField))
         .collect();
-    let type_name_exprs: Vec<TokenStream> =
-        type_params.iter().map(|t| quote!(<<#t as ::wpp::IntoWppField>::Output as ::wpp::WppField>::TYPE_NAME)).collect();
-    let call_args: Vec<TokenStream> = arg_names.iter().map(|a| quote!(&#a)).collect();
+    let schema_type_names: Vec<TokenStream> =
+        type_params.iter().map(|t| quote!(#t::TYPE_NAME)).collect();
 
     let data_descriptors: Vec<TokenStream> = bytes_names
         .iter()
@@ -180,8 +181,18 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
 
     let output = if field_count > 0 {
         quote! {{
+            // Bring fallback trait into scope for autoref dispatch
+            use ::wpp::WppDisplayFallback as _;
+
+            // Convert arguments: autoref dispatch prefers IntoWppField,
+            // falls back to Display via TraceFmtBuf.
+            #(let #arg_names = #args;)*
+            #(let #param_names = ::wpp::WppConvert(#arg_names).convert();)*
+            #(let #bytes_names = ::wpp::WppField::as_bytes(&#param_names);)*
+
+            // Schema function emits codeview annotation using the output types
             #[inline(always)]
-            fn __wpp_schema< #(#bounds),* >( #(#fn_params),* ) {
+            fn __wpp_schema< #(#schema_bounds),* >( #(#schema_params),* ) {
                 core::hint::codeview_annotation!(
                     "WPP_EVENT",
                     #provider_name,
@@ -190,14 +201,10 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                     #level_str,
                     #keyword_str,
                     #format_string,
-                    #(#type_name_exprs),*
+                    #(#schema_type_names),*
                 );
             }
-            #(let #arg_names = #args;)*
-            __wpp_schema( #(#call_args),* );
-
-            #(let #param_names = ::wpp::IntoWppField::into_wpp_field(#arg_names);)*
-            #(let #bytes_names = ::wpp::WppField::as_bytes(&#param_names);)*
+            __wpp_schema( #(&#param_names),* );
 
             // ETW: gated by is_enabled (real-time trace session active)
             {

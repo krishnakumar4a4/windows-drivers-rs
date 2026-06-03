@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 
 use wdk_sys::{NT_ERROR, NT_INFORMATION, NT_SUCCESS, NT_WARNING, NTSTATUS};
+use wpp::{IntoWppField, WppField};
 
 // TODO: Needs redesign. Currently we are treating
 // warnings as success (see `NtSStatusNonError` and the
@@ -274,6 +275,100 @@ impl StatusCodeExt for i32 {
         F: FnOnce() -> NtStatusError,
     {
         if NT_SUCCESS(self) { Ok(()) } else { Err(f()) }
+    }
+}
+
+/// A Windows HRESULT value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HResult(i32);
+
+impl HResult {
+    pub fn from(code: i32) -> Self {
+        Self(code)
+    }
+
+    pub const fn code(&self) -> i32 {
+        self.0
+    }
+
+    pub fn is_success(&self) -> bool {
+        self.0 >= 0
+    }
+}
+
+impl From<i32> for HResult {
+    fn from(code: i32) -> Self {
+        Self(code)
+    }
+}
+
+impl Into<i32> for HResult {
+    fn into(self) -> i32 {
+        self.0
+    }
+}
+
+// WppField implementations for status types
+
+impl WppField for NtStatus {
+    const TYPE_NAME: &'static str = "NTSTATUS";
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        let code = self.code();
+        unsafe {
+            core::slice::from_raw_parts(&code as *const i32 as *const u8, core::mem::size_of::<i32>())
+        }
+    }
+}
+
+impl IntoWppField for NtStatus {
+    type Output = Self;
+
+    #[inline]
+    fn into_wpp_field(self) -> Self {
+        self
+    }
+}
+
+impl<'a> IntoWppField for &'a NtStatus {
+    type Output = NtStatus;
+
+    #[inline]
+    fn into_wpp_field(self) -> NtStatus {
+        *self
+    }
+}
+
+impl WppField for HResult {
+    const TYPE_NAME: &'static str = "HRESULT";
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                &self.0 as *const i32 as *const u8,
+                core::mem::size_of::<i32>(),
+            )
+        }
+    }
+}
+
+impl IntoWppField for HResult {
+    type Output = Self;
+
+    #[inline]
+    fn into_wpp_field(self) -> Self {
+        self
+    }
+}
+
+impl<'a> IntoWppField for &'a HResult {
+    type Output = HResult;
+
+    #[inline]
+    fn into_wpp_field(self) -> HResult {
+        *self
     }
 }
 

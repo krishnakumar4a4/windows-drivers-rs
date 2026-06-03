@@ -143,3 +143,88 @@ impl_into_wpp_field_passthrough! {
     i8, u8, i16, u16, i32, u32, i64, u64,
     f32, f64, bool, usize, isize,
 }
+
+// ---------------------------------------------------------------------------
+// TraceFmtBuf — Display-to-bytes formatter for custom types
+// ---------------------------------------------------------------------------
+
+/// A formatting buffer that collects `Display` output into a `Vec<u8>` and
+/// produces a null-terminated byte slice for WPP tracing.
+pub struct TraceFmtBuf {
+    buf: alloc::vec::Vec<u8>,
+}
+
+impl TraceFmtBuf {
+    /// Creates a new empty buffer with a small pre-allocation.
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            buf: alloc::vec::Vec::with_capacity(128),
+        }
+    }
+
+    /// Appends a null terminator. Must be called after writing is complete.
+    #[inline]
+    pub fn finalize(&mut self) {
+        // Truncate at any interior null byte
+        if let Some(pos) = self.buf.iter().position(|&b| b == 0) {
+            self.buf.truncate(pos);
+        }
+        self.buf.push(0); // null terminator
+    }
+}
+
+impl core::fmt::Write for TraceFmtBuf {
+    #[inline]
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.buf.extend_from_slice(s.as_bytes());
+        Ok(())
+    }
+}
+
+impl WppField for TraceFmtBuf {
+    const TYPE_NAME: &'static str = "CString";
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        &self.buf
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Autoref-based dispatch: IntoWppField (preferred) vs Display (fallback)
+// ---------------------------------------------------------------------------
+
+/// Wrapper used by the `trace!` macro for autoref specialization.
+///
+/// Method resolution prefers the **inherent** `convert(self)` (for types that
+/// implement [`IntoWppField`]) over the **trait** `convert(&self)` from
+/// [`WppDisplayFallback`] (for types that implement `Display`).
+pub struct WppConvert<T>(pub T);
+
+// Higher priority: inherent method for IntoWppField types.
+// Rust method resolution finds this first (by-value before by-ref).
+impl<T: IntoWppField> WppConvert<T> {
+    #[inline]
+    pub fn convert(self) -> T::Output {
+        self.0.into_wpp_field()
+    }
+}
+
+/// Fallback trait for types that implement `Display` but not `IntoWppField`.
+/// Found by method resolution via auto-ref (`&self`) when no inherent
+/// `convert` exists.
+pub trait WppDisplayFallback {
+    fn convert(&self) -> TraceFmtBuf;
+}
+
+impl<T: core::fmt::Display> WppDisplayFallback for WppConvert<T> {
+    #[inline]
+    fn convert(&self) -> TraceFmtBuf {
+        use core::fmt::Write;
+        let mut buf = TraceFmtBuf::new();
+        let _ = write!(buf, "{}", self.0);
+        buf.finalize();
+        buf
+    }
+}

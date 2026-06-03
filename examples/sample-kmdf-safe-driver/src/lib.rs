@@ -6,12 +6,31 @@
 
 use wdf::{
     driver_entry, println, wpp_control_guids, DeviceInit, Driver, DriverConfig, DriverObject,
-    NtResult, UnicodeString,
+    HResult, NtResult, NtStatus, UnicodeString,
 };
 
+use core::fmt;
 extern crate alloc;
 
 const MAX_WRITE_LENGTH: usize = 1024 * 40;
+
+/// Example custom struct with a `Display` implementation.
+/// The `trace!` macro automatically serializes it via `TraceFmtBuf`.
+struct DeviceInfo {
+    vendor_id: u16,
+    device_id: u16,
+    revision: u8,
+}
+
+impl fmt::Display for DeviceInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{{vendor_id=0x{:04X}, device_id=0x{:04X}, revision={}}}",
+            self.vendor_id, self.device_id, self.revision
+        )
+    }
+}
 
 wpp_control_guids!(
     SampleDriver cb94defb-592a-4509-8f2e-54f204929669 {
@@ -39,6 +58,15 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
 
     let msg = "rust for drivers";
     trace!(INFO, GENERAL, "Safe Rust driver entry complete. Int: {}, Str: {}", 42, msg);
+
+    let nt_status = NtStatus::from(0); // STATUS_SUCCESS
+    trace!(INFO, GENERAL, "NtStatus check: {}", nt_status);
+
+    let hr = HResult::from(0); // S_OK
+    trace!(INFO, GENERAL, "HResult check: {}", hr);
+
+    let dev = DeviceInfo { vendor_id: 0x8086, device_id: 0x1234, revision: 3 };
+    trace!(INFO, GENERAL, "Device info: {}", dev);
 
     trace!(VERBOSE, PNP, "PnP subsystem initialized");
     trace!(WARNING, IO, "IO path ready, max write: {}", MAX_WRITE_LENGTH);
