@@ -228,3 +228,15 @@ impl<T: core::fmt::Display> WppDisplayFallback for WppConvert<T> {
         buf
     }
 }
+
+/// Formats a `Debug` value into a [`TraceFmtBuf`] for WPP tracing.
+///
+/// Used by the `trace!` macro when a `{:?}` placeholder is encountered.
+#[inline]
+pub fn debug_to_trace_buf<T: core::fmt::Debug>(val: &T) -> TraceFmtBuf {
+    use core::fmt::Write;
+    let mut buf = TraceFmtBuf::new();
+    let _ = write!(buf, "{:?}", val);
+    buf.finalize();
+    buf
+}

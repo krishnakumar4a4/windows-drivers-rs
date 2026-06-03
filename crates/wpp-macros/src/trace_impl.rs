@@ -118,13 +118,13 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     let field_count = args.len();
 
     let event_id = compute_event_id(format_string);
-    let placeholder_count = count_placeholders(format_string);
-    if placeholder_count != field_count {
+    let placeholder_kinds = parse_placeholders(format_string);
+    if placeholder_kinds.len() != field_count {
         return Err(syn::Error::new(
             proc_macro2::Span::call_site(),
             format!(
                 "format string has {} placeholder(s) but {} argument(s)",
-                placeholder_count, field_count
+                placeholder_kinds.len(), field_count
             ),
         ));
     }
@@ -158,6 +158,21 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     let schema_type_names: Vec<TokenStream> =
         type_params.iter().map(|t| quote!(#t::TYPE_NAME)).collect();
 
+    // Per-argument conversion: {:?} uses Debug, {} uses autoref dispatch
+    let convert_stmts: Vec<TokenStream> = arg_names
+        .iter()
+        .zip(param_names.iter())
+        .zip(placeholder_kinds.iter())
+        .map(|((a, p), kind)| match kind {
+            PlaceholderKind::Debug => {
+                quote!(let #p = ::wpp::debug_to_trace_buf(&#a);)
+            }
+            PlaceholderKind::Display => {
+                quote!(let #p = ::wpp::WppConvert(#a).convert();)
+            }
+        })
+        .collect();
+
     let data_descriptors: Vec<TokenStream> = bytes_names
         .iter()
         .map(|b| {
@@ -185,9 +200,9 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
             use ::wpp::WppDisplayFallback as _;
 
             // Convert arguments: autoref dispatch prefers IntoWppField,
-            // falls back to Display via TraceFmtBuf.
+            // falls back to Display via TraceFmtBuf. {:?} uses Debug directly.
             #(let #arg_names = #args;)*
-            #(let #param_names = ::wpp::WppConvert(#arg_names).convert();)*
+            #(#convert_stmts)*
             #(let #bytes_names = ::wpp::WppField::as_bytes(&#param_names);)*
 
             // Schema function emits codeview annotation using the output types
@@ -322,24 +337,38 @@ fn compute_event_id(fmt: &str) -> u16 {
     ((fnv1a_64(fmt.as_bytes()) % 65534) + 1) as u16
 }
 
-fn count_placeholders(fmt: &str) -> usize {
-    let mut count = 0;
+/// Whether a format placeholder uses Display (`{}`) or Debug (`{:?}`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PlaceholderKind {
+    Display,
+    Debug,
+}
+
+/// Parses a Rust-style format string and returns the kind of each placeholder.
+fn parse_placeholders(fmt: &str) -> Vec<PlaceholderKind> {
+    let mut kinds = Vec::new();
     let mut chars = fmt.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '{' {
             if chars.peek() == Some(&'{') {
-                chars.next();
+                chars.next(); // escaped {{
             } else {
+                let mut spec = String::new();
                 while let Some(c2) = chars.next() {
                     if c2 == '}' {
                         break;
                     }
+                    spec.push(c2);
                 }
-                count += 1;
+                if spec == ":?" {
+                    kinds.push(PlaceholderKind::Debug);
+                } else {
+                    kinds.push(PlaceholderKind::Display);
+                }
             }
         }
     }
-    count
+    kinds
 }
 
 fn fnv1a_64(data: &[u8]) -> u64 {
@@ -357,12 +386,18 @@ mod tests {
 
     #[test]
     fn count_simple() {
-        assert_eq!(count_placeholders("{} {}"), 2);
+        assert_eq!(parse_placeholders("{} {}").len(), 2);
     }
 
     #[test]
     fn count_escaped() {
-        assert_eq!(count_placeholders("{{}} {}"), 1);
+        assert_eq!(parse_placeholders("{{}} {}").len(), 1);
+    }
+
+    #[test]
+    fn parse_debug_placeholder() {
+        let kinds = parse_placeholders("{} {:?} {}");
+        assert_eq!(kinds, vec![PlaceholderKind::Display, PlaceholderKind::Debug, PlaceholderKind::Display]);
     }
 
     #[test]

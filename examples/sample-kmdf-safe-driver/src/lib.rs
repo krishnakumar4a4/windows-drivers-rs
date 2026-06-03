@@ -43,6 +43,14 @@ wpp_control_guids!(
     }
 );
 
+/// Example struct with only `Debug` (no `Display`).
+/// The `trace!` macro formats it via `{:?}` using `debug_to_trace_buf`.
+#[derive(Debug)]
+struct DriverState {
+    initialized: bool,
+    irql: u8,
+}
+
 // Modules declared after wpp_control_guids! so trace macros are in scope
 mod device;
 mod queue;
@@ -67,6 +75,9 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
 
     let dev = DeviceInfo { vendor_id: 0x8086, device_id: 0x1234, revision: 3 };
     trace!(INFO, GENERAL, "Device info: {}", dev);
+
+    let state = DriverState { initialized: true, irql: 2 };
+    trace!(INFO, GENERAL, "Driver state: {:?}", state);
 
     trace!(VERBOSE, PNP, "PnP subsystem initialized");
     trace!(WARNING, IO, "IO path ready, max write: {}", MAX_WRITE_LENGTH);

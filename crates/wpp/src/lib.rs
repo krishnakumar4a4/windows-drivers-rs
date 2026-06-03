@@ -21,6 +21,7 @@ pub use field::IntoWppField;
 pub use field::TraceFmtBuf;
 pub use field::WppConvert;
 pub use field::WppDisplayFallback;
+pub use field::debug_to_trace_buf;
 pub use provider::ProviderState;
 #[cfg(feature = "kernel_mode")]
 pub use ifr::IFRState;
