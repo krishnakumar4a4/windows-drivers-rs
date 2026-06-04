@@ -52,6 +52,106 @@ impl_wpp_field! {
     isize => "isize",
 }
 
+// --- char: traced as its u32 Unicode scalar value ---
+
+impl WppField for char {
+    const TYPE_NAME: &'static str = "char";
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self as *const Self as *const u8,
+                core::mem::size_of::<Self>(),
+            )
+        }
+    }
+}
+
+impl IntoWppField for char {
+    type Output = Self;
+
+    #[inline]
+    fn into_wpp_field(self) -> Self {
+        self
+    }
+}
+
+impl<'a> IntoWppField for &'a char {
+    type Output = char;
+
+    #[inline]
+    fn into_wpp_field(self) -> char {
+        *self
+    }
+}
+
+// --- Raw pointers: traced as usize (address) ---
+
+impl<T> WppField for *const T {
+    const TYPE_NAME: &'static str = "*const";
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self as *const Self as *const u8,
+                core::mem::size_of::<Self>(),
+            )
+        }
+    }
+}
+
+impl<T> IntoWppField for *const T {
+    type Output = Self;
+
+    #[inline]
+    fn into_wpp_field(self) -> Self {
+        self
+    }
+}
+
+impl<'a, T> IntoWppField for &'a *const T {
+    type Output = *const T;
+
+    #[inline]
+    fn into_wpp_field(self) -> *const T {
+        *self
+    }
+}
+
+impl<T> WppField for *mut T {
+    const TYPE_NAME: &'static str = "*mut";
+
+    #[inline]
+    fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            core::slice::from_raw_parts(
+                self as *const Self as *const u8,
+                core::mem::size_of::<Self>(),
+            )
+        }
+    }
+}
+
+impl<T> IntoWppField for *mut T {
+    type Output = Self;
+
+    #[inline]
+    fn into_wpp_field(self) -> Self {
+        self
+    }
+}
+
+impl<'a, T> IntoWppField for &'a *mut T {
+    type Output = *mut T;
+
+    #[inline]
+    fn into_wpp_field(self) -> *mut T {
+        *self
+    }
+}
+
 impl WppField for &CStr {
     const TYPE_NAME: &'static str = "&CStr";
 

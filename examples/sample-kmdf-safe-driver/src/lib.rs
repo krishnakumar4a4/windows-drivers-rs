@@ -93,6 +93,17 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
     let rc_val = Rc::new(77);
     trace!(INFO, GENERAL, "Rc: {:?}", rc_val);
 
+    // --- Raw pointers and char ---
+    let ptr: *const u32 = &42u32 as *const u32;
+    trace!(INFO, GENERAL, "Raw pointer: {}", ptr);
+
+    let mut mut_val = 7u32;
+    let mut_ptr: *mut u32 = &mut mut_val as *mut u32;
+    trace!(INFO, GENERAL, "Mut pointer: {}", mut_ptr);
+
+    let ch = 'R';
+    trace!(INFO, GENERAL, "Char: {}", ch);
+
     // Note: Mutex and RwLock are std-only, not available in no_std kernel drivers.
     // Use wdf::SpinLock for kernel synchronization instead.
 
