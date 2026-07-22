@@ -154,6 +154,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     validate_unique_keywords(&parsed.providers)?;
 
     output.extend(generate_control_guid_array(&parsed.providers));
+    output.extend(generate_tmc_emit_fn(&parsed.providers));
     for (idx, provider) in parsed.providers.iter().enumerate() {
         output.extend(generate_provider_module(provider, idx));
     }
@@ -194,16 +195,43 @@ fn generate_control_guid_array(providers: &[ProviderDecl]) -> TokenStream {
     }
 }
 
+/// Generates a single top-level function that emits every provider's `TMC:`
+/// control-GUID PDB annotation. Emitting all TMC annotations from one
+/// `#[inline(never)]` function keeps their `S_ANNOTATION` records contiguous in
+/// the PDB (instead of scattered across each provider's `init()`), giving PDB
+/// consumers (tracepdb / TraceView) a predictable, grouped layout.
+fn generate_tmc_emit_fn(providers: &[ProviderDecl]) -> TokenStream {
+    let annotations: Vec<TokenStream> = providers
+        .iter()
+        .map(|p| {
+            let guid_str = &p.guid_str;
+            let provider_name_str = p.name.to_string();
+            // TMC annotation lists each flag by name only (no bit suffix).
+            let kw_annotation_strings: Vec<String> =
+                p.keywords.iter().map(|kw| kw.name.to_string()).collect();
+            quote! {
+                core::hint::codeview_annotation!(
+                    "TMC:", #guid_str, #provider_name_str,
+                    #(#kw_annotation_strings),*
+                );
+            }
+        })
+        .collect();
+
+    quote! {
+        /// Emits all providers' `TMC:` control-GUID annotations, grouped in one
+        /// function. Marked `#[inline(never)]` so the annotations stay together
+        /// in the PDB; called from each provider's `init()` so it is retained.
+        #[doc(hidden)]
+        #[inline(never)]
+        pub fn __wpp_emit_control_guids() {
+            #(#annotations)*
+        }
+    }
+}
+
 fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
     let mod_name = &p.name;
-    let guid_str = &p.guid_str;
-
-    let dg = compute_decode_guid(&p.name.to_string(), guid_str);
-    let (dd1, dd2, dd3) = (dg.d1, dg.d2, dg.d3);
-    let dd4_tokens: Vec<TokenStream> = dg.d4.iter().map(|b| {
-        let b = *b;
-        quote!(#b)
-    }).collect();
 
     let kw_consts: Vec<TokenStream> = p.keywords.iter().map(|kw| {
         let name = &kw.name;
@@ -212,9 +240,6 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
     }).collect();
 
     let provider_name_str = p.name.to_string();
-    let kw_annotation_strings: Vec<String> = p.keywords.iter()
-        .map(|kw| format!("{}={}", kw.name, kw.bit_position))
-        .collect();
 
     let cb_index_lit = proc_macro2::Literal::usize_unsuffixed(idx);
 
@@ -226,9 +251,6 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
             pub fn control_guid() -> &'static ::wpp::GUID {
                 &super::WPP_CONTROL_GUIDS[CB_INDEX]
             }
-            pub const DECODE_GUID: ::wpp::GUID = ::wpp::GUID {
-                data1: #dd1, data2: #dd2, data3: #dd3, data4: [#(#dd4_tokens),*],
-            };
             /// Index of this provider's control block in the IFR CB array.
             pub const CB_INDEX: usize = #cb_index_lit;
             #(#kw_consts)*
@@ -246,10 +268,10 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
             /// The caller must ensure `clean_up()` is called before the
             /// module containing this provider is unloaded.
             pub unsafe fn init() {
-                core::hint::codeview_annotation!(
-                    "WPP_PROVIDER", #provider_name_str, #guid_str,
-                    #(#kw_annotation_strings),*
-                );
+                // Emit all providers' TMC control-GUID annotations from a single
+                // grouped function (their PDB records stay contiguous). Called
+                // here so the function is retained in the binary.
+                super::__wpp_emit_control_guids();
                 if STATE.init_state.compare_exchange(
                     ::wpp::provider::UNINITIALIZED,
                     ::wpp::provider::INITIALIZING,
@@ -264,7 +286,23 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
                     &STATE as *const ::wpp::ProviderState as *mut core::ffi::c_void,
                 ) };
                 STATE.reg_handle.store(handle, core::sync::atomic::Ordering::Relaxed);
-                unsafe { ::wpp::etw::set_decode_guid(handle, &DECODE_GUID) };
+                // ModernWpp (WPPv3): mark this Crimson provider as a WPP
+                // trace-message provider so the kernel stamps the WPP header
+                // flag and tracks the PDB DebugId for TMF decoding. Best-effort
+                // — ignored on kernels without the feature. The control GUID
+                // doubles as the decode identity (single-GUID model), matching
+                // the TMF/TMC annotations emitted above.
+                let __wpp_modern_status = unsafe { ::wpp::etw::enable_modern_wpp(handle) };
+                ::wdf::println!(
+                    "enable_modern_wpp[{}]: status={:#010x} -> {}",
+                    #provider_name_str,
+                    __wpp_modern_status,
+                    if __wpp_modern_status == 0 {
+                        "ModernWpp enabled"
+                    } else {
+                        "ModernWpp NOT available on this machine"
+                    }
+                );
                 STATE.init_state.store(
                     ::wpp::provider::INITIALIZED,
                     core::sync::atomic::Ordering::Release,
@@ -774,33 +812,6 @@ fn generate_ifr_module(providers: &[ProviderDecl]) -> TokenStream {
     }
 }
 
-fn compute_decode_guid(name: &str, guid_str: &str) -> GuidParts {
-    let input = format!("{}:{}", name, guid_str);
-    let hash = fnv1a_64(input.as_bytes());
-
-    let d1 = (hash & 0xFFFF_FFFF) as u32;
-    let d2 = ((hash >> 32) & 0xFFFF) as u16;
-    let d3 = ((hash >> 48) & 0x0FFF) as u16 | 0xD000;
-
-    let hash2 = fnv1a_64(&hash.to_le_bytes());
-    let mut d4 = [0u8; 8];
-    for (i, b) in hash2.to_le_bytes().iter().enumerate() {
-        d4[i] = *b;
-    }
-    d4[0] = (d4[0] & 0x3F) | 0x80;
-
-    GuidParts { d1, d2, d3, d4 }
-}
-
-fn fnv1a_64(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for &byte in data {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -811,13 +822,5 @@ mod tests {
         assert_eq!(gp.d1, 0x84bdb2e9);
         assert_eq!(gp.d2, 0x829e);
         assert_eq!(gp.d3, 0x41b3);
-    }
-
-    #[test]
-    fn decode_guid_deterministic() {
-        let g1 = compute_decode_guid("Test", "12345678-1234-1234-1234-123456789abc");
-        let g2 = compute_decode_guid("Test", "12345678-1234-1234-1234-123456789abc");
-        assert_eq!(g1.d1, g2.d1);
-        assert_eq!(g1.d2, g2.d2);
     }
 }

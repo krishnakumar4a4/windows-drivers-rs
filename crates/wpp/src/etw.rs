@@ -162,32 +162,42 @@ pub unsafe fn unregister(handle: u64) -> u32 {
     unsafe { event_unregister(handle) }
 }
 
-/// Set the decode GUID trait on a registered provider.
+/// Marks a registered provider as a ModernWpp (WPPv3) trace-message provider.
+///
+/// This corresponds to `EtwSetInformation(RegHandle, EventProviderSetReserved2,
+/// NULL, 0)`. It requests that the kernel:
+///
+/// * stamp `EVENT_HEADER_FLAG_RESERVED1` on every event written by this
+///   provider, so the trace decoder routes the (Crimson) events to the WPP/TMF
+///   decode path, and
+/// * track the binary's **DebugId** (PDB signature) so the decoder can locate
+///   the PDB that carries the WPPv1 `TMF:`/`TMC:` annotations.
+///
+/// The provider's control GUID is used as the decode identity (single-GUID
+/// model): `EventHeader.ProviderId` already equals the control GUID that the
+/// PDB annotations are keyed under, so no separate decode-GUID descriptor or
+/// trait is needed.
+///
+/// This is best-effort: on kernels without `Feature_ModernWpp`, the call
+/// returns a failure status (e.g. `STATUS_INVALID_DEVICE_REQUEST`) and the
+/// caller should ignore it — the driver still loads, only PDB/TMF decoding of
+/// these events is unavailable.
 ///
 /// # Safety
 ///
-/// `handle` must be a valid registration handle. `decode_guid` must
-/// point to a valid GUID.
-pub unsafe fn set_decode_guid(handle: u64, decode_guid: &GUID) -> u32 {
-    let mut traits = [0u8; 22];
-    let blob_size: u16 = 22;
-    traits[0..2].copy_from_slice(&blob_size.to_le_bytes());
-    traits[2] = 0; // empty provider name
-    let trait_size: u16 = 19;
-    traits[3..5].copy_from_slice(&trait_size.to_le_bytes());
-    traits[5] = 2; // EtwProviderTraitDecodeGuid
-    traits[6..10].copy_from_slice(&decode_guid.data1.to_le_bytes());
-    traits[10..12].copy_from_slice(&decode_guid.data2.to_le_bytes());
-    traits[12..14].copy_from_slice(&decode_guid.data3.to_le_bytes());
-    traits[14..22].copy_from_slice(&decode_guid.data4);
-
-    const EVENT_INFO_CLASS_SET_TRAITS: u32 = 2;
+/// `handle` must be a valid registration handle that has not been unregistered.
+pub unsafe fn enable_modern_wpp(handle: u64) -> u32 {
+    // EVENT_INFO_CLASS::EventProviderSetReserved2 (a.k.a. EventProviderTraceMessage).
+    // Not present in the public SDK enum (which ends at
+    // EventProviderUseDescriptorType = 3 / MaxEventInfo = 4); defined by the
+    // ModernWpp-capable OS.
+    const EVENT_INFO_CLASS_SET_RESERVED2: u32 = 4;
     unsafe {
         event_set_information(
             handle,
-            EVENT_INFO_CLASS_SET_TRAITS,
-            traits.as_ptr() as *const core::ffi::c_void,
-            traits.len() as u32,
+            EVENT_INFO_CLASS_SET_RESERVED2,
+            core::ptr::null(),
+            0,
         )
     }
 }

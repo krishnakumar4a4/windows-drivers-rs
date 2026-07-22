@@ -38,10 +38,10 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
     }
 
     let msg = "rust for drivers";
-    trace!(INFO, GENERAL, "Safe Rust driver entry complete. Int: {}, Str: {}", 42, msg);
+    trace!(INFO, GENERAL, "Safe Rust driver entry complete. Int: {=i32}, Str: {=str}", 42, msg);
 
     trace!(VERBOSE, PNP, "PnP subsystem initialized");
-    trace!(WARNING, IO, "IO path ready, max write: {}", MAX_WRITE_LENGTH);
+    trace!(WARNING, IO, "IO path ready, max write: {=usize}", MAX_WRITE_LENGTH);
 
     // Default trace: no keyword, routes to first provider
     trace!(INFO, "Driver entry complete, no keyword");
