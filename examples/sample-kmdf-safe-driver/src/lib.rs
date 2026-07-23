@@ -40,6 +40,27 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
     let msg = "rust for drivers";
     trace!(INFO, GENERAL, "Safe Rust driver entry complete. Int: {=i32}, Str: {=str}", 42, msg);
 
+    // Signed integer width type specifiers.
+    trace!(
+        INFO, GENERAL,
+        "Signed widths: i8={=i8}, i16={=i16}, i32={=i32}, i64={=i64}, isize={=isize}",
+        -8_i8, -1600_i16, -320_000_i32, -64_000_000_000_i64, -42_isize
+    );
+
+    // Unsigned integer width type specifiers.
+    trace!(
+        INFO, GENERAL,
+        "Unsigned widths: u8={=u8}, u16={=u16}, u32={=u32}, u64={=u64}, usize={=usize}",
+        200_u8, 60_000_u16, 4_000_000_000_u32, 18_000_000_000_000_000_000_u64, MAX_WRITE_LENGTH
+    );
+
+    // Boolean and C-string type specifiers.
+    trace!(
+        INFO, GENERAL,
+        "Flags: initialized={=bool}, safe_mode={=bool}, build={=cstr}",
+        true, false, c"safe-rust"
+    );
+
     trace!(VERBOSE, PNP, "PnP subsystem initialized");
     trace!(WARNING, IO, "IO path ready, max write: {=usize}", MAX_WRITE_LENGTH);
 

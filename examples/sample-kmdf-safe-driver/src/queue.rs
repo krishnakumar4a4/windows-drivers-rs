@@ -45,6 +45,20 @@ pub(crate) fn queue_initialize(device: &Device) -> NtResult<()> {
 
     trace!(VERBOSE, GENERAL, "Queue initialized");
 
+    // C-string and signed-width type specifiers.
+    trace!(
+        INFO, GENERAL,
+        "Queue tag={=cstr}, dispatch={=cstr}, priority={=i16}",
+        c"default-queue", c"sequential", -1_i16
+    );
+
+    // Unsigned 32-bit and boolean specifiers.
+    trace!(
+        WARNING, IO,
+        "Queue limits: max_write={=u32}, cancellable={=bool}",
+        MAX_WRITE_LENGTH as u32, true
+    );
+
     Ok(())
 }
 
