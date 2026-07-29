@@ -29,6 +29,17 @@ pub struct EVENT_DATA_DESCRIPTOR {
     pub Reserved: u32,
 }
 
+/// `EVENT_DATA_DESCRIPTOR.Type` value marking a descriptor as the per-event
+/// decode GUID (RS name: `EVENT_DATA_DESCRIPTOR_TYPE_DECODE_GUID`; servicing
+/// name: `EVENT_DATA_DESCRIPTOR_TYPE_RESERVED1`).
+///
+/// The `Type` field is the low byte of the `Reserved` union, so setting the
+/// whole `Reserved` word to this value tags the descriptor's `Ptr`/`Size` as a
+/// `GUID` used for TMF decode lookup rather than as event payload. Requires the
+/// provider to have opted in via [`enable_modern_wpp`] (which sets
+/// `EventProviderUseDescriptorType`).
+pub const EVENT_DATA_DESCRIPTOR_TYPE_RESERVED1: u32 = 4;
+
 /// Enable callback function pointer type.
 type EnableCallback = Option<
     unsafe extern "system" fn(
@@ -173,15 +184,20 @@ pub unsafe fn unregister(handle: u64) -> u32 {
 /// * track the binary's **DebugId** (PDB signature) so the decoder can locate
 ///   the PDB that carries the WPPv1 `TMF:`/`TMC:` annotations.
 ///
-/// The provider's control GUID is used as the decode identity (single-GUID
-/// model): `EventHeader.ProviderId` already equals the control GUID that the
-/// PDB annotations are keyed under, so no separate decode-GUID descriptor or
-/// trait is needed.
+/// It additionally sets `EventProviderUseDescriptorType`, so that the kernel
+/// honours `EVENT_DATA_DESCRIPTOR.Type`. This is required for the per-module
+/// decode-GUID model (Option B): each event prepends a descriptor of type
+/// [`EVENT_DATA_DESCRIPTOR_TYPE_RESERVED1`] carrying the module's decode GUID,
+/// which the kernel copies into `EventHeader.ProviderId` (with
+/// `EVENT_HEADER_FLAG_DECODE_GUID`). The decoder then looks up that module's
+/// TMF under the decode GUID — decoupled from the provider control GUID used
+/// for registration and enablement.
 ///
 /// This is best-effort: on kernels without `Feature_ModernWpp`, the call
 /// returns a failure status (e.g. `STATUS_INVALID_DEVICE_REQUEST`) and the
 /// caller should ignore it — the driver still loads, only PDB/TMF decoding of
-/// these events is unavailable.
+/// these events is unavailable. The returned status is that of the primary
+/// `EventProviderSetReserved2` call.
 ///
 /// # Safety
 ///
@@ -192,12 +208,29 @@ pub unsafe fn enable_modern_wpp(handle: u64) -> u32 {
     // EventProviderUseDescriptorType = 3 / MaxEventInfo = 4); defined by the
     // ModernWpp-capable OS.
     const EVENT_INFO_CLASS_SET_RESERVED2: u32 = 4;
-    unsafe {
+    // EVENT_INFO_CLASS::EventProviderUseDescriptorType — honour
+    // `EVENT_DATA_DESCRIPTOR.Type` so the leading RESERVED1 descriptor is
+    // treated as the decode GUID (metadata) instead of event payload.
+    const EVENT_INFO_CLASS_USE_DESCRIPTOR_TYPE: u32 = 3;
+
+    let status = unsafe {
         event_set_information(
             handle,
             EVENT_INFO_CLASS_SET_RESERVED2,
             core::ptr::null(),
             0,
         )
-    }
+    };
+
+    let use_descriptor_type: u8 = 1; // BOOLEAN TRUE
+    let _ = unsafe {
+        event_set_information(
+            handle,
+            EVENT_INFO_CLASS_USE_DESCRIPTOR_TYPE,
+            &use_descriptor_type as *const u8 as *const core::ffi::c_void,
+            core::mem::size_of::<u8>() as u32,
+        )
+    };
+
+    status
 }

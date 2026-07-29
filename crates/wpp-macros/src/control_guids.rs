@@ -154,7 +154,6 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     validate_unique_keywords(&parsed.providers)?;
 
     output.extend(generate_control_guid_array(&parsed.providers));
-    output.extend(generate_tmc_emit_fn(&parsed.providers));
     for (idx, provider) in parsed.providers.iter().enumerate() {
         output.extend(generate_provider_module(provider, idx));
     }
@@ -195,41 +194,6 @@ fn generate_control_guid_array(providers: &[ProviderDecl]) -> TokenStream {
     }
 }
 
-/// Generates a single top-level function that emits every provider's `TMC:`
-/// control-GUID PDB annotation. Emitting all TMC annotations from one
-/// `#[inline(never)]` function keeps their `S_ANNOTATION` records contiguous in
-/// the PDB (instead of scattered across each provider's `init()`), giving PDB
-/// consumers (tracepdb / TraceView) a predictable, grouped layout.
-fn generate_tmc_emit_fn(providers: &[ProviderDecl]) -> TokenStream {
-    let annotations: Vec<TokenStream> = providers
-        .iter()
-        .map(|p| {
-            let guid_str = &p.guid_str;
-            let provider_name_str = p.name.to_string();
-            // TMC annotation lists each flag by name only (no bit suffix).
-            let kw_annotation_strings: Vec<String> =
-                p.keywords.iter().map(|kw| kw.name.to_string()).collect();
-            quote! {
-                core::hint::codeview_annotation!(
-                    "TMC:", #guid_str, #provider_name_str,
-                    #(#kw_annotation_strings),*
-                );
-            }
-        })
-        .collect();
-
-    quote! {
-        /// Emits all providers' `TMC:` control-GUID annotations, grouped in one
-        /// function. Marked `#[inline(never)]` so the annotations stay together
-        /// in the PDB; called from each provider's `init()` so it is retained.
-        #[doc(hidden)]
-        #[inline(never)]
-        pub fn __wpp_emit_control_guids() {
-            #(#annotations)*
-        }
-    }
-}
-
 fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
     let mod_name = &p.name;
 
@@ -240,6 +204,10 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
     }).collect();
 
     let provider_name_str = p.name.to_string();
+    let guid_str = &p.guid_str;
+    // TMC annotation lists each flag by name only (no bit suffix).
+    let kw_annotation_strings: Vec<String> =
+        p.keywords.iter().map(|kw| kw.name.to_string()).collect();
 
     let cb_index_lit = proc_macro2::Literal::usize_unsuffixed(idx);
 
@@ -268,10 +236,15 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
             /// The caller must ensure `clean_up()` is called before the
             /// module containing this provider is unloaded.
             pub unsafe fn init() {
-                // Emit all providers' TMC control-GUID annotations from a single
-                // grouped function (their PDB records stay contiguous). Called
-                // here so the function is retained in the binary.
-                super::__wpp_emit_control_guids();
+                // Emit this provider's `TMC:` control-GUID annotation (control
+                // GUID -> provider name + flag names). It is keyed under the
+                // control GUID, which under Option B is distinct from the
+                // per-module decode GUIDs that key the TMF records, so TMC and
+                // TMF annotations never share a GUID and cannot collide.
+                core::hint::codeview_annotation!(
+                    "TMC:", #guid_str, #provider_name_str,
+                    #(#kw_annotation_strings),*
+                );
                 if STATE.init_state.compare_exchange(
                     ::wpp::provider::UNINITIALIZED,
                     ::wpp::provider::INITIALIZING,
@@ -288,10 +261,11 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
                 STATE.reg_handle.store(handle, core::sync::atomic::Ordering::Relaxed);
                 // ModernWpp (WPPv3): mark this Crimson provider as a WPP
                 // trace-message provider so the kernel stamps the WPP header
-                // flag and tracks the PDB DebugId for TMF decoding. Best-effort
-                // — ignored on kernels without the feature. The control GUID
-                // doubles as the decode identity (single-GUID model), matching
-                // the TMF/TMC annotations emitted above.
+                // flag and tracks the PDB DebugId for TMF decoding, and opt in
+                // to descriptor typing so the per-module decode-GUID descriptor
+                // (Option B) is honoured. Best-effort — ignored on kernels
+                // without the feature. Enablement stays keyed on this control
+                // GUID; each event carries its module's decode GUID separately.
                 let __wpp_modern_status = unsafe { ::wpp::etw::enable_modern_wpp(handle) };
                 ::wdf::println!(
                     "enable_modern_wpp[{}]: status={:#010x} -> {}",
