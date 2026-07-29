@@ -23,6 +23,9 @@ struct TraceImplInput {
     level_name: String,
     keyword_ident: Ident,
     format_string: String,
+    /// Span of the format-string literal — used to recover the source file
+    /// (module) the trace call lives in, which keys the per-module decode GUID.
+    format_span: proc_macro2::Span,
     args: Vec<Expr>,
 }
 
@@ -60,6 +63,7 @@ impl Parse for TraceImplInput {
         input.parse::<Token![,]>()?;
         parse_at_key(input, "fmt")?;
         let fmt_lit: LitStr = input.parse()?;
+        let format_span = fmt_lit.span();
 
         let mut args = Vec::new();
         while input.peek(Token![,]) {
@@ -76,6 +80,7 @@ impl Parse for TraceImplInput {
             level_name: level_name_ident.to_string(),
             keyword_ident,
             format_string: fmt_lit.value(),
+            format_span,
             args,
         })
     }
@@ -117,6 +122,21 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     let args = &parsed.args;
     let field_count = args.len();
 
+    // Option B (per-module decode GUID): derive a stable decode GUID from the
+    // source file that this trace call lives in. Every trace statement in the
+    // same module (file) hashes to the same GUID, so all of a module's TMF
+    // annotations — and the decode GUID stamped on each event at runtime — are
+    // keyed under one identity that is distinct from the provider control GUID.
+    // This avoids the Option A collision where the control GUID doubled as the
+    // trace/decode GUID and interleaved with TMC records. `guid` (the control
+    // GUID) is retained only for enablement/registration, not for decoding.
+    let _ = guid;
+    let module_guid = compute_module_decode_guid(&module_key_from_span(parsed.format_span));
+    let decode_guid_str = &module_guid.guid_str;
+    let (dg1, dg2, dg3) = (module_guid.d1, module_guid.d2, module_guid.d3);
+    let dg4_tokens: Vec<TokenStream> =
+        module_guid.d4.iter().map(|b| { let b = *b; quote!(#b) }).collect();
+
     // Parse defmt-style type hints (e.g. `{=i32}`, `{=str}`) out of the format
     // string. Because the hints carry the concrete type at macro-expansion
     // time, we no longer need a monomorphized generic to recover type names.
@@ -134,15 +154,14 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
 
     let event_id = compute_event_id(format_string);
     let event_id_lit = event_id;
-    let field_count_u32 = field_count as u32;
 
     // Build the wppv1 TMF annotation lines. Every part is known at expansion
     // time, so each line is emitted as a plain string literal in the PDB's
-    // `S_ANNOTATION` record. The trace GUID is the provider's control GUID and
+    // `S_ANNOTATION` record. The trace GUID is the per-module decode GUID and
     // the message number is the computed event id.
     let annotation_lines = build_tmf_annotation(
         provider_name,
-        guid,
+        decode_guid_str,
         event_id,
         &wpp_format,
         &level_name_to_wpp(&parsed.level_name),
@@ -186,9 +205,31 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
         })
         .collect();
 
+    // Per-module decode GUID: a compile-time constant matching the GUID written
+    // into the TMF annotation above. It is sent on every event as the leading
+    // `EVENT_DATA_DESCRIPTOR` of type `RESERVED1` (a.k.a. the decode-GUID
+    // descriptor), so the kernel stamps `EventHeader.ProviderId` with it and the
+    // trace decoder looks up the module's TMF under this same GUID.
+    let decode_guid_const = quote! {
+        const __WPP_DECODE_GUID: ::wpp::GUID = ::wpp::GUID {
+            data1: #dg1, data2: #dg2, data3: #dg3, data4: [#(#dg4_tokens),*],
+        };
+    };
+    // Leading decode-GUID descriptor (Type = EVENT_DATA_DESCRIPTOR_TYPE_RESERVED1).
+    let decode_descriptor = quote! {
+        ::wpp::etw::EVENT_DATA_DESCRIPTOR {
+            Ptr: &__WPP_DECODE_GUID as *const ::wpp::GUID as u64,
+            Size: core::mem::size_of::<::wpp::GUID>() as u32,
+            Reserved: ::wpp::etw::EVENT_DATA_DESCRIPTOR_TYPE_RESERVED1,
+        }
+    };
+    // Total descriptors written = decode-GUID descriptor + one per field.
+    let total_desc_count = (field_count + 1) as u32;
+
     let output = if field_count > 0 {
         quote! {{
             #annotation_call
+            #decode_guid_const
 
             #(let #arg_names = #args;)*
             #(let #param_names = ::wpp::IntoWppField::into_wpp_field(#arg_names);)*
@@ -203,7 +244,8 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                         Opcode: 0, Task: 0, Keyword: #provider_mod::#keyword_ident,
                     };
 
-                    let __wpp_data: [::wpp::etw::EVENT_DATA_DESCRIPTOR; #field_count_u32 as usize] = [
+                    let __wpp_data: [::wpp::etw::EVENT_DATA_DESCRIPTOR; #total_desc_count as usize] = [
+                        #decode_descriptor,
                         #(#data_descriptors),*
                     ];
 
@@ -211,7 +253,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                         ::wpp::etw::write(
                             #provider_mod::STATE.reg_handle(),
                             &__WPP_EVT_DESC,
-                            #field_count_u32,
+                            #total_desc_count,
                             __wpp_data.as_ptr(),
                         );
                     }
@@ -222,7 +264,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
             {
                 let __wpp_auto_ctx = #ifr_state.auto_log_context();
                 if !__wpp_auto_ctx.is_null() {
-                    let mut __wpp_ifr_guid = *#provider_mod::control_guid();
+                    let mut __wpp_ifr_guid = __WPP_DECODE_GUID;
                     let __wpp_ifr_status = unsafe {
                         ::wpp::ifr::WppAutoLogTrace(
                             __wpp_auto_ctx,
@@ -244,6 +286,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     } else {
         quote! {{
             #annotation_call
+            #decode_guid_const
 
             // ETW: gated by is_enabled (real-time trace session active)
             {
@@ -254,9 +297,17 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                         Opcode: 0, Task: 0, Keyword: #provider_mod::#keyword_ident,
                     };
 
+                    // Only the leading decode-GUID descriptor is sent (no fields).
+                    let __wpp_data: [::wpp::etw::EVENT_DATA_DESCRIPTOR; 1] = [
+                        #decode_descriptor,
+                    ];
+
                     unsafe {
                         ::wpp::etw::write(
-                            #provider_mod::STATE.reg_handle(), &__WPP_EVT_DESC, 0, core::ptr::null(),
+                            #provider_mod::STATE.reg_handle(),
+                            &__WPP_EVT_DESC,
+                            1,
+                            __wpp_data.as_ptr(),
                         );
                     }
                 }
@@ -266,7 +317,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
             {
                 let __wpp_auto_ctx = #ifr_state.auto_log_context();
                 if !__wpp_auto_ctx.is_null() {
-                    let mut __wpp_ifr_guid = *#provider_mod::control_guid();
+                    let mut __wpp_ifr_guid = __WPP_DECODE_GUID;
                     let __wpp_ifr_status = unsafe {
                         ::wpp::ifr::WppAutoLogTrace(
                             __wpp_auto_ctx,
@@ -455,6 +506,60 @@ fn fnv1a_64(data: &[u8]) -> u64 {
     hash
 }
 
+/// A per-module decode GUID: its canonical string form plus the raw fields used
+/// to emit the matching compile-time `::wpp::GUID` constant.
+struct ModuleGuid {
+    guid_str: String,
+    d1: u32,
+    d2: u16,
+    d3: u16,
+    d4: [u8; 8],
+}
+
+/// Derives the module key that seeds a module's decode GUID.
+///
+/// Option B keys the decode GUID on "module path + module name". In Rust's
+/// file-based module system the source file path uniquely identifies a module
+/// (e.g. `src/device.rs` ⇔ `crate::device`), so the file the trace call lives
+/// in is used as the key. Path separators are normalised so the key is stable
+/// regardless of host OS conventions. Every trace statement in the same file
+/// yields the same key — and therefore the same module decode GUID.
+fn module_key_from_span(span: proc_macro2::Span) -> String {
+    // `Span::unwrap()` yields the underlying `proc_macro::Span`, whose stable
+    // `file()` accessor returns the source path. This is only ever called from
+    // within real proc-macro expansion (never unit tests), where `unwrap()` is
+    // valid.
+    let file = span.unwrap().file();
+    file.replace('\\', "/")
+}
+
+/// Computes a deterministic v4-shaped decode GUID from a module key.
+///
+/// The same key always produces the same GUID, so all trace statements in a
+/// module share one decode identity. The 128 bits are filled from two FNV-1a
+/// passes; the version (4) and variant (RFC 4122) nibbles are then fixed so the
+/// value is a well-formed UUID that the trace decoder accepts.
+fn compute_module_decode_guid(module_key: &str) -> ModuleGuid {
+    let hash = fnv1a_64(module_key.as_bytes());
+    let d1 = (hash & 0xFFFF_FFFF) as u32;
+    let d2 = ((hash >> 32) & 0xFFFF) as u16;
+    // Top nibble of d3 = version 4.
+    let d3 = (((hash >> 48) & 0x0FFF) as u16) | 0x4000;
+
+    let hash2 = fnv1a_64(&hash.to_le_bytes());
+    let mut d4 = [0u8; 8];
+    d4.copy_from_slice(&hash2.to_le_bytes());
+    // Two most-significant bits of d4[0] = RFC 4122 variant (10xx).
+    d4[0] = (d4[0] & 0x3F) | 0x80;
+
+    let guid_str = format!(
+        "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        d1, d2, d3, d4[0], d4[1], d4[2], d4[3], d4[4], d4[5], d4[6], d4[7]
+    );
+
+    ModuleGuid { guid_str, d1, d2, d3, d4 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,5 +605,28 @@ mod tests {
     #[test]
     fn event_id_differs() {
         assert_ne!(compute_event_id("hello"), compute_event_id("world"));
+    }
+
+    #[test]
+    fn module_decode_guid_deterministic() {
+        let a = compute_module_decode_guid("src/device.rs");
+        let b = compute_module_decode_guid("src/device.rs");
+        assert_eq!(a.guid_str, b.guid_str);
+    }
+
+    #[test]
+    fn module_decode_guid_differs_per_module() {
+        let a = compute_module_decode_guid("src/device.rs");
+        let b = compute_module_decode_guid("src/queue.rs");
+        assert_ne!(a.guid_str, b.guid_str);
+    }
+
+    #[test]
+    fn module_decode_guid_is_v4_variant() {
+        let g = compute_module_decode_guid("src/lib.rs");
+        // Version nibble (top of d3) must be 4.
+        assert_eq!(g.d3 & 0xF000, 0x4000);
+        // Variant (top two bits of d4[0]) must be 0b10.
+        assert_eq!(g.d4[0] & 0xC0, 0x80);
     }
 }
