@@ -3,7 +3,7 @@
 
 //! Runtime state for ETW providers.
 
-use core::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 pub const UNINITIALIZED: u8 = 0;
 pub const INITIALIZING: u8 = 1;

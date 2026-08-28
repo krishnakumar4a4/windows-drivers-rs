@@ -34,9 +34,9 @@ pub use sync::*;
 pub use timer::*;
 pub use wdf_macros::*;
 pub use wdk::println;
-pub use wpp::wpp_control_guids;
 use wdk_sys::WDF_TRI_STATE;
 pub use work_item::*;
+pub use wpp::wpp_control_guids;
 
 /// A timeout value which can either be
 /// relative to the current system time

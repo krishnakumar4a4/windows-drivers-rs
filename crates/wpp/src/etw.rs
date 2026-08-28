@@ -117,17 +117,16 @@ unsafe extern "system" {
 #[cfg(feature = "kernel_mode")]
 use self::{
     EtwRegister as event_register,
-    EtwWriteTransfer as event_write,
-    EtwUnregister as event_unregister,
     EtwSetInformation as event_set_information,
+    EtwUnregister as event_unregister,
+    EtwWriteTransfer as event_write,
 };
-
 #[cfg(not(feature = "kernel_mode"))]
 use self::{
     EventRegister as event_register,
-    EventWriteTransfer as event_write,
-    EventUnregister as event_unregister,
     EventSetInformation as event_set_information,
+    EventUnregister as event_unregister,
+    EventWriteTransfer as event_write,
 };
 
 // ── Public wrappers ─────────────────────────────────────────────────────────
@@ -203,10 +202,10 @@ pub unsafe fn unregister(handle: u64) -> u32 {
 ///
 /// `handle` must be a valid registration handle that has not been unregistered.
 pub unsafe fn enable_modern_wpp(handle: u64) -> u32 {
-    // EVENT_INFO_CLASS::EventProviderSetReserved2 (a.k.a. EventProviderTraceMessage).
-    // Not present in the public SDK enum (which ends at
-    // EventProviderUseDescriptorType = 3 / MaxEventInfo = 4); defined by the
-    // ModernWpp-capable OS.
+    // EVENT_INFO_CLASS::EventProviderSetReserved2 (a.k.a.
+    // EventProviderTraceMessage). Not present in the public SDK enum (which
+    // ends at EventProviderUseDescriptorType = 3 / MaxEventInfo = 4); defined
+    // by the ModernWpp-capable OS.
     const EVENT_INFO_CLASS_SET_RESERVED2: u32 = 4;
     // EVENT_INFO_CLASS::EventProviderUseDescriptorType — honour
     // `EVENT_DATA_DESCRIPTOR.Type` so the leading RESERVED1 descriptor is
@@ -214,12 +213,7 @@ pub unsafe fn enable_modern_wpp(handle: u64) -> u32 {
     const EVENT_INFO_CLASS_USE_DESCRIPTOR_TYPE: u32 = 3;
 
     let status = unsafe {
-        event_set_information(
-            handle,
-            EVENT_INFO_CLASS_SET_RESERVED2,
-            core::ptr::null(),
-            0,
-        )
+        event_set_information(handle, EVENT_INFO_CLASS_SET_RESERVED2, core::ptr::null(), 0)
     };
 
     let use_descriptor_type: u8 = 1; // BOOLEAN TRUE

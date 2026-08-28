@@ -28,7 +28,11 @@ wpp_control_guids!(
 mod device;
 mod queue;
 
-#[driver_entry(trace_providers(SampleDriver, PnpTracer))]
+#[driver_entry(trace_providers(
+    SampleDriver,
+    PnpTracer,
+    sample_kmdf_safe_driver_wpp_dependency::DependencyProvider
+))]
 fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString) -> NtResult<()> {
     let config = DriverConfig::new(evt_device_add);
     let driver = Driver::create(driver_object, registry_path, config)?;
@@ -63,6 +67,7 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
 
     trace!(VERBOSE, PNP, "PnP subsystem initialized");
     trace!(WARNING, IO, "IO path ready, max write: {=usize}", MAX_WRITE_LENGTH);
+    sample_kmdf_safe_driver_wpp_dependency::emit_dependency_trace();
 
     // Default trace: no keyword, routes to first provider
     trace!(INFO, "Driver entry complete, no keyword");

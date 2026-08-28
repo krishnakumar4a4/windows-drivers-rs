@@ -9,8 +9,14 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::parse::{Parse, ParseStream};
-use syn::{Expr, Ident, LitStr, Token, Result};
+use syn::{
+    Expr,
+    Ident,
+    LitStr,
+    Result,
+    Token,
+    parse::{Parse, ParseStream},
+};
 
 // ─── AST ────────────────────────────────────────────────────────────────────
 
@@ -134,8 +140,14 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     let module_guid = compute_module_decode_guid(&module_key_from_span(parsed.format_span));
     let decode_guid_str = &module_guid.guid_str;
     let (dg1, dg2, dg3) = (module_guid.d1, module_guid.d2, module_guid.d3);
-    let dg4_tokens: Vec<TokenStream> =
-        module_guid.d4.iter().map(|b| { let b = *b; quote!(#b) }).collect();
+    let dg4_tokens: Vec<TokenStream> = module_guid
+        .d4
+        .iter()
+        .map(|b| {
+            let b = *b;
+            quote!(#b)
+        })
+        .collect();
 
     // Parse defmt-style type hints (e.g. `{=i32}`, `{=str}`) out of the format
     // string. Because the hints carry the concrete type at macro-expansion
@@ -177,12 +189,15 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
 
     // Serialization plumbing (unchanged): argument capture, `IntoWppField`
     // conversion, and raw-byte extraction for ETW / IFR.
-    let arg_names: Vec<Ident> =
-        (0..field_count).map(|i| format_ident!("__a{}", i)).collect();
-    let param_names: Vec<Ident> =
-        (0..field_count).map(|i| format_ident!("__f{}", i)).collect();
-    let bytes_names: Vec<Ident> =
-        (0..field_count).map(|i| format_ident!("__b{}", i)).collect();
+    let arg_names: Vec<Ident> = (0..field_count)
+        .map(|i| format_ident!("__a{}", i))
+        .collect();
+    let param_names: Vec<Ident> = (0..field_count)
+        .map(|i| format_ident!("__f{}", i))
+        .collect();
+    let bytes_names: Vec<Ident> = (0..field_count)
+        .map(|i| format_ident!("__b{}", i))
+        .collect();
 
     let data_descriptors: Vec<TokenStream> = bytes_names
         .iter()
@@ -377,9 +392,9 @@ fn err(msg: &str) -> syn::Error {
 /// Parses a defmt-style format string and produces:
 ///
 /// * the ordered list of type hints for the placeholders, and
-/// * the equivalent wppv1 format string where each `{=type}` becomes
-///   `%N!spec!` (arguments numbered from 10) and the whole string is prefixed
-///   with `%0` (the WPP "no prefix" marker).
+/// * the equivalent wppv1 format string where each `{=type}` becomes `%N!spec!`
+///   (arguments numbered from 10) and the whole string is prefixed with `%0`
+///   (the WPP "no prefix" marker).
 ///
 /// Literal braces are written as `{{` / `}}`, and literal `%` is escaped to
 /// `%%` so it survives WPP's printf-style rendering.
@@ -412,14 +427,14 @@ fn parse_format(fmt: &str) -> Result<(Vec<Hint>, String)> {
                 let inner = inner.trim();
                 let ty = inner.strip_prefix('=').ok_or_else(|| {
                     err(&format!(
-                        "placeholder '{{{}}}' must carry a type hint like '{{=i32}}'; \
-                         bare '{{}}' is not supported",
+                        "placeholder '{{{}}}' must carry a type hint like '{{=i32}}'; bare '{{}}' \
+                         is not supported",
                         inner
                     ))
                 })?;
                 let ty = ty.trim();
-                let (item, spec) = hint_for(ty)
-                    .ok_or_else(|| err(&format!("unknown type hint '={}'", ty)))?;
+                let (item, spec) =
+                    hint_for(ty).ok_or_else(|| err(&format!("unknown type hint '={}'", ty)))?;
                 out.push('%');
                 out.push_str(&arg_num.to_string());
                 out.push_str(spec);
@@ -498,10 +513,10 @@ fn compute_event_id(fmt: &str) -> u16 {
 }
 
 fn fnv1a_64(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut hash: u64 = 0xCBF29CE484222325;
     for &byte in data {
         hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash = hash.wrapping_mul(0x100000001B3);
     }
     hash
 }
@@ -557,7 +572,13 @@ fn compute_module_decode_guid(module_key: &str) -> ModuleGuid {
         d1, d2, d3, d4[0], d4[1], d4[2], d4[3], d4[4], d4[5], d4[6], d4[7]
     );
 
-    ModuleGuid { guid_str, d1, d2, d3, d4 }
+    ModuleGuid {
+        guid_str,
+        d1,
+        d2,
+        d3,
+        d4,
+    }
 }
 
 #[cfg(test)]

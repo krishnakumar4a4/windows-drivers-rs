@@ -2,15 +2,18 @@
 // License: MIT OR Apache-2.0
 //! IFR (In-Flight Recorder) support for WPP tracing - types, FFI and state.
 
-use core::mem;
-use core::ptr;
-use core::sync::atomic::{AtomicPtr, AtomicU8, Ordering};
+use core::{
+    mem,
+    ptr,
+    sync::atomic::{AtomicPtr, AtomicU8, Ordering},
+};
 
 // -- IFR lifecycle states ----------------------------------------------------
 
 pub const UNINITIALIZED: u8 = 0;
 pub const INITIALIZING: u8 = 1;
 pub const INITIALIZED: u8 = 2;
+pub const STOPPING: u8 = 3;
 
 // -- IFR state ---------------------------------------------------------------
 
@@ -42,6 +45,32 @@ impl IFRState {
     }
 }
 
+/// Driver-wide IFR state shared by traces emitted from every linked crate.
+#[doc(hidden)]
+pub static GLOBAL_STATE: IFRState = IFRState::new();
+
+// -- Cross-crate provider discovery ------------------------------------------
+
+#[doc(hidden)]
+pub type PrepareFn = unsafe fn() -> (*mut WPP_PROJECT_CONTROL_BLOCK, *mut WPP_TRACE_CONTROL_BLOCK);
+
+#[doc(hidden)]
+pub type InitFn = unsafe fn();
+
+#[doc(hidden)]
+pub type CleanUpFn = fn();
+
+/// Stable provider-level contract used by the root driver crate to discover
+/// the IFR contribution and provider lifecycle hooks for each listed provider.
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct ProviderDescriptor {
+    pub owner_id: *const (),
+    pub prepare: PrepareFn,
+    pub init: InitFn,
+    pub clean_up: CleanUpFn,
+}
+
 // -- WPP control block types -------------------------------------------------
 
 #[repr(C)]
@@ -52,7 +81,16 @@ pub union WPP_PROJECT_CONTROL_BLOCK {
 
 #[repr(C)]
 pub struct WPP_TRACE_CONTROL_BLOCK {
-    Callback: Option<unsafe extern "C" fn(u8, *mut core::ffi::c_void, u32, *mut core::ffi::c_void, *mut core::ffi::c_void, *mut u32) -> u64>,
+    Callback: Option<
+        unsafe extern "C" fn(
+            u8,
+            *mut core::ffi::c_void,
+            u32,
+            *mut core::ffi::c_void,
+            *mut core::ffi::c_void,
+            *mut u32,
+        ) -> u64,
+    >,
     pub ControlGuid: *const crate::GUID,
     pub Next: *const WPP_TRACE_CONTROL_BLOCK,
     pub Logger: u64,
@@ -92,9 +130,7 @@ impl WPP_TRACE_CONTROL_BLOCK {
 
 // -- IFR globals (expected by WinDbg / rcrdrkd) ------------------------------
 
-// NOTE: These are declared in the generated code in the sample driver
-// (via the macro) to avoid LTO bitcode issues with #[no_mangle] statics
-// in the wpp library crate.
+// NOTE: The fixed-name globals are emitted once by the driver_entry macro.
 
 /// Driver object pointer stored for cleanup.
 static mut WPP_DRIVER_OBJ: *mut core::ffi::c_void = ptr::null_mut();
@@ -107,10 +143,7 @@ unsafe extern "C" {
         DrvObj: *mut core::ffi::c_void,
         RegPath: *const core::ffi::c_void,
     );
-    pub fn WppAutoLogStop(
-        WppCb: *mut WPP_PROJECT_CONTROL_BLOCK,
-        DrvObj: *mut core::ffi::c_void,
-    );
+    pub fn WppAutoLogStop(WppCb: *mut WPP_PROJECT_CONTROL_BLOCK, DrvObj: *mut core::ffi::c_void);
     #[doc(hidden)]
     pub fn WppAutoLogTrace(
         AutoLogContext: *mut core::ffi::c_void,
@@ -164,9 +197,7 @@ pub unsafe fn start_ifr(
 
     // Store auto-log context from the primary control block into IFRState
     let ctx = unsafe { (*(*control_blocks).Control).AutoLogContext };
-    ifr_state
-        .auto_log_context
-        .store(ctx, Ordering::Release);
+    ifr_state.auto_log_context.store(ctx, Ordering::Release);
 }
 
 /// Stops IFR tracing. Called during driver unload.

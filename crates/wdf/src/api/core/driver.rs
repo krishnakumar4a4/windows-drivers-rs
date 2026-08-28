@@ -1,6 +1,8 @@
 use alloc::string::String;
-use core::ptr;
-use core::sync::atomic::{AtomicPtr, Ordering};
+use core::{
+    ptr,
+    sync::atomic::{AtomicPtr, Ordering},
+};
 
 use wdf_macros::object_context;
 #[doc(hidden)]

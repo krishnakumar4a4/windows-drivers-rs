@@ -26,50 +26,54 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
             trace_provider_paths = paths.into_iter().collect();
             Ok(())
         } else {
-            Err(meta.error(format!(
-                "Expected `{TRACE_PROVIDERS_ATTR_NAME}`"
-            )))
+            Err(meta.error(format!("Expected `{TRACE_PROVIDERS_ATTR_NAME}`")))
         }
     });
 
     parse_macro_input!(args with attr_parser);
 
+    let wpp_globals = if trace_provider_paths.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            #[unsafe(no_mangle)]
+            static mut WPP_GLOBAL_Control: *mut ::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK =
+                core::ptr::null_mut();
+            #[unsafe(no_mangle)]
+            static mut WPP_RECORDER_INITIALIZED: *mut ::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK =
+                core::ptr::null_mut();
+        }
+    };
+
     let (wpp_cleanup_param, ifr_block) = if trace_provider_paths.is_empty() {
         (quote! { None }, quote! {})
     } else {
-        // Cleanup: provider clean_up in reverse order, then IFR cleanup
-        let cleanup_calls: Vec<proc_macro2::TokenStream> = trace_provider_paths
-            .iter()
-            .rev()
-            .map(|p| quote! { #p::clean_up(); })
-            .collect();
+        let provider_descriptors = provider_descriptors(&trace_provider_paths);
 
         let cleanup_fn = quote! {
             fn __wpp_cleanup() {
-                #(#cleanup_calls)*
-                __wpp_ifr::cleanup();
+                let __wpp_provider_descriptors = [#(#provider_descriptors),*];
+                crate::__wpp_ifr::clean_up_driver(
+                    &__wpp_provider_descriptors,
+                    &raw mut WPP_GLOBAL_Control,
+                    &raw mut WPP_RECORDER_INITIALIZED,
+                );
             }
             Some(__wpp_cleanup as fn())
         };
 
-        // Init block: IFR init first (creates CBs, links, sets GUIDs, starts),
-        // then individual provider inits (ETW registration)
-        let init_calls: Vec<proc_macro2::TokenStream> = trace_provider_paths
-            .iter()
-            .map(|p| quote! { unsafe { #p::init(); } })
-            .collect();
-
         let ifr = quote! {
             {
-                // IFR init: create CB array, link, set GUIDs, start auto-log
+                let __wpp_provider_descriptors = [#(#provider_descriptors),*];
                 unsafe {
-                    __wpp_ifr::init(
+                    crate::__wpp_ifr::init_driver(
                         driver as *mut ::wdf::DRIVER_OBJECT as *mut core::ffi::c_void,
                         registry_path as *const _ as *const core::ffi::c_void,
+                        &__wpp_provider_descriptors,
+                        &raw mut WPP_GLOBAL_Control,
+                        &raw mut WPP_RECORDER_INITIALIZED,
                     );
                 }
-                // Provider inits — ETW registration
-                #(#init_calls)*
             }
         };
 
@@ -77,6 +81,8 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     let mut wrappers: TokenStream = quote! {
+        #wpp_globals
+
         #[unsafe(link_section = "INIT")]
         #[unsafe(export_name = "DriverEntry")]
         extern "system" fn __driver_entry(driver: &mut ::wdf::DRIVER_OBJECT, registry_path: ::wdf::PCUNICODE_STRING,) -> ::wdf::NTSTATUS {
@@ -90,6 +96,41 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
     wrappers.extend(input);
 
     wrappers
+}
+
+fn provider_descriptors(provider_paths: &[syn::Path]) -> Vec<proc_macro2::TokenStream> {
+    provider_paths
+        .iter()
+        .map(|provider_path| quote! { #provider_path::__wpp_ifr_descriptor() })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derives_provider_descriptors() {
+        let providers = vec![
+            syn::parse_quote!(FirstProvider),
+            syn::parse_quote!(SecondProvider),
+            syn::parse_quote!(dependency::DependencyProvider),
+        ];
+
+        let descriptors: Vec<String> = provider_descriptors(&providers)
+            .iter()
+            .map(|descriptor| quote! { #descriptor }.to_string())
+            .collect();
+
+        assert_eq!(
+            descriptors,
+            [
+                "FirstProvider :: __wpp_ifr_descriptor ()",
+                "SecondProvider :: __wpp_ifr_descriptor ()",
+                "dependency :: DependencyProvider :: __wpp_ifr_descriptor ()"
+            ]
+        );
+    }
 }
 
 /// The attribute used to mark a struct as a framework object context
