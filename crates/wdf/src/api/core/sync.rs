@@ -15,6 +15,80 @@ use super::{
     result::{NtResult, StatusCodeExt},
 };
 
+/// Software interrupt request levels supported by WPP's `irql` type.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IRQL {
+    /// Normal thread execution.
+    Passive = wdk_sys::PASSIVE_LEVEL as u8,
+    /// Asynchronous procedure call execution.
+    Apc = wdk_sys::APC_LEVEL as u8,
+    /// Dispatcher and DPC execution.
+    Dispatch = wdk_sys::DISPATCH_LEVEL as u8,
+}
+
+impl IRQL {
+    /// Returns the current processor's interrupt request level when it is a
+    /// software IRQL representable by this type.
+    pub fn current() -> Option<Self> {
+        let current = unsafe { wdk_sys::ntddk::KeGetCurrentIrql() };
+        Self::try_from(current).ok()
+    }
+}
+
+impl From<IRQL> for wdk_sys::KIRQL {
+    fn from(value: IRQL) -> Self {
+        value as Self
+    }
+}
+
+impl TryFrom<wdk_sys::KIRQL> for IRQL {
+    type Error = wdk_sys::KIRQL;
+
+    fn try_from(value: wdk_sys::KIRQL) -> Result<Self, Self::Error> {
+        match value {
+            value if value == Self::Passive as wdk_sys::KIRQL => Ok(Self::Passive),
+            value if value == Self::Apc as wdk_sys::KIRQL => Ok(Self::Apc),
+            value if value == Self::Dispatch as wdk_sys::KIRQL => Ok(Self::Dispatch),
+            value => Err(value),
+        }
+    }
+}
+
+unsafe impl wpp::WppByteEnum for IRQL {
+    const TYPE_NAME: &'static str = "ItemListByte(Low,APC,DPC)";
+    const FORMAT_SPEC: &'static str = "!s!";
+}
+
+#[cfg(test)]
+mod irql_tests {
+    use wpp::WppField;
+
+    use super::IRQL;
+
+    #[test]
+    fn irql_serializes_as_one_byte() {
+        assert_eq!(IRQL::Passive.as_bytes(), &[wdk_sys::PASSIVE_LEVEL as u8]);
+        assert_eq!(IRQL::Apc.as_bytes(), &[wdk_sys::APC_LEVEL as u8]);
+        assert_eq!(IRQL::Dispatch.as_bytes(), &[wdk_sys::DISPATCH_LEVEL as u8]);
+    }
+
+    #[test]
+    fn irql_converts_to_and_from_kirql() {
+        for irql in [IRQL::Passive, IRQL::Apc, IRQL::Dispatch] {
+            let raw = wdk_sys::KIRQL::from(irql);
+            assert_eq!(IRQL::try_from(raw), Ok(irql));
+        }
+        assert_eq!(IRQL::try_from(3), Err(3));
+    }
+
+    #[test]
+    fn irql_uses_wpp_list_format() {
+        assert_eq!(IRQL::TYPE_NAME, "ItemListByte(Low,APC,DPC)");
+        assert_eq!(IRQL::FORMAT_SPEC, "!s!");
+    }
+}
+
 /// WDF Spin Lock
 pub struct SpinLock<T> {
     wdf_spin_lock: WDFSPINLOCK,

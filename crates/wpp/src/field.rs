@@ -19,6 +19,29 @@ pub trait WppField {
     fn as_bytes(&self) -> &[u8];
 }
 
+/// Contract for field types represented by a single byte.
+///
+/// # Safety
+///
+/// Implementors must have a stable one-byte representation whose address can
+/// be read as a single `u8` for the lifetime of `&self`.
+pub unsafe trait WppByteEnum: Copy {
+    /// The WPP reader type used to decode the byte.
+    const TYPE_NAME: &'static str;
+
+    /// The WPP printf-style specifier used to render the decoded value.
+    const FORMAT_SPEC: &'static str;
+}
+
+impl<T: WppByteEnum> WppField for T {
+    const TYPE_NAME: &'static str = T::TYPE_NAME;
+    const FORMAT_SPEC: &'static str = T::FORMAT_SPEC;
+
+    fn as_bytes(&self) -> &[u8] {
+        unsafe { core::slice::from_raw_parts((self as *const T).cast::<u8>(), 1) }
+    }
+}
+
 macro_rules! impl_wpp_field {
     ($($ty:ty => ($name:literal, $format_spec:literal)),* $(,)?) => {
         $(
@@ -108,6 +131,7 @@ mod tests {
         assert_eq!(3.25_f32.into_wpp_field(), 3.25_f64);
         assert_eq!((&3.25_f32).into_wpp_field(), 3.25_f64);
     }
+
 }
 
 /// Fixed-capacity string assembled during const evaluation for a PDB
@@ -235,6 +259,14 @@ impl IntoWppField for &f32 {
     #[inline]
     fn into_wpp_field(self) -> f64 {
         (*self).into()
+    }
+}
+
+impl<T: WppByteEnum> IntoWppField for T {
+    type Output = T;
+
+    fn into_wpp_field(self) -> Self::Output {
+        self
     }
 }
 

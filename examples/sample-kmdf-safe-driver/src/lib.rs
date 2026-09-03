@@ -6,7 +6,7 @@
 
 use wdf::{
     driver_entry, println, wpp_control_guids, DeviceInit, Driver, DriverConfig, DriverObject,
-    NtResult, UnicodeString,
+    IRQL, NtResult, UnicodeString,
 };
 
 extern crate alloc;
@@ -65,7 +65,11 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
     trace!(WARNING, IO, "IO path ready, max write: {}", MAX_WRITE_LENGTH);
 
     // Default trace: no keyword, routes to first provider
-    trace!(INFO, "Driver entry complete, no keyword");
+    trace!(
+        INFO,
+        "Driver entry complete at IRQL={}",
+        IRQL::current().unwrap_or(IRQL::Passive)
+    );
 
     Ok(())
 }

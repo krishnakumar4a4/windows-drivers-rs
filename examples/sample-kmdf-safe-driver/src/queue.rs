@@ -2,8 +2,8 @@
 
 use wdf::{
     object_context, println, status_codes, Arc, CancellableRequest, Device, IoQueue,
-    IoQueueConfig, IoQueueDispatchType, NtResult, Request, RequestCancellationToken, SpinLock,
-    Timer, TimerConfig,
+    IoQueueConfig, IoQueueDispatchType, IRQL, NtResult, Request, RequestCancellationToken,
+    SpinLock, Timer, TimerConfig,
 };
 
 extern crate alloc;
@@ -42,6 +42,15 @@ pub(crate) fn queue_initialize(device: &Device) -> NtResult<()> {
         timer,
     };
     QueueContext::attach(&queue, queue_context)?;
+
+    {
+        let _guard = QueueContext::get(&queue).request.lock();
+        trace!(
+            INFO, GENERAL,
+            "Queue spin lock acquired at IRQL={}",
+            IRQL::current().unwrap_or(IRQL::Passive)
+        );
+    }
 
     trace!(VERBOSE, GENERAL, "Queue initialized");
 

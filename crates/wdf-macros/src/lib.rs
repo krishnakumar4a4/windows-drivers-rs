@@ -26,9 +26,7 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
             trace_provider_paths = paths.into_iter().collect();
             Ok(())
         } else {
-            Err(meta.error(format!(
-                "Expected `{TRACE_PROVIDERS_ATTR_NAME}`"
-            )))
+            Err(meta.error(format!("Expected `{TRACE_PROVIDERS_ATTR_NAME}`")))
         }
     });
 
