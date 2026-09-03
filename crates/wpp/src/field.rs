@@ -49,8 +49,7 @@ impl_wpp_field! {
     u32   => ("ItemLong", "!lu!"),
     i64   => ("ItemLongLong", "!I64d!"),
     u64   => ("ItemULongLong", "!I64u!"),
-    f32   => ("ItemDouble", "!f!"), // TODO: There is no 32bit equivalent in WPP, so can we use double?
-    f64   => ("ItemDouble", "!f!"),
+    f64   => ("ItemDouble", "!s!"),
     // bool  => ("ItemUChar", "!d!"), // TODO: boolean is ItemListLong(false,true) in WPP
     usize => ("ItemULongLong", "!I64u!"), // TODO: on 32 bit machines, this will be 4 bytes, handle it accordingly
     isize => ("ItemLongLong", "!I64d!"),
@@ -94,12 +93,20 @@ impl WppField for bool {
 
 #[cfg(test)]
 mod tests {
-    use super::WppField;
+    use super::{IntoWppField, WppField};
 
     #[test]
     fn bool_uses_wpp_item_list_format() {
         assert_eq!(<bool as WppField>::TYPE_NAME, "ItemListByte(false,true)");
         assert_eq!(<bool as WppField>::FORMAT_SPEC, "!s!");
+    }
+
+    #[test]
+    fn floats_use_wpp_double_format() {
+        assert_eq!(<f64 as WppField>::TYPE_NAME, "ItemDouble");
+        assert_eq!(<f64 as WppField>::FORMAT_SPEC, "!s!");
+        assert_eq!(3.25_f32.into_wpp_field(), 3.25_f64);
+        assert_eq!((&3.25_f32).into_wpp_field(), 3.25_f64);
     }
 }
 
@@ -213,6 +220,24 @@ impl IntoWppField for CString {
     }
 }
 
+impl IntoWppField for f32 {
+    type Output = f64;
+
+    #[inline]
+    fn into_wpp_field(self) -> f64 {
+        self.into()
+    }
+}
+
+impl IntoWppField for &f32 {
+    type Output = f64;
+
+    #[inline]
+    fn into_wpp_field(self) -> f64 {
+        (*self).into()
+    }
+}
+
 macro_rules! impl_into_wpp_field_passthrough {
     ($($ty:ty),* $(,)?) => {
         $(
@@ -239,5 +264,5 @@ macro_rules! impl_into_wpp_field_passthrough {
 
 impl_into_wpp_field_passthrough! {
     i8, u8, i16, u16, i32, u32, i64, u64,
-    f32, f64, bool, usize, isize, 
+    f64, bool, usize, isize,
 }
