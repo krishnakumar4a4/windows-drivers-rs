@@ -212,6 +212,4 @@ extern "C" fn evt_driver_device_add(
 
 unsafe extern "C" fn driver_unload(_driver: WDFDRIVER) {
     clean_up_wpp();
-
-    println!("Driver unload done");
 }

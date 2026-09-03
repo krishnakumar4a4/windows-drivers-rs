@@ -236,15 +236,19 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
             /// The caller must ensure `clean_up()` is called before the
             /// module containing this provider is unloaded.
             pub unsafe fn init() {
+                struct Args;
+                impl core::hint::CodeViewAnnotationArgs for Args {
+                    const ARGS: &'static [&'static str] = &[
+                        "TMC:", #guid_str, #provider_name_str,
+                        #(#kw_annotation_strings),*
+                    ];
+                }
                 // Emit this provider's `TMC:` control-GUID annotation (control
                 // GUID -> provider name + flag names). It is keyed under the
                 // control GUID, which under Option B is distinct from the
                 // per-module decode GUIDs that key the TMF records, so TMC and
                 // TMF annotations never share a GUID and cannot collide.
-                core::hint::codeview_annotation!(
-                    "TMC:", #guid_str, #provider_name_str,
-                    #(#kw_annotation_strings),*
-                );
+                core::hint::codeview_annotation::<Args>();
                 if STATE.init_state.compare_exchange(
                     ::wpp::provider::UNINITIALIZED,
                     ::wpp::provider::INITIALIZING,

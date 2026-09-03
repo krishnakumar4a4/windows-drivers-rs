@@ -172,7 +172,15 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     let annotation_strings: Vec<TokenStream> =
         annotation_lines.iter().map(|s| quote!(#s)).collect();
     let annotation_call = quote! {
-        core::hint::codeview_annotation!( #(#annotation_strings),* );
+        {
+            struct Args;
+
+            impl core::hint::CodeViewAnnotationArgs for Args {
+                const ARGS: &'static [&'static str] = &[#(#annotation_strings),*];
+            }
+
+            core::hint::codeview_annotation::<Args>();
+        }
     };
 
     // Serialization plumbing (unchanged): argument capture, `IntoWppField`
