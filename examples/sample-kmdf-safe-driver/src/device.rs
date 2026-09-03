@@ -31,17 +31,17 @@ pub(crate) fn device_create(device_init: &mut DeviceInit) -> NtResult<()> {
 
     trace!(VERBOSE, PNP, "Device created successfully");
 
-    // Floating-point type specifiers (valid in kernel mode on x64/ARM64).
+    // Floating-point fields (valid in kernel mode on x64/ARM64).
     trace!(
         VERBOSE, POWER,
-        "Device metrics: core_voltage={=f32}, junction_temp_c={=f64}",
+        "Device metrics: core_voltage={}, junction_temp_c={}",
         3.3_f32, 42.5_f64
     );
 
-    // Mixed boolean + unsigned width specifiers.
+    // Mixed boolean and unsigned-width fields.
     trace!(
         INFO, PNP,
-        "Interface published: enabled={=bool}, endpoint_count={=u16}",
+        "Interface published: enabled={}, endpoint_count={}",
         true, 4_u16
     );
 

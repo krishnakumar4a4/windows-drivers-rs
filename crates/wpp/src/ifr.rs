@@ -2,9 +2,11 @@
 // License: MIT OR Apache-2.0
 //! IFR (In-Flight Recorder) support for WPP tracing - types, FFI and state.
 
-use core::mem;
-use core::ptr;
-use core::sync::atomic::{AtomicPtr, AtomicU8, Ordering};
+use core::{
+    mem,
+    ptr,
+    sync::atomic::{AtomicPtr, AtomicU8, Ordering},
+};
 
 // -- IFR lifecycle states ----------------------------------------------------
 
@@ -52,7 +54,16 @@ pub union WPP_PROJECT_CONTROL_BLOCK {
 
 #[repr(C)]
 pub struct WPP_TRACE_CONTROL_BLOCK {
-    Callback: Option<unsafe extern "C" fn(u8, *mut core::ffi::c_void, u32, *mut core::ffi::c_void, *mut core::ffi::c_void, *mut u32) -> u64>,
+    Callback: Option<
+        unsafe extern "C" fn(
+            u8,
+            *mut core::ffi::c_void,
+            u32,
+            *mut core::ffi::c_void,
+            *mut core::ffi::c_void,
+            *mut u32,
+        ) -> u64,
+    >,
     pub ControlGuid: *const crate::GUID,
     pub Next: *const WPP_TRACE_CONTROL_BLOCK,
     pub Logger: u64,
@@ -107,10 +118,7 @@ unsafe extern "C" {
         DrvObj: *mut core::ffi::c_void,
         RegPath: *const core::ffi::c_void,
     );
-    pub fn WppAutoLogStop(
-        WppCb: *mut WPP_PROJECT_CONTROL_BLOCK,
-        DrvObj: *mut core::ffi::c_void,
-    );
+    pub fn WppAutoLogStop(WppCb: *mut WPP_PROJECT_CONTROL_BLOCK, DrvObj: *mut core::ffi::c_void);
     #[doc(hidden)]
     pub fn WppAutoLogTrace(
         AutoLogContext: *mut core::ffi::c_void,
@@ -164,9 +172,7 @@ pub unsafe fn start_ifr(
 
     // Store auto-log context from the primary control block into IFRState
     let ctx = unsafe { (*(*control_blocks).Control).AutoLogContext };
-    ifr_state
-        .auto_log_context
-        .store(ctx, Ordering::Release);
+    ifr_state.auto_log_context.store(ctx, Ordering::Release);
 }
 
 /// Stops IFR tracing. Called during driver unload.

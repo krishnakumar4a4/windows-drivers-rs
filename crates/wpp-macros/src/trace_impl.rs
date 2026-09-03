@@ -3,14 +3,20 @@
 
 //! Implementation of `__wpp_trace_impl!` proc macro.
 //!
-//! Parses defmt-style type hints (e.g. `{=i32}`, `{=str}`) from the format
-//! string to recover argument types at macro-expansion time, then emits a
-//! wppv1 `TMF:` annotation into the PDB via `codeview_annotation`.
+//! Parses Rust-style placeholders from the format string, then emits a wppv1
+//! `TMF:` annotation into the PDB via `codeview_annotation`.
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::parse::{Parse, ParseStream};
-use syn::{Expr, Ident, LitStr, Token, Result};
+use syn::{
+    Expr,
+    Ident,
+    Lit,
+    LitStr,
+    Result,
+    Token,
+    parse::{Parse, ParseStream},
+};
 
 // ─── AST ────────────────────────────────────────────────────────────────────
 
@@ -134,20 +140,23 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     let module_guid = compute_module_decode_guid(&module_key_from_span(parsed.format_span));
     let decode_guid_str = &module_guid.guid_str;
     let (dg1, dg2, dg3) = (module_guid.d1, module_guid.d2, module_guid.d3);
-    let dg4_tokens: Vec<TokenStream> =
-        module_guid.d4.iter().map(|b| { let b = *b; quote!(#b) }).collect();
+    let dg4_tokens: Vec<TokenStream> = module_guid
+        .d4
+        .iter()
+        .map(|b| {
+            let b = *b;
+            quote!(#b)
+        })
+        .collect();
 
-    // Parse defmt-style type hints (e.g. `{=i32}`, `{=str}`) out of the format
-    // string. Because the hints carry the concrete type at macro-expansion
-    // time, we no longer need a monomorphized generic to recover type names.
-    let (hints, wpp_format) = parse_format(format_string)?;
-    if hints.len() != field_count {
+    let format_segments = parse_format(format_string)?;
+    let placeholder_count = format_segments.len() - 1;
+    if placeholder_count != field_count {
         return Err(syn::Error::new(
             proc_macro2::Span::call_site(),
             format!(
-                "format string has {} type-hinted placeholder(s) but {} argument(s)",
-                hints.len(),
-                field_count
+                "format string has {} placeholder(s) but {} argument(s)",
+                placeholder_count, field_count
             ),
         ));
     }
@@ -155,42 +164,118 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     let event_id = compute_event_id(format_string);
     let event_id_lit = event_id;
 
-    // Build the wppv1 TMF annotation lines. Every part is known at expansion
-    // time, so each line is emitted as a plain string literal in the PDB's
-    // `S_ANNOTATION` record. The trace GUID is the per-module decode GUID and
-    // the message number is the computed event id.
-    let annotation_lines = build_tmf_annotation(
-        provider_name,
-        decode_guid_str,
-        event_id,
-        &wpp_format,
-        &level_name_to_wpp(&parsed.level_name),
-        &keyword_ident.to_string(),
-        &hints,
-        args,
-    );
+    let annotation_lines = build_tmf_annotation_header(provider_name, decode_guid_str);
     let annotation_strings: Vec<TokenStream> =
         annotation_lines.iter().map(|s| quote!(#s)).collect();
-    let annotation_call = quote! {
-        {
-            struct Args;
 
-            impl core::hint::CodeViewAnnotationArgs for Args {
-                const ARGS: &'static [&'static str] = &[#(#annotation_strings),*];
-            }
-
-            core::hint::codeview_annotation::<Args>();
-        }
+    let flags = if keyword_ident == "__WPP_NO_KEYWORD" {
+        String::new()
+    } else {
+        format!(" FLAGS={}", keyword_ident)
     };
+    let typev_prefix = format!(
+        "#typev {}_{} {} \"{}",
+        provider_name, event_id, event_id, format_segments[0]
+    );
+    let typev_suffix = format!(
+        "\" //   LEVEL={}{}",
+        level_name_to_wpp(&parsed.level_name),
+        flags
+    );
 
     // Serialization plumbing (unchanged): argument capture, `IntoWppField`
     // conversion, and raw-byte extraction for ETW / IFR.
-    let arg_names: Vec<Ident> =
-        (0..field_count).map(|i| format_ident!("__a{}", i)).collect();
-    let param_names: Vec<Ident> =
-        (0..field_count).map(|i| format_ident!("__f{}", i)).collect();
-    let bytes_names: Vec<Ident> =
-        (0..field_count).map(|i| format_ident!("__b{}", i)).collect();
+    let arg_names: Vec<Ident> = (0..field_count)
+        .map(|i| format_ident!("__a{}", i))
+        .collect();
+    let param_names: Vec<Ident> = (0..field_count)
+        .map(|i| format_ident!("__f{}", i))
+        .collect();
+    let bytes_names: Vec<Ident> = (0..field_count)
+        .map(|i| format_ident!("__b{}", i))
+        .collect();
+    let type_names: Vec<Ident> = (0..field_count)
+        .map(|i| format_ident!("__WppT{}", i))
+        .collect();
+    let annotation_const_names: Vec<Ident> = (0..field_count)
+        .map(|i| format_ident!("ARG_{}", i))
+        .collect();
+    let annotation_prefixes: Vec<String> = args
+        .iter()
+        .map(annotation_argument_prefix)
+        .collect();
+    let annotation_suffixes: Vec<String> = (0..field_count)
+        .map(|i| format!(" -- {}", 10 + i))
+        .collect();
+    let mut format_parts = Vec::with_capacity(field_count * 2 + 1);
+    format_parts.push(quote!(#typev_prefix));
+    for (index, type_name) in type_names.iter().enumerate() {
+        let segment = &format_segments[index + 1];
+        format_parts.push(quote!(#type_name::FORMAT_SPEC));
+        format_parts.push(quote!(#segment));
+    }
+    format_parts.push(quote!(#typev_suffix));
+
+    let annotation_call = if field_count > 0 {
+        quote! {
+            {
+                fn __wpp_emit_annotation<#(#type_names: ::wpp::WppField),*>(
+                    #(#param_names: &#type_names),*
+                ) {
+                    struct Args<#(#type_names),*>(
+                        core::marker::PhantomData<(#(#type_names,)*)>
+                    );
+
+                    impl<#(#type_names: ::wpp::WppField),*> Args<#(#type_names),*> {
+                        const FORMAT_LINE: ::wpp::field::AnnotationString<512> =
+                            ::wpp::field::AnnotationString::concat_parts(&[
+                                #(#format_parts),*
+                            ]);
+
+                        #(
+                            const #annotation_const_names: ::wpp::field::AnnotationString<150> =
+                                ::wpp::field::AnnotationString::concat(
+                                    #annotation_prefixes,
+                                    #type_names::TYPE_NAME,
+                                    #annotation_suffixes,
+                                );
+                        )*
+                    }
+
+                    impl<#(#type_names: ::wpp::WppField),*>
+                        core::hint::CodeViewAnnotationArgs for Args<#(#type_names),*>
+                    {
+                        const ARGS: &'static [&'static str] = &[
+                            #(#annotation_strings),*,
+                            Self::FORMAT_LINE.as_str(),
+                            "{",
+                            #(Self::#annotation_const_names.as_str()),*,
+                            "}",
+                        ];
+                    }
+
+                    core::hint::codeview_annotation::<Args<#(#type_names),*>>();
+                }
+
+                __wpp_emit_annotation(#(&#param_names),*);
+            }
+        }
+    } else {
+        let typev_line = format!("{}{}", typev_prefix, typev_suffix);
+        quote! {
+            {
+                struct Args;
+
+                impl core::hint::CodeViewAnnotationArgs for Args {
+                    const ARGS: &'static [&'static str] = &[
+                        #(#annotation_strings),*, #typev_line, "{", "}"
+                    ];
+                }
+
+                core::hint::codeview_annotation::<Args>();
+            }
+        }
+    };
 
     let data_descriptors: Vec<TokenStream> = bytes_names
         .iter()
@@ -236,11 +321,11 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
 
     let output = if field_count > 0 {
         quote! {{
-            #annotation_call
             #decode_guid_const
 
             #(let #arg_names = #args;)*
             #(let #param_names = ::wpp::IntoWppField::into_wpp_field(#arg_names);)*
+            #annotation_call
             #(let #bytes_names = ::wpp::WppField::as_bytes(&#param_names);)*
 
             // ETW: gated by is_enabled (real-time trace session active)
@@ -350,49 +435,38 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/// A parsed type hint: the WPP `Item*` reader type and its printf specifier.
-type Hint = (&'static str, &'static str);
-
-/// Maps a defmt-style type name (the text after `=` in `{=type}`) to the WPP
-/// item type used in the TMF annotation and its printf-style format specifier.
-///
-/// The item type controls how the trace decoder reads the serialized bytes, so
-/// the byte width must match the wire format produced by `WppField::as_bytes`.
-fn hint_for(ty: &str) -> Option<Hint> {
-    Some(match ty {
-        "i8" => ("ItemChar", "!d!"),
-        "u8" => ("ItemUChar", "!u!"),
-        "i16" => ("ItemShort", "!d!"),
-        "u16" => ("ItemUShort", "!u!"),
-        "i32" => ("ItemLong", "!d!"),
-        "u32" => ("ItemULong", "!u!"),
-        "i64" => ("ItemLongLong", "!I64d!"),
-        "u64" => ("ItemULongLong", "!I64u!"),
-        "isize" => ("ItemLongLong", "!I64d!"),
-        "usize" => ("ItemULongLong", "!I64u!"),
-        "f32" => ("ItemFloat", "!f!"),
-        "f64" => ("ItemDouble", "!f!"),
-        "bool" => ("ItemUChar", "!d!"),
-        "str" | "cstr" => ("ItemString", "!s!"),
-        _ => return None,
-    })
-}
-
 fn err(msg: &str) -> syn::Error {
     syn::Error::new(proc_macro2::Span::call_site(), msg.to_string())
 }
 
-/// Parses a defmt-style format string and produces:
+fn annotation_argument_prefix(arg: &Expr) -> String {
+    let mut expression = quote!(#arg).to_string();
+    if is_c_string_literal(arg) && expression.starts_with('c') {
+        expression.remove(0);
+    }
+
+    format!("{expression}, ")
+}
+
+fn is_c_string_literal(expr: &Expr) -> bool {
+    match expr {
+        Expr::Group(group) => is_c_string_literal(&group.expr),
+        Expr::Paren(paren) => is_c_string_literal(&paren.expr),
+        Expr::Lit(expr_lit) => matches!(expr_lit.lit, Lit::CStr(_)),
+        _ => false,
+    }
+}
+
+/// Parses a Rust-style format string and produces:
 ///
-/// * the ordered list of type hints for the placeholders, and
-/// * the equivalent wppv1 format string where each `{=type}` becomes
-///   `%N!spec!` (arguments numbered from 10) and the whole string is prefixed
-///   with `%0` (the WPP "no prefix" marker).
+/// Returns static string segments split at each placeholder. Each placeholder's
+/// segment ends with its numbered WPP argument reference (`%10`, `%11`, ...),
+/// allowing the type-driven `!spec!` to be inserted between adjacent segments.
 ///
 /// Literal braces are written as `{{` / `}}`, and literal `%` is escaped to
 /// `%%` so it survives WPP's printf-style rendering.
-fn parse_format(fmt: &str) -> Result<(Vec<Hint>, String)> {
-    let mut hints = Vec::new();
+fn parse_format(fmt: &str) -> Result<Vec<String>> {
+    let mut segments = Vec::new();
     let mut out = String::from("%0");
     let mut arg_num = 10u32;
     let mut chars = fmt.chars().peekable();
@@ -417,22 +491,17 @@ fn parse_format(fmt: &str) -> Result<(Vec<Hint>, String)> {
                 if !closed {
                     return Err(err("unclosed '{' in format string"));
                 }
-                let inner = inner.trim();
-                let ty = inner.strip_prefix('=').ok_or_else(|| {
-                    err(&format!(
-                        "placeholder '{{{}}}' must carry a type hint like '{{=i32}}'; \
-                         bare '{{}}' is not supported",
+                if !inner.is_empty() {
+                    return Err(err(&format!(
+                        "unsupported format placeholder '{{{}}}'; use '{{}}'",
                         inner
-                    ))
-                })?;
-                let ty = ty.trim();
-                let (item, spec) = hint_for(ty)
-                    .ok_or_else(|| err(&format!("unknown type hint '={}'", ty)))?;
+                    )));
+                }
                 out.push('%');
                 out.push_str(&arg_num.to_string());
-                out.push_str(spec);
                 arg_num += 1;
-                hints.push((item, spec));
+                segments.push(out);
+                out = String::new();
             }
             '}' => {
                 if chars.peek() == Some(&'}') {
@@ -447,22 +516,14 @@ fn parse_format(fmt: &str) -> Result<(Vec<Hint>, String)> {
         }
     }
 
-    Ok((hints, out))
+    segments.push(out);
+    Ok(segments)
 }
 
 /// Builds the ordered list of strings that make up a wppv1 `TMF:` annotation.
 ///
 /// Each returned string becomes one line inside the PDB `S_ANNOTATION` record.
-fn build_tmf_annotation(
-    provider_name: &str,
-    guid: &str,
-    event_id: u16,
-    wpp_format: &str,
-    level_wpp: &str,
-    keyword: &str,
-    hints: &[Hint],
-    args: &[Expr],
-) -> Vec<String> {
+fn build_tmf_annotation_header(provider_name: &str, guid: &str) -> Vec<String> {
     let mut lines = Vec::new();
     lines.push("TMF:".to_string());
     lines.push(format!(
@@ -470,22 +531,6 @@ fn build_tmf_annotation(
         guid, provider_name, provider_name
     ));
 
-    let flags = if keyword == "__WPP_NO_KEYWORD" {
-        String::new()
-    } else {
-        format!(" FLAGS={}", keyword)
-    };
-    lines.push(format!(
-        "#typev {}_{} {} \"{}\" //   LEVEL={}{}",
-        provider_name, event_id, event_id, wpp_format, level_wpp, flags
-    ));
-
-    lines.push("{".to_string());
-    for (i, ((item, _spec), arg)) in hints.iter().zip(args.iter()).enumerate() {
-        let arg_text = quote!(#arg).to_string();
-        lines.push(format!("{}, {} -- {}", arg_text, item, 10 + i));
-    }
-    lines.push("}".to_string());
     lines
 }
 
@@ -506,10 +551,10 @@ fn compute_event_id(fmt: &str) -> u16 {
 }
 
 fn fnv1a_64(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
+    let mut hash: u64 = 0xCBF29CE484222325;
     for &byte in data {
         hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
+        hash = hash.wrapping_mul(0x100000001B3);
     }
     hash
 }
@@ -565,7 +610,13 @@ fn compute_module_decode_guid(module_key: &str) -> ModuleGuid {
         d1, d2, d3, d4[0], d4[1], d4[2], d4[3], d4[4], d4[5], d4[6], d4[7]
     );
 
-    ModuleGuid { guid_str, d1, d2, d3, d4 }
+    ModuleGuid {
+        guid_str,
+        d1,
+        d2,
+        d3,
+        d4,
+    }
 }
 
 #[cfg(test)]
@@ -573,36 +624,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_simple_hints() {
-        let (hints, fmt) = parse_format("Int: {=i32}, Str: {=str}").unwrap();
-        assert_eq!(hints.len(), 2);
-        assert_eq!(hints[0], ("ItemLong", "!d!"));
-        assert_eq!(hints[1], ("ItemString", "!s!"));
-        assert_eq!(fmt, "%0Int: %10!d!, Str: %11!s!");
+    fn parse_simple_placeholders() {
+        let segments = parse_format("Int: {}, Str: {}").unwrap();
+        assert_eq!(segments, ["%0Int: %10", ", Str: %11", ""]);
     }
 
     #[test]
     fn parse_escaped_braces() {
-        let (hints, fmt) = parse_format("{{literal}} {=u32}").unwrap();
-        assert_eq!(hints.len(), 1);
-        assert_eq!(fmt, "%0{literal} %10!u!");
+        let segments = parse_format("{{literal}} {}").unwrap();
+        assert_eq!(segments, ["%0{literal} %10", ""]);
     }
 
     #[test]
     fn parse_no_args() {
-        let (hints, fmt) = parse_format("no args here").unwrap();
-        assert!(hints.is_empty());
-        assert_eq!(fmt, "%0no args here");
+        let segments = parse_format("no args here").unwrap();
+        assert_eq!(segments, ["%0no args here"]);
     }
 
     #[test]
-    fn parse_rejects_bare_placeholder() {
-        assert!(parse_format("value {}").is_err());
+    fn parse_rejects_format_modifiers() {
+        assert!(parse_format("value {:x}").is_err());
+        assert!(parse_format("value {=u32}").is_err());
     }
 
     #[test]
-    fn parse_rejects_unknown_hint() {
-        assert!(parse_format("value {=widget}").is_err());
+    fn annotation_prefix_drops_c_string_literal_prefix() {
+        let expression: Expr = syn::parse_str("c\"test\"").unwrap();
+        assert_eq!(annotation_argument_prefix(&expression), "\"test\", ");
+    }
+
+    #[test]
+    fn annotation_prefix_detects_wrapped_c_string_literal() {
+        let expression: Expr = syn::parse_str("(c\"test\")").unwrap();
+        assert!(is_c_string_literal(&expression));
+    }
+
+    #[test]
+    fn annotation_prefix_preserves_other_expressions() {
+        let expression: Expr = syn::parse_str("value").unwrap();
+        assert_eq!(annotation_argument_prefix(&expression), "value, ");
     }
 
     #[test]
