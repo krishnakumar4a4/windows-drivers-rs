@@ -208,7 +208,8 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
         .map(|i| format!(" -- {}", 10 + i))
         .collect();
     let mut format_parts = Vec::with_capacity(field_count * 2 + 1);
-    format_parts.push(quote!(#typev_prefix));
+    let first_format_segment = &format_segments[0];
+    format_parts.push(quote!(#first_format_segment));
     for (index, type_name) in type_names.iter().enumerate() {
         let segment = &format_segments[index + 1];
         format_parts.push(quote!(#type_name::FORMAT_SPEC));
@@ -221,16 +222,23 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
             {
                 fn __wpp_emit_annotation<#(#type_names: ::wpp::WppField),*>(
                     #(#param_names: &#type_names),*
-                ) {
+                ) -> u16 {
                     struct Args<#(#type_names),*>(
                         core::marker::PhantomData<(#(#type_names,)*)>
                     );
 
                     impl<#(#type_names: ::wpp::WppField),*> Args<#(#type_names),*> {
+                        const EVENT_ID: u16 = ::wpp::field::compute_event_id(
+                            #format_string,
+                            &[#(#type_names::TYPE_NAME),*],
+                        );
+
                         const FORMAT_LINE: ::wpp::field::AnnotationString<512> =
-                            ::wpp::field::AnnotationString::concat_parts(&[
-                                #(#format_parts),*
-                            ]);
+                            ::wpp::field::AnnotationString::event_format_line(
+                                #provider_name,
+                                Self::EVENT_ID,
+                                &[#(#format_parts),*],
+                            );
 
                         #(
                             const #annotation_const_names: ::wpp::field::AnnotationString<150> =
@@ -255,9 +263,10 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                     }
 
                     core::hint::codeview_annotation::<Args<#(#type_names),*>>();
+                    Args::<#(#type_names),*>::EVENT_ID
                 }
 
-                __wpp_emit_annotation(#(&#param_names),*);
+                __wpp_emit_annotation(#(&#param_names),*)
             }
         }
     } else {
@@ -325,15 +334,15 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
 
             #(let #arg_names = #args;)*
             #(let #param_names = ::wpp::IntoWppField::into_wpp_field(#arg_names);)*
-            #annotation_call
+            let __wpp_event_id = #annotation_call;
             #(let #bytes_names = ::wpp::WppField::as_bytes(&#param_names);)*
 
             // ETW: gated by is_enabled (real-time trace session active)
             {
                 let __wpp_kw_val: u64 = #provider_mod::#keyword_ident;
                 if #provider_mod::STATE.is_enabled(#level_expr, __wpp_kw_val) {
-                    const __WPP_EVT_DESC: ::wpp::etw::EVENT_DESCRIPTOR = ::wpp::etw::EVENT_DESCRIPTOR {
-                        Id: #event_id_lit, Version: 0, Channel: 0, Level: #level_expr,
+                    let __wpp_evt_desc: ::wpp::etw::EVENT_DESCRIPTOR = ::wpp::etw::EVENT_DESCRIPTOR {
+                        Id: __wpp_event_id, Version: 0, Channel: 0, Level: #level_expr,
                         Opcode: 0, Task: 0, Keyword: #provider_mod::#keyword_ident,
                     };
 
@@ -345,7 +354,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                     unsafe {
                         ::wpp::etw::write(
                             #provider_mod::STATE.reg_handle(),
-                            &__WPP_EVT_DESC,
+                            &__wpp_evt_desc,
                             #total_desc_count,
                             __wpp_data.as_ptr(),
                         );
@@ -365,7 +374,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                             (#provider_mod::#keyword_ident & 0xFFFF_FFFF) as u32,
                             &mut __wpp_ifr_guid as *mut ::wpp::GUID
                                 as *mut core::ffi::c_void,
-                            #event_id_lit,
+                            __wpp_event_id,
                             #(#ifr_arg_pairs)*
                             core::ptr::null::<core::ffi::c_void>(),
                         )

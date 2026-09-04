@@ -16,7 +16,7 @@ pub mod field;
 pub mod ifr;
 pub mod provider;
 
-pub use field::{IntoWppField, WppByteEnum, WppField};
+pub use field::{IntoWppField, WppField, WppValue};
 #[cfg(feature = "kernel_mode")]
 pub use ifr::IFRState;
 pub use provider::ProviderState;

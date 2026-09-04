@@ -70,6 +70,39 @@ impl NtStatus {
     }
 }
 
+unsafe impl wpp::WppValue for NtStatus {
+    type Wire = i32;
+
+    const TYPE_NAME: &'static str = "ItemNTSTATUS";
+    const FORMAT_SPEC: &'static str = "!s!";
+
+    fn into_wire(self) -> Self::Wire {
+        self.code()
+    }
+}
+
+#[cfg(test)]
+mod nt_status_wpp_tests {
+    use wpp::{IntoWppField, WppField};
+
+    use super::{NtStatus, status_codes};
+
+    #[test]
+    fn nt_status_uses_wpp_status_format() {
+        type Field = <NtStatus as IntoWppField>::Output;
+        assert_eq!(Field::TYPE_NAME, "ItemNTSTATUS");
+        assert_eq!(Field::FORMAT_SPEC, "!s!");
+    }
+
+    #[test]
+    fn nt_status_serializes_its_raw_code() {
+        for code in [status_codes::STATUS_SUCCESS, status_codes::STATUS_ACCESS_DENIED] {
+            let field = NtStatus::from(code).into_wpp_field();
+            assert_eq!(field.as_bytes(), &code.to_ne_bytes());
+        }
+    }
+}
+
 impl From<NtStatusNonError> for NtStatus {
     fn from(non_error: NtStatusNonError) -> Self {
         Self::NonError(non_error)

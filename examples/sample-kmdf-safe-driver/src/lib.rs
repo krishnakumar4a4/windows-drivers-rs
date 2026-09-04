@@ -6,7 +6,7 @@
 
 use wdf::{
     driver_entry, println, wpp_control_guids, DeviceInit, Driver, DriverConfig, DriverObject,
-    IRQL, NtResult, UnicodeString,
+    status_codes, IRQL, NtResult, NtStatus, UnicodeString,
 };
 
 extern crate alloc;
@@ -64,6 +64,19 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
     trace!(VERBOSE, PNP, "PnP subsystem initialized");
     trace!(WARNING, IO, "IO path ready, max write: {}", MAX_WRITE_LENGTH);
 
+    let v1 = 123_i32;
+    let v2 = "another-generic-value";
+    let v3 = IRQL::current().unwrap_or(IRQL::Passive);
+    trace_generic_values(v1, v2);
+    trace_generic_values(v3, v2);
+
+    trace!(
+        INFO, GENERAL,
+        "NTSTATUS values: success={}, access_denied={}",
+        NtStatus::from(status_codes::STATUS_SUCCESS),
+        NtStatus::from(status_codes::STATUS_ACCESS_DENIED)
+    );
+
     // Default trace: no keyword, routes to first provider
     trace!(
         INFO,
@@ -72,6 +85,14 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
     );
 
     Ok(())
+}
+
+fn trace_generic_values<T: wpp::IntoWppField, U: wpp::IntoWppField>(first: T, second: U) {
+    trace!(
+        INFO, GENERAL,
+        "Generic values: first={}, second={}",
+        first, second
+    );
 }
 
 fn evt_device_add(device_init: &mut DeviceInit) -> NtResult<()> {

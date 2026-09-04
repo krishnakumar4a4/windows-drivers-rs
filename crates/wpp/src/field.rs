@@ -4,7 +4,7 @@
 //! Trait implemented by types that can be serialized into ETW event data.
 
 use alloc::ffi::CString;
-use core::{cmp::max, ffi::CStr};
+use core::{ffi::CStr, marker::PhantomData};
 
 /// The associated constants are resolved during monomorphization, allowing
 /// `codeview_annotation` to emit the concrete type name into the PDB.
@@ -19,26 +19,43 @@ pub trait WppField {
     fn as_bytes(&self) -> &[u8];
 }
 
-/// Contract for field types represented by a single byte.
+/// Contract for external types converted to a WPP wire representation.
 ///
 /// # Safety
 ///
-/// Implementors must have a stable one-byte representation whose address can
-/// be read as a single `u8` for the lifetime of `&self`.
-pub unsafe trait WppByteEnum: Copy {
-    /// The WPP reader type used to decode the byte.
+/// `Wire` must have no uninitialized padding bytes because its complete object
+/// representation is copied into the trace payload.
+pub unsafe trait WppValue: Copy {
+    /// The initialized wire representation stored in the trace payload.
+    type Wire: Copy;
+
+    /// The WPP reader type used to decode the value.
     const TYPE_NAME: &'static str;
 
     /// The WPP printf-style specifier used to render the decoded value.
     const FORMAT_SPEC: &'static str;
+
+    /// Converts this value into its WPP wire representation.
+    fn into_wire(self) -> Self::Wire;
 }
 
-impl<T: WppByteEnum> WppField for T {
+/// Owned WPP field produced from an external value type.
+pub struct WppValueField<T: WppValue> {
+    wire: T::Wire,
+    marker: PhantomData<T>,
+}
+
+impl<T: WppValue> WppField for WppValueField<T> {
     const TYPE_NAME: &'static str = T::TYPE_NAME;
     const FORMAT_SPEC: &'static str = T::FORMAT_SPEC;
 
     fn as_bytes(&self) -> &[u8] {
-        unsafe { core::slice::from_raw_parts((self as *const T).cast::<u8>(), 1) }
+        unsafe {
+            core::slice::from_raw_parts(
+                (&raw const self.wire).cast::<u8>(),
+                core::mem::size_of::<T::Wire>(),
+            )
+        }
     }
 }
 
@@ -76,6 +93,7 @@ impl_wpp_field! {
     // bool  => ("ItemUChar", "!d!"), // TODO: boolean is ItemListLong(false,true) in WPP
     usize => ("ItemULongLong", "!I64u!"), // TODO: on 32 bit machines, this will be 4 bytes, handle it accordingly
     isize => ("ItemLongLong", "!I64d!"),
+    // &[i8] => ("ItemListByte", "!s!"),
 }
 
 impl WppField for &CStr {
@@ -116,7 +134,7 @@ impl WppField for bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{IntoWppField, WppField};
+    use super::{AnnotationString, IntoWppField, WppField, compute_event_id};
 
     #[test]
     fn bool_uses_wpp_item_list_format() {
@@ -132,6 +150,29 @@ mod tests {
         assert_eq!((&3.25_f32).into_wpp_field(), 3.25_f64);
     }
 
+    #[test]
+    fn event_id_includes_field_types() {
+        let format = "Generic values: first={}, second={}";
+        let integer = compute_event_id(format, &["ItemLong", "ItemString"]);
+        let irql = compute_event_id(
+            format,
+            &["ItemListByte(Low,APC,DPC)", "ItemString"],
+        );
+        assert_ne!(integer, irql);
+    }
+
+    #[test]
+    fn event_format_line_contains_schema_id() {
+        const LINE: AnnotationString<128> = AnnotationString::event_format_line(
+            "Provider",
+            12345,
+            &["%0value=%10", "!ld!", "\" //   LEVEL=INFO"],
+        );
+        assert_eq!(
+            LINE.as_str(),
+            "#typev Provider_12345 12345 \"%0value=%10!ld!\" //   LEVEL=INFO"
+        );
+    }
 }
 
 /// Fixed-capacity string assembled during const evaluation for a PDB
@@ -193,10 +234,105 @@ impl<const CAPACITY: usize> AnnotationString<CAPACITY> {
     }
 
     #[doc(hidden)]
+    pub const fn event_format_line(
+        provider_name: &str,
+        event_id: u16,
+        format_parts: &[&str],
+    ) -> Self {
+        let mut result = Self {
+            bytes: [0; CAPACITY],
+            len: 0,
+        };
+
+        result.push_str("#typev ");
+        result.push_str(provider_name);
+        result.push_byte(b'_');
+        result.push_u16(event_id);
+        result.push_byte(b' ');
+        result.push_u16(event_id);
+        result.push_str(" \"");
+
+        let mut index = 0;
+        while index < format_parts.len() {
+            result.push_str(format_parts[index]);
+            index += 1;
+        }
+
+        result
+    }
+
+    const fn push_str(&mut self, value: &str) {
+        let bytes = value.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() {
+            self.push_byte(bytes[index]);
+            index += 1;
+        }
+    }
+
+    const fn push_byte(&mut self, value: u8) {
+        assert!(
+            self.len < CAPACITY,
+            "WPP annotation string exceeds its buffer capacity"
+        );
+        self.bytes[self.len] = value;
+        self.len += 1;
+    }
+
+    const fn push_u16(&mut self, value: u16) {
+        let divisor = if value >= 10_000 {
+            10_000
+        } else if value >= 1_000 {
+            1_000
+        } else if value >= 100 {
+            100
+        } else if value >= 10 {
+            10
+        } else {
+            1
+        };
+        let mut remaining = value;
+        let mut current_divisor = divisor;
+
+        loop {
+            self.push_byte(b'0' + (remaining / current_divisor) as u8);
+            remaining %= current_divisor;
+            if current_divisor == 1 {
+                break;
+            }
+            current_divisor /= 10;
+        }
+    }
+
+    #[doc(hidden)]
     pub const fn as_str(&self) -> &str {
         let bytes = unsafe { core::slice::from_raw_parts(self.bytes.as_ptr(), self.len) };
         unsafe { core::str::from_utf8_unchecked(bytes) }
     }
+}
+
+/// Computes a stable event ID from a format string and its monomorphized WPP
+/// field types.
+#[doc(hidden)]
+pub const fn compute_event_id(format: &str, type_names: &[&str]) -> u16 {
+    let mut hash = fnv1a_64_update(0xCBF29CE484222325, format.as_bytes());
+    let mut index = 0;
+    while index < type_names.len() {
+        hash = fnv1a_64_update(hash, &[0]);
+        hash = fnv1a_64_update(hash, type_names[index].as_bytes());
+        index += 1;
+    }
+    ((hash % 65_534) + 1) as u16
+}
+
+const fn fnv1a_64_update(mut hash: u64, bytes: &[u8]) -> u64 {
+    let mut index = 0;
+    while index < bytes.len() {
+        hash ^= bytes[index] as u64;
+        hash = hash.wrapping_mul(0x100000001B3);
+        index += 1;
+    }
+    hash
 }
 
 /// Converts a value into a type that implements [`WppField`].
@@ -262,11 +398,14 @@ impl IntoWppField for &f32 {
     }
 }
 
-impl<T: WppByteEnum> IntoWppField for T {
-    type Output = T;
+impl<T: WppValue> IntoWppField for T {
+    type Output = WppValueField<T>;
 
     fn into_wpp_field(self) -> Self::Output {
-        self
+        WppValueField {
+            wire: self.into_wire(),
+            marker: PhantomData,
+        }
     }
 }
 
