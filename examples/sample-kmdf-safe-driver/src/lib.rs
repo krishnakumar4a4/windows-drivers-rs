@@ -13,6 +13,33 @@ extern crate alloc;
 
 const MAX_WRITE_LENGTH: usize = 1024 * 40;
 
+#[allow(dead_code)]
+#[repr(u8)]
+#[derive(Clone, Copy, wpp::WppField)]
+enum SampleByteState {
+    Unknown = 0,
+    Starting = 1,
+    Ready = 2,
+}
+
+#[allow(dead_code)]
+#[repr(u16)]
+#[derive(Clone, Copy, wpp::WppField)]
+enum SampleShortState {
+    Unknown = 0,
+    Warning = 10,
+    Failed = 100,
+}
+
+#[allow(dead_code)]
+#[repr(u32)]
+#[derive(Clone, Copy, wpp::WppField)]
+enum SampleLongState {
+    Offline = 0,
+    Online = 1,
+    Recovering = 2,
+}
+
 wpp_control_guids!(
     SampleDriver cb94defb-592a-4509-8f2e-54f204929669 {
         GENERAL,
@@ -75,6 +102,14 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
         "NTSTATUS values: success={}, access_denied={}",
         NtStatus::from(status_codes::STATUS_SUCCESS),
         NtStatus::from(status_codes::STATUS_ACCESS_DENIED)
+    );
+
+    trace!(
+        INFO, GENERAL,
+        "Custom enums: byte={}, short={}, long={}",
+        SampleByteState::Ready,
+        SampleShortState::Warning,
+        SampleLongState::Recovering
     );
 
     // Default trace: no keyword, routes to first provider

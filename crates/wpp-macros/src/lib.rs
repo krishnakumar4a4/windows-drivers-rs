@@ -4,6 +4,7 @@
 //! Proc macros for WPP software tracing.
 
 mod control_guids;
+mod field;
 mod trace_impl;
 
 use proc_macro::TokenStream;
@@ -37,6 +38,15 @@ pub fn wpp_control_guids(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn __wpp_trace_impl(input: TokenStream) -> TokenStream {
     match trace_impl::generate(input.into()) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// Derive WPP list-enum decoding for a fieldless `u8`, `u16`, or `u32` enum.
+#[proc_macro_derive(WppField)]
+pub fn derive_wpp_field(input: TokenStream) -> TokenStream {
+    match field::generate(input.into()) {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
     }
