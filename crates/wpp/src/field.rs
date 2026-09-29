@@ -123,6 +123,8 @@ impl WppField for bool {
     const TYPE_NAME: &'static str = "ItemListByte(false,true)";
     const FORMAT_SPEC: &'static str = "!s!";
 
+    // TODO: implicit conversion from Rust type to C++ type possible as both are single byte size types, 
+    // change this
     #[inline]
     fn as_bytes(&self) -> &[u8] {
         match self {

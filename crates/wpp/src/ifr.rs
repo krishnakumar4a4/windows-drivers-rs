@@ -79,6 +79,17 @@ pub struct WPP_TRACE_CONTROL_BLOCK {
     pub AutoLogAttachToMiniDump: u16,
 }
 
+/// TODO: We can remove this as the other approach of reading AutoLogContext 
+/// by WPP_GLOBAL_Control variable is working on rcdrkd extension.
+/// 
+/// Versioned debugger type anchor; its value is never dereferenced.
+/// Decoders resolve the exported symbol to its typed PDB data record,
+/// then follow the pointer type to discover control-block fields.
+#[doc(hidden)]
+#[used]
+#[unsafe(export_name = "WPP_DEBUG_TRACE_CONTROL_BLOCK_V1")]
+pub static mut WPP_DEBUG_TYPE_ANCHOR: *const WPP_TRACE_CONTROL_BLOCK = ptr::null();
+
 impl WPP_TRACE_CONTROL_BLOCK {
     #[doc(hidden)]
     pub const fn new(flags_len: u8) -> Self {

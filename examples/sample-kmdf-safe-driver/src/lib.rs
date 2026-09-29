@@ -13,6 +13,7 @@ extern crate alloc;
 
 const MAX_WRITE_LENGTH: usize = 1024 * 40;
 
+/// u8 size field less enum variant demonstration
 #[allow(dead_code)]
 #[repr(u8)]
 #[derive(Clone, Copy, wpp::WppField)]
@@ -22,6 +23,7 @@ enum SampleByteState {
     Ready = 2,
 }
 
+/// u16 size field less enum variant demonstration
 #[allow(dead_code)]
 #[repr(u16)]
 #[derive(Clone, Copy, wpp::WppField)]
@@ -31,6 +33,7 @@ enum SampleShortState {
     Failed = 100,
 }
 
+/// u32 size field less enum variant demonstration
 #[allow(dead_code)]
 #[repr(u32)]
 #[derive(Clone, Copy, wpp::WppField)]
@@ -38,6 +41,27 @@ enum SampleLongState {
     Offline = 0,
     Online = 1,
     Recovering = 2,
+}
+
+/// Implicitly valued enum variant demonstration.
+#[allow(dead_code)]
+#[repr(u8)]
+#[derive(Clone, Copy, wpp::WppField)]
+enum SampleImplicitState {
+    Unknown,
+    Starting,
+    Ready,
+}
+
+
+/// Mixed implicitly and explicitly valued enum variant demonstration.
+#[allow(dead_code)]
+#[repr(u16)]
+#[derive(Clone, Copy, wpp::WppField)]
+enum SampleMixedState {
+    Unknown,
+    Warning = 10,
+    Failed,
 }
 
 wpp_control_guids!(
@@ -55,8 +79,48 @@ wpp_control_guids!(
 mod device;
 mod queue;
 
+// struct SampleRecord<T> {
+//     concrete: i32,
+//     generic: T,
+// }
+
+// impl<T: wpp::IntoWppField> SampleRecord<T> {
+//     fn trace(self) {
+//         trace!(
+//             INFO, GENERAL,
+//             "Struct fields: concrete={}, generic={}",
+//             self.concrete, self.generic
+//         );
+//     }
+// }
+
+
+/// Note: This is to demonstrate how duplicate WPP_GLOBAL_Control symbols
+/// declared in other places in the codebase would not affect the IFR decoding.
+pub mod nested {
+    // #[unsafe(no_mangle)]
+    #[used]
+    // #[export_name = "WPP_GLOBAL_Control"]
+    pub static mut WPP_GLOBAL_Control: &str = "test";
+
+    pub fn test() {
+        unsafe {
+            WPP_GLOBAL_Control = "modified";
+        }
+    }
+}
+
 #[driver_entry(trace_providers(SampleDriver, PnpTracer))]
 fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString) -> NtResult<()> {
+
+    // Scenario:Call the test function in the nested module to modify its WPP_GLOBAL_Control symbol.
+    // nested::test();
+
+    // Scenario: Mutate the publicly visible WPP_GLOBAL_Control symbol in the nested module.
+    unsafe {
+        nested::WPP_GLOBAL_Control = "modified";
+    }
+
     let config = DriverConfig::new(evt_device_add);
     let driver = Driver::create(driver_object, registry_path, config)?;
 
@@ -97,6 +161,13 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
     trace_generic_values(v1, v2);
     trace_generic_values(v3, v2);
 
+    // TODO: This doesn't appear in the trace decoded output, check it
+    // SampleRecord {
+    //     concrete: 42,
+    //     generic: SampleImplicitState::Starting,
+    // }
+    // .trace();
+
     trace!(
         INFO, GENERAL,
         "NTSTATUS values: success={}, access_denied={}",
@@ -104,12 +175,16 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
         NtStatus::from(status_codes::STATUS_ACCESS_DENIED)
     );
 
+    // TODO: This decodes as - "10: Unknown - Custom enums: byte=0x00000002(Ready), short=0x0000000a(Warning), long=0x00000002(Recovering), implicit=0x00000002(Ready), mixed=0x0000000b(Failed)"
+    // The issue is probably with limits on size of the path to the tracepoint in source code
     trace!(
         INFO, GENERAL,
-        "Custom enums: byte={}, short={}, long={}",
+        "Custom enums: byte={}, short={}, long={}, implicit={}, mixed={}",
         SampleByteState::Ready,
         SampleShortState::Warning,
-        SampleLongState::Recovering
+        SampleLongState::Recovering,
+        SampleImplicitState::Ready,
+        SampleMixedState::Failed
     );
 
     // Default trace: no keyword, routes to first provider
