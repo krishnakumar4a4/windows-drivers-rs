@@ -293,17 +293,7 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
                 // (Option B) is honoured. Best-effort — ignored on kernels
                 // without the feature. Enablement stays keyed on this control
                 // GUID; each event carries its module's decode GUID separately.
-                let __wpp_modern_status = unsafe { ::wpp::etw::enable_modern_wpp(handle) };
-                ::wdf::println!(
-                    "enable_modern_wpp[{}]: status={:#010x} -> {}",
-                    #provider_name_str,
-                    __wpp_modern_status,
-                    if __wpp_modern_status == 0 {
-                        "ModernWpp enabled"
-                    } else {
-                        "ModernWpp NOT available on this machine"
-                    }
-                );
+                unsafe { ::wpp::etw::enable_modern_wpp(handle) };
                 STATE.init_state.store(
                     ::wpp::provider::INITIALIZED,
                     core::sync::atomic::Ordering::Release,
