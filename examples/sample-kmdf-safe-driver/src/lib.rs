@@ -3,6 +3,7 @@
 
 #![no_std]
 #![feature(codeview_annotation)]
+#![feature(core_os)]
 
 use wdf::{
     driver_entry, println, wpp_control_guids, DeviceInit, Driver, DriverConfig, DriverObject,

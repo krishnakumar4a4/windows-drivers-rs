@@ -260,7 +260,7 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
             /// module containing this provider is unloaded.
             pub unsafe fn init() {
                 struct Args;
-                impl core::hint::CodeViewAnnotationArgs for Args {
+                impl core::os::windows::CodeViewAnnotationArgs for Args {
                     const ARGS: &'static [&'static str] = &[
                         "TMC:", #guid_str, #provider_name_str,
                         #(#kw_annotation_strings),*
@@ -271,7 +271,7 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
                 // control GUID, which under Option B is distinct from the
                 // per-module decode GUIDs that key the TMF records, so TMC and
                 // TMF annotations never share a GUID and cannot collide.
-                core::hint::codeview_annotation::<Args>();
+                core::os::windows::codeview_annotation::<Args>();
                 if STATE.init_state.compare_exchange(
                     ::wpp::provider::UNINITIALIZED,
                     ::wpp::provider::INITIALIZING,
@@ -612,7 +612,7 @@ fn generate_ifr_module(providers: &[ProviderDecl]) -> TokenStream {
     //         let provider_name = p.name.to_string();
     //         let flags: Vec<String> = p.keywords.iter().map(|kw|
     // kw.name.to_string()).collect();         quote! {
-    //             core::hint::codeview_annotation!("TMC:", #guid, #provider_name,
+    //             core::os::windows::codeview_annotation!("TMC:", #guid, #provider_name,
     // #(#flags),*);         }
     //     })
     //     .collect();
