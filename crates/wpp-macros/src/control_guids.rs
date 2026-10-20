@@ -29,11 +29,11 @@ struct KeywordDecl {
 }
 
 #[derive(Clone)]
-struct GuidParts {
-    d1: u32,
-    d2: u16,
-    d3: u16,
-    d4: [u8; 8],
+pub(super) struct GuidParts {
+    pub(super) d1: u32,
+    pub(super) d2: u16,
+    pub(super) d3: u16,
+    pub(super) d4: [u8; 8],
 }
 
 struct ControlGuidsInput {
@@ -137,7 +137,7 @@ fn parse_guid(input: ParseStream) -> Result<String> {
     Ok(guid)
 }
 
-fn parse_guid_parts(s: &str) -> core::result::Result<GuidParts, String> {
+pub(super) fn parse_guid_parts(s: &str) -> core::result::Result<GuidParts, String> {
     let segs: Vec<&str> = s.split('-').collect();
     if segs.len() != 5 {
         return Err("expected 5 segments".into());

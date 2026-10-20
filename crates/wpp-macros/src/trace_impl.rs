@@ -18,13 +18,15 @@ use syn::{
     parse::{Parse, ParseStream},
 };
 
+use crate::control_guids::{GuidParts, parse_guid_parts};
+
 // ─── AST ────────────────────────────────────────────────────────────────────
 
 struct TraceImplInput {
     provider_mod: TokenStream,
     ifr_state: TokenStream,
     provider_name: String,
-    guid: String,
+    guid: GuidParts,
     level_expr: Expr,
     level_name: String,
     keyword_ident: Ident,
@@ -53,6 +55,8 @@ impl Parse for TraceImplInput {
         input.parse::<Token![,]>()?;
         parse_at_key(input, "guid")?;
         let guid: LitStr = input.parse()?;
+        let guid = parse_guid_parts(&guid.value())
+            .map_err(|error| syn::Error::new(guid.span(), format!("invalid provider GUID: {error}")))?;
 
         input.parse::<Token![,]>()?;
         parse_at_key(input, "level")?;
@@ -81,7 +85,7 @@ impl Parse for TraceImplInput {
             provider_mod,
             ifr_state,
             provider_name: provider_name.value(),
-            guid: guid.value(),
+            guid,
             level_expr,
             level_name: level_name_ident.to_string(),
             keyword_ident,
@@ -136,8 +140,8 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
     // This avoids the Option A collision where the control GUID doubled as the
     // trace/decode GUID and interleaved with TMC records. `guid` (the control
     // GUID) is retained only for enablement/registration, not for decoding.
-    let _ = guid;
-    let module_guid = compute_module_decode_guid(&module_key_from_span(parsed.format_span));
+    let module_guid =
+        compute_module_decode_guid(&module_key_from_span(parsed.format_span), guid);
     let decode_guid_str = &module_guid.guid_str;
     let (dg1, dg2, dg3) = (module_guid.d1, module_guid.d2, module_guid.d3);
     let dg4_tokens: Vec<TokenStream> = module_guid
@@ -367,7 +371,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                 let __wpp_auto_ctx = #ifr_state.auto_log_context();
                 if !__wpp_auto_ctx.is_null() {
                     let mut __wpp_ifr_guid = __WPP_DECODE_GUID;
-                    let __wpp_ifr_status = unsafe {
+                    unsafe {
                         ::wpp::ifr::WppAutoLogTrace(
                             __wpp_auto_ctx,
                             #level_expr,
@@ -379,9 +383,6 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                             core::ptr::null::<core::ffi::c_void>(),
                         )
                     };
-                    ::wdf::println!("WppAutoLogTrace status: {}, ctx: {:?}", __wpp_ifr_status, __wpp_auto_ctx);
-                } else {
-                    ::wdf::println!("WppAutoLogTrace skipped: auto_log_context is null");
                 }
             }
         }}
@@ -420,7 +421,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                 let __wpp_auto_ctx = #ifr_state.auto_log_context();
                 if !__wpp_auto_ctx.is_null() {
                     let mut __wpp_ifr_guid = __WPP_DECODE_GUID;
-                    let __wpp_ifr_status = unsafe {
+                    unsafe {
                         ::wpp::ifr::WppAutoLogTrace(
                             __wpp_auto_ctx,
                             #level_expr,
@@ -431,9 +432,6 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                             core::ptr::null::<core::ffi::c_void>(),
                         )
                     };
-                    ::wdf::println!("WppAutoLogTrace status: {}, ctx: {:?}", __wpp_ifr_status, __wpp_auto_ctx);
-                } else {
-                    ::wdf::println!("WppAutoLogTrace skipped: auto_log_context is null");
                 }
             }
         }}
@@ -601,8 +599,18 @@ fn module_key_from_span(span: proc_macro2::Span) -> String {
 /// module share one decode identity. The 128 bits are filled from two FNV-1a
 /// passes; the version (4) and variant (RFC 4122) nibbles are then fixed so the
 /// value is a well-formed UUID that the trace decoder accepts.
-fn compute_module_decode_guid(module_key: &str) -> ModuleGuid {
-    let hash = fnv1a_64(module_key.as_bytes());
+fn compute_module_decode_guid(module_key: &str, provider_guid: &GuidParts) -> ModuleGuid {
+    // Extend the module-only scheme above with the provider control GUID:
+    // TracePDB groups TMF records by decode GUID and retains one provider label,
+    // so providers in the same module need distinct decode GUIDs. The control
+    // GUID now also seeds decoding; hash canonical bytes, not GUID spelling.
+    let mut key = Vec::with_capacity(16 + module_key.len());
+    key.extend_from_slice(&provider_guid.d1.to_le_bytes());
+    key.extend_from_slice(&provider_guid.d2.to_le_bytes());
+    key.extend_from_slice(&provider_guid.d3.to_le_bytes());
+    key.extend_from_slice(&provider_guid.d4);
+    key.extend_from_slice(module_key.as_bytes());
+    let hash = fnv1a_64(&key);
     let d1 = (hash & 0xFFFF_FFFF) as u32;
     let d2 = ((hash >> 32) & 0xFFFF) as u16;
     // Top nibble of d3 = version 4.
@@ -631,6 +639,9 @@ fn compute_module_decode_guid(module_key: &str) -> ModuleGuid {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SAMPLE_PROVIDER_GUID: &str = "cb94defb-592a-4509-8f2e-54f204929669";
+    const PNP_PROVIDER_GUID: &str = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
 
     #[test]
     fn parse_simple_placeholders() {
@@ -686,21 +697,64 @@ mod tests {
 
     #[test]
     fn module_decode_guid_deterministic() {
-        let a = compute_module_decode_guid("src/device.rs");
-        let b = compute_module_decode_guid("src/device.rs");
+        let provider = parse_guid_parts(SAMPLE_PROVIDER_GUID).unwrap();
+        let a = compute_module_decode_guid("src/device.rs", &provider);
+        let b = compute_module_decode_guid("src/device.rs", &provider);
         assert_eq!(a.guid_str, b.guid_str);
+        let parts = parse_guid_parts(&a.guid_str).unwrap();
+        assert_eq!(
+            (a.d1, a.d2, a.d3, a.d4),
+            (parts.d1, parts.d2, parts.d3, parts.d4)
+        );
+        assert_ne!(a.guid_str, SAMPLE_PROVIDER_GUID);
     }
 
     #[test]
     fn module_decode_guid_differs_per_module() {
-        let a = compute_module_decode_guid("src/device.rs");
-        let b = compute_module_decode_guid("src/queue.rs");
+        let provider = parse_guid_parts(SAMPLE_PROVIDER_GUID).unwrap();
+        let a = compute_module_decode_guid("src/device.rs", &provider);
+        let b = compute_module_decode_guid("src/queue.rs", &provider);
         assert_ne!(a.guid_str, b.guid_str);
     }
 
     #[test]
+    fn module_decode_guid_differs_per_provider() {
+        let sample = parse_guid_parts(SAMPLE_PROVIDER_GUID).unwrap();
+        let pnp = parse_guid_parts(PNP_PROVIDER_GUID).unwrap();
+        let a = compute_module_decode_guid("src/lib.rs", &sample);
+        let b = compute_module_decode_guid("src/lib.rs", &pnp);
+        assert_ne!(a.guid_str, b.guid_str);
+    }
+
+    #[test]
+    fn module_decode_guid_ignores_provider_guid_case() {
+        let lower = parse_guid_parts(SAMPLE_PROVIDER_GUID).unwrap();
+        let upper = parse_guid_parts(&SAMPLE_PROVIDER_GUID.to_ascii_uppercase()).unwrap();
+        let a = compute_module_decode_guid("src/lib.rs", &lower);
+        let b = compute_module_decode_guid("src/lib.rs", &upper);
+        assert_eq!(a.guid_str, b.guid_str);
+    }
+
+    #[test]
+    fn parse_rejects_invalid_provider_guid() {
+        let result = syn::parse_str::<TraceImplInput>(
+            r#"@provider_mod crate::SampleDriver,
+               @ifr_state crate::__wpp_ifr::STATE,
+               @provider_name "SampleDriver",
+               @guid "invalid",
+               @level 4,
+               @level_name INFO,
+               @keyword GENERAL,
+               @fmt "test""#,
+        );
+        let error = result.err().expect("invalid provider GUID should be rejected");
+        assert!(error.to_string().contains("invalid provider GUID"));
+    }
+
+    #[test]
     fn module_decode_guid_is_v4_variant() {
-        let g = compute_module_decode_guid("src/lib.rs");
+        let provider = parse_guid_parts(SAMPLE_PROVIDER_GUID).unwrap();
+        let g = compute_module_decode_guid("src/lib.rs", &provider);
         // Version nibble (top of d3) must be 4.
         assert_eq!(g.d3 & 0xF000, 0x4000);
         // Variant (top two bits of d4[0]) must be 0b10.
