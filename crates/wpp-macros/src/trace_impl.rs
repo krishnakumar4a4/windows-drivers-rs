@@ -232,6 +232,15 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                     );
 
                     impl<#(#type_names: ::wpp::WppField),*> Args<#(#type_names),*> {
+                        // TODO: Multiple rust types can match with same WPP TYPE_NAME which results 
+                        // in same EVENT_ID when generics are used.
+                        // Possible solution1: Use FORMAT_SPEC and TYPE_NAME together to compute EVENT_ID
+                        //                      as it generates a unique EVENT_ID that the decoder can use.
+                        // Possible solution2: Introduce an additional RUST_TYPE const and include it in 
+                        //                      the computation of EVENT_ID to ensure uniqueness.
+                        // Possible solution3: Make the EVENT_ID extremely unique by include line number,
+                        // file name, and other compile-time unique identifiers about the trace statement. 
+                        // This solution is as good as generating a random EVENT_ID per each trace statement.
                         const EVENT_ID: u16 = ::wpp::field::compute_event_id(
                             #format_string,
                             &[#(#type_names::TYPE_NAME),*],
@@ -255,7 +264,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                     }
 
                     impl<#(#type_names: ::wpp::WppField),*>
-                        core::hint::CodeViewAnnotationArgs for Args<#(#type_names),*>
+                        core::os::windows::CodeViewAnnotationArgs for Args<#(#type_names),*>
                     {
                         const ARGS: &'static [&'static str] = &[
                             #(#annotation_strings),*,
@@ -266,7 +275,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                         ];
                     }
 
-                    core::hint::codeview_annotation::<Args<#(#type_names),*>>();
+                    core::os::windows::codeview_annotation::<Args<#(#type_names),*>>();
                     Args::<#(#type_names),*>::EVENT_ID
                 }
 
@@ -279,13 +288,13 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
             {
                 struct Args;
 
-                impl core::hint::CodeViewAnnotationArgs for Args {
+                impl core::os::windows::CodeViewAnnotationArgs for Args {
                     const ARGS: &'static [&'static str] = &[
                         #(#annotation_strings),*, #typev_line, "{", "}"
                     ];
                 }
 
-                core::hint::codeview_annotation::<Args>();
+                core::os::windows::codeview_annotation::<Args>();
             }
         }
     };
