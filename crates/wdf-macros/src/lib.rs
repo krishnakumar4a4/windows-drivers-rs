@@ -75,7 +75,9 @@ pub fn driver_entry(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     let mut wrappers: TokenStream = quote! {
-        #[unsafe(link_section = "INIT")]
+        // The `INIT` section only exists in kernel-mode images. The cfg is evaluated
+        // in the driver crate, where `wdk-build` sets it.
+        #[cfg_attr(driver_model__driver_type = "KMDF", unsafe(link_section = "INIT"))]
         #[unsafe(export_name = "DriverEntry")]
         extern "system" fn __driver_entry(driver: &mut ::wdf::DRIVER_OBJECT, registry_path: ::wdf::PCUNICODE_STRING,) -> ::wdf::NTSTATUS {
             #ifr_block

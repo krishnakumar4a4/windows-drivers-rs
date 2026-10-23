@@ -29,9 +29,7 @@ use super::{
     string::{UnicodeString, WString},
 };
 
-// HACK: DRIVER_OBJECT is not generated in the auto-generated bindings
-// for UMDF (although it is for KMDF) because relevant headers are not
-// included under UMDF currently. Needs a fix in wdk_sys
+// Opaque (forward-declared only) under UMDF, so it must only be used as a pointer.
 pub type DRIVER_OBJECT = wdk_sys::_DRIVER_OBJECT;
 
 /// Global pointer to the WPP provider cleanup function.
@@ -193,7 +191,7 @@ pub fn call_safe_driver_entry(
     }
 }
 
-#[unsafe(link_section = "PAGE")]
+#[cfg_attr(driver_model__driver_type = "KMDF", unsafe(link_section = "PAGE"))]
 extern "C" fn evt_driver_device_add(
     driver: WDFDRIVER,
     device_init: *mut WDFDEVICE_INIT,
