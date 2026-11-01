@@ -12,6 +12,7 @@ extern crate alloc;
 
 pub mod etw;
 pub mod field;
+// TODO: [P2] Currently only supports kernel mode, what about user mode?
 #[cfg(feature = "kernel_mode")]
 pub mod ifr;
 pub mod provider;

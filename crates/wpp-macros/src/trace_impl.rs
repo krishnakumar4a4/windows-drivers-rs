@@ -244,6 +244,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
                         const EVENT_ID: u16 = ::wpp::field::compute_event_id(
                             #format_string,
                             &[#(#type_names::TYPE_NAME),*],
+                            &[#(#type_names::FORMAT_SPEC),*], // solution 1
                         );
 
                         const FORMAT_LINE: ::wpp::field::AnnotationString<512> =
@@ -345,6 +346,7 @@ pub fn generate(input: TokenStream) -> Result<TokenStream> {
         quote! {{
             #decode_guid_const
 
+            // TODO: [P2] When ETW/IFR is disabled, we may want to skip the below work
             #(let #arg_names = #args;)*
             #(let #param_names = ::wpp::IntoWppField::into_wpp_field(#arg_names);)*
             let __wpp_event_id = #annotation_call;

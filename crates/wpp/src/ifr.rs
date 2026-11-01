@@ -163,22 +163,19 @@ unsafe extern "C" {
 ///   `WPP_PROJECT_CONTROL_BLOCK` with `ControlGuid` set on each block.
 /// * `driver_obj` and `reg_path` must be valid pointers from DriverEntry.
 /// * `ifr_state` must point to the IFR module's static `IFRState`.
-/// * `global_control` and `recorder_initialized` must point to the
-///   `#[no_mangle]` statics `WPP_GLOBAL_Control` / `WPP_RECORDER_INITIALIZED`.
+/// * `global_control` must point to the `#[no_mangle]` static `WPP_GLOBAL_Control`.
 #[doc(hidden)]
 pub unsafe fn start_ifr(
     control_blocks: *mut WPP_PROJECT_CONTROL_BLOCK,
     driver_obj: *mut core::ffi::c_void,
     reg_path: *const core::ffi::c_void,
     ifr_state: &IFRState,
-    global_control: *mut *mut WPP_PROJECT_CONTROL_BLOCK,
-    recorder_initialized: *mut *mut WPP_PROJECT_CONTROL_BLOCK,
+    global_control: *mut *mut WPP_PROJECT_CONTROL_BLOCK
 ) {
     unsafe {
         WPP_DRIVER_OBJ = driver_obj;
         *global_control = control_blocks;
         WppAutoLogStart(control_blocks, driver_obj, reg_path);
-        *recorder_initialized = *global_control;
     }
 
     // Store auto-log context from the primary control block into IFRState
@@ -190,24 +187,21 @@ pub unsafe fn start_ifr(
 ///
 /// # Safety
 ///
-/// `global_control` and `recorder_initialized` must point to the same
-/// `#[no_mangle]` statics passed to [`start_ifr`].
+/// `global_control` must point to the same `#[no_mangle]` static passed to [`start_ifr`].
 #[doc(hidden)]
 pub unsafe fn stop_ifr(
     ifr_state: &IFRState,
     global_control: *mut *mut WPP_PROJECT_CONTROL_BLOCK,
-    recorder_initialized: *mut *mut WPP_PROJECT_CONTROL_BLOCK,
 ) {
+    ifr_state
+        .auto_log_context
+        .store(ptr::null_mut(), Ordering::Release);
     unsafe {
         let cb = *global_control;
         if !cb.is_null() {
             WppAutoLogStop(cb, WPP_DRIVER_OBJ);
-            *recorder_initialized = ptr::null_mut();
             *global_control = ptr::null_mut();
             WPP_DRIVER_OBJ = ptr::null_mut();
         }
     }
-    ifr_state
-        .auto_log_context
-        .store(ptr::null_mut(), Ordering::Release);
 }

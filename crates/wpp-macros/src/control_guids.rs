@@ -280,6 +280,7 @@ fn generate_provider_module(p: &ProviderDecl, idx: usize) -> TokenStream {
                 ).is_err() {
                     return;
                 }
+                // TODO: [P2] Handle registration error here.
                 let (_, handle) = unsafe { ::wpp::etw::register(
                     control_guid(),
                     Some(::wpp::provider::enable_callback),
@@ -473,6 +474,7 @@ fn generate_wpp_flag_enum(providers: &[ProviderDecl]) -> TokenStream {
     };
 
     quote! {
+        // TODO: TraceLevel can be declared in wpp crate instead of being generated here
         #[allow(missing_docs)]
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[repr(u8)]
@@ -663,9 +665,6 @@ fn generate_ifr_module(providers: &[ProviderDecl]) -> TokenStream {
             #[unsafe(no_mangle)]
             static mut WPP_GLOBAL_Control: *mut ::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK =
                 core::ptr::null_mut();
-            #[unsafe(no_mangle)]
-            static mut WPP_RECORDER_INITIALIZED: *mut ::wpp::ifr::WPP_PROJECT_CONTROL_BLOCK =
-                core::ptr::null_mut();
 
             // ── Control block array types ────────────────────────────────────
 
@@ -770,7 +769,6 @@ fn generate_ifr_module(providers: &[ProviderDecl]) -> TokenStream {
                         reg_path,
                         &STATE,
                         &raw mut WPP_GLOBAL_Control,
-                        &raw mut WPP_RECORDER_INITIALIZED,
                     );
                 }
 
@@ -795,7 +793,6 @@ fn generate_ifr_module(providers: &[ProviderDecl]) -> TokenStream {
                     ::wpp::ifr::stop_ifr(
                         &STATE,
                         &raw mut WPP_GLOBAL_Control,
-                        &raw mut WPP_RECORDER_INITIALIZED,
                     );
                 }
             }

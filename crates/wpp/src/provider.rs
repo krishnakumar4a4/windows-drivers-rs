@@ -33,7 +33,7 @@ impl ProviderState {
         Self {
             reg_handle: AtomicU64::new(0),
             enabled_level: AtomicU8::new(0),
-            enabled_keywords: AtomicU64::new(0),
+            enabled_keywords: AtomicU64::new(0), // TODO: This should be 32 bits size, confirm this
             init_state: AtomicU8::new(UNINITIALIZED),
         }
     }
@@ -43,7 +43,7 @@ impl ProviderState {
     #[inline]
     pub fn is_enabled(&self, level: u8, keyword: u64) -> bool {
         let cur_level = self.enabled_level.load(Ordering::Relaxed);
-        if cur_level == 0 || level > cur_level {
+        if level > cur_level {
             return false;
         }
         let cur_kw = self.enabled_keywords.load(Ordering::Relaxed);
