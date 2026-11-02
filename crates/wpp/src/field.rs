@@ -346,6 +346,7 @@ pub trait IntoWppField {
     fn into_wpp_field(self) -> Self::Output;
 }
 
+// TODO: Can't we directly implement WppField on &str?
 impl<'a> IntoWppField for &'a str {
     type Output = CString;
 

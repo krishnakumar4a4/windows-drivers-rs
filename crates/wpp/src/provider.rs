@@ -18,6 +18,7 @@ pub const INITIALIZED: u8 = 2;
 /// UNINITIALIZED → INITIALIZING → INITIALIZED.
 /// This prevents double-registration and ensures safe concurrent access
 /// between `init()`, `clean_up()`, and `trace!` calls.
+// TODO: Check if this is really necessary
 pub struct ProviderState {
     pub reg_handle: AtomicU64,
     pub enabled_level: AtomicU8,

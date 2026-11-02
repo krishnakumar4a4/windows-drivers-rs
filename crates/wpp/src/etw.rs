@@ -226,5 +226,5 @@ pub unsafe fn enable_modern_wpp(handle: u64) -> u32 {
         )
     };
 
-    status
+    status // TODO: use general purpose NTSTATUS here, can we make use of windows-result?
 }
