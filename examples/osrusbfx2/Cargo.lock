@@ -683,6 +683,7 @@ dependencies = [
  "wdk-build",
  "wdk-panic",
  "wdk-sys",
+ "wpp",
 ]
 
 [[package]]
@@ -999,3 +1000,21 @@ name = "windows_x86_64_msvc"
 version = "0.53.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "271414315aff87387382ec3d271b52d7ae78726f5d44ac98b4f4030c91880486"
+
+[[package]]
+name = "wpp"
+version = "0.1.0"
+source = "git+https://github.com/krishnakumar4a4/wpp#01b83011140dd990e586dea3ea29cd42b9c6be85"
+dependencies = [
+ "wpp-macros",
+]
+
+[[package]]
+name = "wpp-macros"
+version = "0.1.0"
+source = "git+https://github.com/krishnakumar4a4/wpp#01b83011140dd990e586dea3ea29cd42b9c6be85"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]

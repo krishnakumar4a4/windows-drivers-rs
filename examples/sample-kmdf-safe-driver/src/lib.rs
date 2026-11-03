@@ -66,10 +66,10 @@ enum SampleMixedState {
 }
 
 wpp_control_guids!(
-    SampleDriver cb94defb-592a-4509-8f2e-54f204929669 {
+    SampleDriver "cb94defb-592a-4509-8f2e-54f204929669" {
         GENERAL,
     }
-    PnpTracer a1b2c3d4-e5f6-7890-abcd-ef1234567890 {
+    PnpTracer "a1b2c3d4-e5f6-7890-abcd-ef1234567890" {
         PNP,
         POWER,
         IO,
