@@ -70,14 +70,20 @@ impl NtStatus {
     }
 }
 
-unsafe impl wpp::WppValue for NtStatus {
-    type Wire = i32;
-
-    const TYPE_NAME: &'static str = "ItemNTSTATUS";
+impl wpp::WppField for NtStatus {
     const FORMAT_SPEC: &'static str = "!s!";
+    const TYPE_NAME: &'static str = "ItemNTSTATUS";
 
-    fn into_wire(self) -> Self::Wire {
-        self.code()
+    fn as_bytes(&self) -> &[u8] {
+        let code = match self {
+            Self::NonError(
+                NtStatusNonError::Success(code)
+                | NtStatusNonError::Informational(code)
+                | NtStatusNonError::Warning(code),
+            ) => code,
+            Self::Error(NtStatusError(code)) => code,
+        };
+        wpp::WppField::as_bytes(code)
     }
 }
 
@@ -89,16 +95,22 @@ mod nt_status_wpp_tests {
 
     #[test]
     fn nt_status_uses_wpp_status_format() {
-        type Field = <NtStatus as IntoWppField>::Output;
-        assert_eq!(Field::TYPE_NAME, "ItemNTSTATUS");
-        assert_eq!(Field::FORMAT_SPEC, "!s!");
+        assert_eq!(NtStatus::TYPE_NAME, "ItemNTSTATUS");
+        assert_eq!(NtStatus::FORMAT_SPEC, "!s!");
     }
 
     #[test]
     fn nt_status_serializes_its_raw_code() {
-        for code in [status_codes::STATUS_SUCCESS, status_codes::STATUS_ACCESS_DENIED] {
-            let field = NtStatus::from(code).into_wpp_field();
-            assert_eq!(field.as_bytes(), &code.to_ne_bytes());
+        for code in [
+            status_codes::STATUS_SUCCESS,
+            0x4000_0000,
+            0x8000_0000_u32 as i32,
+            status_codes::STATUS_ACCESS_DENIED,
+        ] {
+            let status = NtStatus::from(code);
+            assert_eq!(status.as_bytes(), &code.to_ne_bytes());
+            assert_eq!(status.into_wpp_field().as_bytes(), &code.to_ne_bytes());
+            assert_eq!((&status).into_wpp_field().as_bytes(), &code.to_ne_bytes());
         }
     }
 }

@@ -55,14 +55,18 @@ impl TryFrom<wdk_sys::KIRQL> for IRQL {
     }
 }
 
-unsafe impl wpp::WppValue for IRQL {
-    type Wire = u8;
-
-    const TYPE_NAME: &'static str = "ItemListByte(Low,APC,DPC)";
+impl wpp::WppField for IRQL {
     const FORMAT_SPEC: &'static str = "!s!";
+    const TYPE_NAME: &'static str = "ItemListByte(Low,APC,DPC)";
 
-    fn into_wire(self) -> Self::Wire {
-        self.into()
+    fn as_bytes(&self) -> &[u8] {
+        // SAFETY: IRQL is a fieldless repr(u8) enum with no padding.
+        unsafe {
+            core::slice::from_raw_parts(
+                (self as *const Self).cast::<u8>(),
+                core::mem::size_of::<u8>(),
+            )
+        }
     }
 }
 
@@ -74,9 +78,12 @@ mod irql_tests {
 
     #[test]
     fn irql_serializes_as_one_byte() {
-        assert_eq!(IRQL::Passive.into_wpp_field().as_bytes(), &[wdk_sys::PASSIVE_LEVEL as u8]);
-        assert_eq!(IRQL::Apc.into_wpp_field().as_bytes(), &[wdk_sys::APC_LEVEL as u8]);
-        assert_eq!(IRQL::Dispatch.into_wpp_field().as_bytes(), &[wdk_sys::DISPATCH_LEVEL as u8]);
+        for irql in [IRQL::Passive, IRQL::Apc, IRQL::Dispatch] {
+            let expected = [wdk_sys::KIRQL::from(irql)];
+            assert_eq!(irql.as_bytes(), &expected);
+            assert_eq!(irql.into_wpp_field().as_bytes(), &expected);
+            assert_eq!((&irql).into_wpp_field().as_bytes(), &expected);
+        }
     }
 
     #[test]
@@ -90,9 +97,8 @@ mod irql_tests {
 
     #[test]
     fn irql_uses_wpp_list_format() {
-        type Field = <IRQL as IntoWppField>::Output;
-        assert_eq!(Field::TYPE_NAME, "ItemListByte(Low,APC,DPC)");
-        assert_eq!(Field::FORMAT_SPEC, "!s!");
+        assert_eq!(IRQL::TYPE_NAME, "ItemListByte(Low,APC,DPC)");
+        assert_eq!(IRQL::FORMAT_SPEC, "!s!");
     }
 }
 
