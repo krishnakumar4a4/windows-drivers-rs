@@ -200,6 +200,20 @@ impl Into<i32> for NtStatusNonError {
     }
 }
 
+impl wpp::WppField for NtStatusNonError {
+    const FORMAT_SPEC: &'static str = "!s!";
+    const TYPE_NAME: &'static str = "ItemNTSTATUS";
+
+    fn as_bytes(&self) -> &[u8] {
+        let code = match self {
+            Self::Success(c) => c,
+            Self::Informational(c) => c,
+            Self::Warning(c) => c,
+        };
+        wpp::WppField::as_bytes(code)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct NtStatusError(i32);
 
@@ -229,6 +243,15 @@ impl From<i32> for NtStatusError {
 impl Into<i32> for NtStatusError {
     fn into(self) -> i32 {
         self.code()
+    }
+}
+
+impl wpp::WppField for NtStatusError {
+    const FORMAT_SPEC: &'static str = "!s!";
+    const TYPE_NAME: &'static str = "ItemNTSTATUS";
+
+    fn as_bytes(&self) -> &[u8] {
+        wpp::WppField::as_bytes(&self.0)
     }
 }
 

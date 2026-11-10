@@ -7,7 +7,7 @@
 
 use wdf::{
     driver_entry, println, wpp_control_guids, DeviceInit, Driver, DriverConfig, DriverObject,
-    status_codes, IRQL, NtResult, NtStatus, UnicodeString,
+    status_codes, IRQL, NtResult, NtStatus, NtStatusError, NtStatusNonError, UnicodeString,
 };
 
 extern crate alloc;
@@ -171,9 +171,11 @@ fn driver_entry(driver_object: &mut DriverObject, registry_path: &UnicodeString)
 
     trace!(
         INFO, GENERAL,
-        "NTSTATUS values: success={}, access_denied={}",
+        "NTSTATUS values: success={}, access_denied={}, NtStatusNonError={}, NtStatusError={}",
         NtStatus::from(status_codes::STATUS_SUCCESS),
-        NtStatus::from(status_codes::STATUS_ACCESS_DENIED)
+        NtStatus::from(status_codes::STATUS_ACCESS_DENIED),
+        NtStatusNonError::from(status_codes::STATUS_SUCCESS),
+        NtStatusError::from(status_codes::STATUS_ACCESS_DENIED)
     );
 
     // TODO: This decodes as - "10: Unknown - Custom enums: byte=0x00000002(Ready), short=0x0000000a(Warning), long=0x00000002(Recovering), implicit=0x00000002(Ready), mixed=0x0000000b(Failed)"
