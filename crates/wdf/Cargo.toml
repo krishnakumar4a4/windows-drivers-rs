@@ -21,17 +21,15 @@ wdk-alloc.workspace = true
 wdk-sys = { workspace = true, features = ["usb"] }
 wdk.workspace = true
 wdk-panic.workspace = true
-wpp = { workspace = true, features = ["kernel_mode"] }
+wpp.workspace = true
 paste.workspace = true
 bitflags.workspace = true
 
 [features]
 # Cargo features cannot depend on the driver type, so this selects the
-# kernel-mode flavor of `wpp` (`Etw*` instead of `Event*` APIs). It is on by
-# default for KMDF. UMDF drivers must depend on `wdf` with
-# `default-features = false`.
-default = ["kernel_mode"]
+# kernel-mode/user-mode flavor of `wpp` (`Etw*`/`Event*` APIs).
 kernel_mode = ["wpp/kernel_mode"]
+user_mode = ["wpp/user_mode"]
 
 
 # TODO temporarily turned off lints
