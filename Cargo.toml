@@ -6,6 +6,7 @@ exclude = [
   "examples/sample-kmdf-driver",
   "examples/sample-kmdf-safe-driver",
   "examples/sample-umdf-driver",
+  "examples/sample-umdf-safe-driver",
   "examples/sample-wdm-driver",
   "examples/sample-test",
   "examples/osrusbfx2",

@@ -1194,6 +1194,8 @@ impl Config {
                 if umdf_config.umdf_version_major >= 2 {
                     println!("cargo::rustc-link-lib=static=WdfDriverStubUm");
                     println!("cargo::rustc-link-lib=static=ntdll");
+                    // Import library for `WppRecorderUM.dll` (WPP in-flight recorder)
+                    println!("cargo::rustc-link-lib=static=wpprecorderum");
                 }
 
                 println!("cargo::rustc-cdylib-link-arg=/NODEFAULTLIB:kernel32.lib");
