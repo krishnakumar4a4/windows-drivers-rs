@@ -30,6 +30,7 @@ bitflags.workspace = true
 # kernel-mode/user-mode flavor of `wpp` (`Etw*`/`Event*` APIs).
 kernel_mode = ["wpp/kernel_mode"]
 user_mode = ["wpp/user_mode"]
+ifr = ["wpp/ifr"]
 
 
 # TODO temporarily turned off lints
