@@ -9,13 +9,14 @@
 extern crate alloc;
 
 #[cfg(all(driver_model__driver_type = "KMDF", not(feature = "kernel_mode")))]
-compile_error!("KMDF drivers require the `kernel_mode` feature of the `wdf` crate (enabled by default)");
+compile_error!("KMDF drivers require the `kernel_mode` feature of the `wdf` crate");
 
-#[cfg(all(driver_model__driver_type = "UMDF", feature = "kernel_mode"))]
+#[cfg(all(driver_model__driver_type = "UMDF", not(feature = "user_mode")))]
 compile_error!(
-    "UMDF drivers must depend on the `wdf` crate with `default-features = false`"
+    "UMDF drivers require the `user_mode` feature of the `wdf` crate"
 );
 
+/// Framework-independent tracing runtime.
 pub extern crate wpp;
 
 #[cfg(any(driver_model__driver_type = "KMDF", driver_model__driver_type = "UMDF"))]

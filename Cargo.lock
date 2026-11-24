@@ -1399,7 +1399,7 @@ dependencies = [
 [[package]]
 name = "wpp"
 version = "0.1.0"
-source = "git+https://github.com/krishnakumar4a4/wpp#429f7c2b70c027f73960c730cab3766185d36a55"
+source = "git+https://github.com/krishnakumar4a4/wpp#97b26e5999e53aaa999d8577146ab3aec74394f4"
 dependencies = [
  "wpp-macros",
 ]
@@ -1407,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "wpp-macros"
 version = "0.1.0"
-source = "git+https://github.com/krishnakumar4a4/wpp#429f7c2b70c027f73960c730cab3766185d36a55"
+source = "git+https://github.com/krishnakumar4a4/wpp#97b26e5999e53aaa999d8577146ab3aec74394f4"
 dependencies = [
  "proc-macro2",
  "quote",

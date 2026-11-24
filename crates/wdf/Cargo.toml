@@ -26,8 +26,8 @@ paste.workspace = true
 bitflags.workspace = true
 
 [features]
-# Cargo features cannot depend on the driver type, so this selects the
-# kernel-mode/user-mode flavor of `wpp` (`Etw*`/`Event*` APIs).
+# Select exactly one tracing mode; WPP's default user mode is disabled by the
+# workspace dependency so kernel-mode builds do not enable both modes.
 kernel_mode = ["wpp/kernel_mode"]
 user_mode = ["wpp/user_mode"]
 ifr = ["wpp/ifr"]
